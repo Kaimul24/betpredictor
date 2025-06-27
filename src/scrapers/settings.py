@@ -27,8 +27,6 @@ CONCURRENT_REQUESTS = 3
 
 COOKIES_ENABLED = True
 
-
-# ─── Playwright integration ────────────────────────────────────────────────────
 DOWNLOAD_HANDLERS = {
     "http":  "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
     "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
@@ -80,12 +78,9 @@ COOKIES_ENABLED = True
 
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-#ITEM_PIPELINES = {
-#    "scrapers.pipelines.ScrapersPipeline": 300,
-#}
 ITEM_PIPELINES = {
     "scrapers.pipelines.DateRecorderPipeline": 800,
-    "scrapers.pipelines.SQLitePipeline": 100
+    #"scrapers.pipelines.StatsPipeline": 100
 }
 
 SQLITE_PATH = '../data/mlb_stats.sqlite'

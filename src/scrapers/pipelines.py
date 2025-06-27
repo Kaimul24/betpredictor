@@ -12,7 +12,7 @@ from scrapers.items import BatterStat, PitcherStat
 
 
 
-class SQLitePipeline:
+class StatsPipeline:
     def __init__(self, db_path):
         self.db_path = db_path
         self.ddl_path = Path(__file__).with_name("schema.sql")

@@ -143,6 +143,7 @@ venv.bak/
 
 # json files
 *.json
+*.csv
 test*
 
 # stats data
