@@ -7,6 +7,11 @@
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+from config import DATABASE_PATH
+
 BOT_NAME = "scrapers"
 
 SPIDER_MODULES = ["scrapers.spiders"]
@@ -80,10 +85,11 @@ COOKIES_ENABLED = True
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 ITEM_PIPELINES = {
     "scrapers.pipelines.DateRecorderPipeline": 800,
-    #"scrapers.pipelines.StatsPipeline": 100
+    "scrapers.pipelines.StatsPipeline": 200,
+    "scrapers.pipelines.OddsPipeline": 300,
 }
 
-SQLITE_PATH = '../data/mlb_stats.sqlite'
+SQLITE_PATH = str(DATABASE_PATH)
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html

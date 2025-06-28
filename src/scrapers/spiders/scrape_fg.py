@@ -122,5 +122,4 @@ class fgSpider(scrapy.Spider):
                 item['date'] = date
                 item['scraped_at'] = datetime.now()
                 yield item
-            
-
+                

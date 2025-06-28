@@ -8,9 +8,62 @@
 from itemadapter import ItemAdapter
 import sqlite3, json, os
 from pathlib import Path
-from scrapers.items import BatterStat, PitcherStat
+from scrapers.items import BatterStat, PitcherStat, OddsItem
 
+class OddsPipeline:
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self.ddl_path = Path(__file__).with_name("schema.sql")
 
+    @classmethod
+    def from_crawler(cls, crawler):
+        db_path = crawler.settings.get('SQLITE_PATH', 'stats.db')
+        return cls(db_path=db_path)
+
+    def open_spider(self, spider):
+        self.conn = sqlite3.connect(self.db_path)
+        self.conn.execute("PRAGMA foreign_keys = ON")
+        self.cur = self.conn.cursor()
+
+        # Drop and recreate odds table to ensure clean data
+        self.cur.execute("DROP TABLE IF EXISTS odds")
+        self.cur.executescript(self.ddl_path.read_text())
+
+    def close_spider(self, spider):
+        self.conn.commit()
+        self.conn.close()
+
+    def process_item(self, item, spider):
+        if not isinstance(item, OddsItem):
+            return item
+
+        p = ItemAdapter(item)
+
+        self.cur.execute(
+            """
+            INSERT OR REPLACE INTO odds
+            (game_date, away_team, home_team,
+             away_starter, home_starter,
+             away_score, home_score, winner,
+             sportsbook, away_odds, home_odds)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                p["date"],
+                p["away_team"],
+                p["home_team"],
+                p.get("away_starter"),
+                p.get("home_starter"),
+                p.get("away_score"),
+                p.get("home_score"),
+                p.get("winner"),
+                p["sportsbook"],
+                p["away_odds"],
+                p["home_odds"],
+            ),
+        )
+
+        return item
 
 class StatsPipeline:
     def __init__(self, db_path):
@@ -34,6 +87,9 @@ class StatsPipeline:
         self.conn.close()
 
     def process_item(self, item, spider):
+        if not isinstance(item, BatterStat) or isinstance(item, PitcherStat):
+            return item
+
         p = ItemAdapter(item)
         
         self.cur.execute(
@@ -52,7 +108,7 @@ class StatsPipeline:
                  p['war'], p['baserunning'], p['scraped_at'])
             )
 
-        elif isinstance(item, PitcherStat):
+        if isinstance(item, PitcherStat):
             self.cur.execute("""
                 INSERT OR REPLACE INTO pitching_stats
                 (player_id, game_date, team, games, era, ip, k_percent, bb_percent,
@@ -62,7 +118,6 @@ class StatsPipeline:
                  p['k_percent'], p['bb_percent'], p['barrel_percent'],
                  p['hard_hit'], p['war'], p['siera'], p['fip'], p['scraped_at'])
             )
-        return item
 
 class DateRecorderPipeline:
     """Collect all requested and successfully scraped dates."""
