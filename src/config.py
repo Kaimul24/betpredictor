@@ -28,6 +28,13 @@ DATES = {
     '2024': [date(2024, 3, 28), date(2024, 10, 1)]
 }
 
+LG_AVG_STATS = {
+    "2021": {"Bats": {"ops": 0.7278624, "bb_k": 0.374753826, "woba": 0.31442644240601775, "barrel_percent": 0.07911897, "hard_hit": 0.38520605}, "Throws": {"era": 4.265892667856131, "k_percent": 0.23179901, "bb_percent": 0.08686756, "barrel_percent": 0.07911897, "hard_hit": 0.38520605, "siera": 4.175190307395692, "fip": 4.265892485031086}},
+    "2022": {"Bats": {"ops": 0.706412709, "bb_k": 0.363937077, "woba": 0.30974585067181093, "barrel_percent": 0.07502755, "hard_hit": 0.38169228}, "Throws": {"era": 3.96832714563721, "k_percent": 0.22417771, "bb_percent": 0.08158658, "barrel_percent": 0.07502755, "hard_hit": 0.38169228, "siera": 3.8756488351581293, "fip": 3.9683269469843023}},
+    "2023": {"Bats": {"ops": 0.734292472, "bb_k": 0.378056066, "woba": 0.31837469936833196, "barrel_percent": 0.08060002, "hard_hit": 0.39204536}, "Throws": {"era": 4.331714250563033, "k_percent": 0.22727915, "bb_percent": 0.08592426, "barrel_percent": 0.08060002, "hard_hit": 0.39204536, "siera": 4.237841443447046, "fip": 4.331714183169491}},
+    "2024": {"Bats": {"ops": 0.711329941, "bb_k": 0.362380755, "woba": 0.310181047531053, "barrel_percent": 0.07797881, "hard_hit": 0.38651521}, "Throws": {"era": 4.07894181840083, "k_percent": 0.22580009, "bb_percent": 0.08182561, "barrel_percent": 0.07797881, "hard_hit": 0.38651521, "siera": 3.9892671273186298, "fip": 4.078941491380367}}
+}
+
 TEAM_ABBR_MAP = {
     'Arizona Diamondbacks': 'ARI',
     'Atlanta Braves': 'ATL',

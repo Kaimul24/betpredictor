@@ -25,8 +25,8 @@ class OddsPipeline:
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.cur = self.conn.cursor()
 
-        # Drop and recreate odds table to ensure clean data
-        self.cur.execute("DROP TABLE IF EXISTS odds")
+        # self.cur.execute("DROP TABLE IF EXISTS odds")
+
         self.cur.executescript(self.ddl_path.read_text())
 
     def close_spider(self, spider):
@@ -74,12 +74,16 @@ class StatsPipeline:
     def from_crawler(cls, crawler):
         db_path = crawler.settings.get('SQLITE_PATH', 'stats.db')
         return cls(db_path=db_path)
-    
 
     def open_spider(self, spider):
         self.conn = sqlite3.connect(self.db_path)
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.cur = self.conn.cursor()
+
+        # self.cur.execute("DROP TABLE IF EXISTS batting_stats")
+        # self.cur.execute("DROP TABLE IF EXISTS pitching_stats")
+        # self.cur.execute("DROP TABLE IF EXISTS players")
+
         self.cur.executescript(self.ddl_path.read_text())
 
     def close_spider(self, spider):
@@ -87,37 +91,39 @@ class StatsPipeline:
         self.conn.close()
 
     def process_item(self, item, spider):
-        if not isinstance(item, BatterStat) or isinstance(item, PitcherStat):
+        if not isinstance(item, (BatterStat, PitcherStat)):
             return item
 
         p = ItemAdapter(item)
         
         self.cur.execute(
-            "INSERT OR IGNORE INTO players(player_id, name, team) VALUES(?,?,?)",
-            (p['player_id'], p['name'], p['team'])
+            "INSERT OR REPLACE INTO players(player_id, name, current_team, last_updated) VALUES(?,?,?,?)",
+            (p['player_id'], p['name'], p['team'], p['scraped_at'])
         )
 
         if isinstance(item, BatterStat):
             self.cur.execute("""
                 INSERT OR REPLACE INTO batting_stats
-                (player_id, game_date, team, games, ab, pa, ops, bb_k,
-                 wrc_plus, barrel_percent, hard_hit, war, baserunning, scraped_at)
+                (player_id, game_date, team, dh, ab, pa, ops, bb_k,
+                 wrc_plus, woba, barrel_percent, hard_hit, baserunning, scraped_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (p['player_id'], p['date'], p['team'], p['games'], p['ab'], p['pa'], p['ops'],
-                 p['bb_k'], p['wrc_plus'], p['barrel_percent'], p['hard_hit'],
-                 p['war'], p['baserunning'], p['scraped_at'])
+                (p['player_id'], p['date'], p['team'], p['dh'], p['ab'], p['pa'], p['ops'],
+                 p['bb_k'], p['wrc_plus'], p['woba'], p['barrel_percent'], p['hard_hit'],
+                 p['baserunning'], p['scraped_at'])
             )
 
         if isinstance(item, PitcherStat):
             self.cur.execute("""
                 INSERT OR REPLACE INTO pitching_stats
-                (player_id, game_date, team, games, era, ip, k_percent, bb_percent,
-                 barrel_percent, hard_hit, war, siera, fip, scraped_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (p['player_id'], p['date'], p['team'], p['games'], p['era'], p['ip'],
+                (player_id, game_date, team, dh, era, ip, k_percent, bb_percent,
+                 barrel_percent, hard_hit, siera, fip, scraped_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (p['player_id'], p['date'], p['team'], p['dh'], p['era'], p['ip'],
                  p['k_percent'], p['bb_percent'], p['barrel_percent'],
-                 p['hard_hit'], p['war'], p['siera'], p['fip'], p['scraped_at'])
+                 p['hard_hit'], p['siera'], p['fip'], p['scraped_at'])
             )
+
+        return item
 
 class DateRecorderPipeline:
     """Collect all requested and successfully scraped dates."""

@@ -1,7 +1,8 @@
 CREATE TABLE IF NOT EXISTS players (
   player_id TEXT PRIMARY KEY,      
   name      TEXT,
-  team      TEXT
+  current_team TEXT,
+  last_updated TEXT
 );
 
 CREATE TABLE IF NOT EXISTS schedule (
@@ -49,18 +50,18 @@ CREATE TABLE IF NOT EXISTS batting_stats (
   player_id       TEXT, 
   game_date       TEXT,
   team            TEXT,
-  games           INTEGER,
+  dh              INTEGER,
   ab              INTEGER,
   pa              INTEGER,
   ops             REAL,
   bb_k            REAL,
   wrc_plus        REAL,
+  woba            REAL,
   barrel_percent  REAL,
   hard_hit        REAL,
-  war             REAL,
   baserunning     REAL,
   scraped_at      TEXT,
-  PRIMARY KEY (player_id, game_date),
+  PRIMARY KEY (player_id, game_date, dh),
   FOREIGN KEY (player_id) REFERENCES players(player_id)
 );
 
@@ -68,18 +69,17 @@ CREATE TABLE IF NOT EXISTS pitching_stats (
   player_id       TEXT,
   game_date       TEXT,
   team            TEXT,
-  games           INTEGER,
+  dh              INTEGER,
   era             REAL,
   ip              REAL,
   k_percent       REAL,
   bb_percent      REAL,
   barrel_percent  REAL,
   hard_hit        REAL,
-  war             REAL,
   siera           REAL,
   fip             REAL,
   scraped_at      TEXT,
-  PRIMARY KEY (player_id, game_date),
+  PRIMARY KEY (player_id, game_date, dh),
   FOREIGN KEY (player_id) REFERENCES players(player_id)
 );
 
@@ -88,3 +88,15 @@ CREATE INDEX IF NOT EXISTS idx_batting_team_date
 
 CREATE INDEX IF NOT EXISTS idx_pitching_team_date
   ON pitching_stats(team, game_date);
+
+CREATE INDEX IF NOT EXISTS idx_batting_player_date
+  ON batting_stats(player_id, game_date);
+
+CREATE INDEX IF NOT EXISTS idx_pitching_player_date
+  ON pitching_stats(player_id, game_date);
+
+CREATE INDEX IF NOT EXISTS idx_batting_team_player_date
+  ON batting_stats(team, player_id, game_date);
+
+CREATE INDEX IF NOT EXISTS idx_pitching_team_player_date
+  ON pitching_stats(team, player_id, game_date);
