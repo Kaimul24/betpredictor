@@ -21,10 +21,17 @@ class SqlitePipeline:
         return cls(db_path=db_path)
 
     def open_spider(self, spider):
+        # Ensure the directory exists
+        db_dir = Path(self.db_path).parent
+        db_dir.mkdir(parents=True, exist_ok=True)
+        
         self.conn = sqlite3.connect(self.db_path)
         self.conn.execute("PRAGMA foreign_keys = ON")
+        self.conn.execute("PRAGMA journal_mode = WAL")  # Enable WAL mode
+        self.conn.execute("PRAGMA synchronous = NORMAL")
         self.cur = self.conn.cursor()
         self.cur.executescript(self.ddl_path.read_text())
+
 
     def close_spider(self, spider):
         self.conn.commit()
@@ -121,7 +128,7 @@ class DateRecorderPipeline:
         return item
 
     def close_spider(self, spider):
-        requested = sorted(spider.requested_dates)
+        requested = sorted(getattr(spider, 'requested_dates', []))
         scraped = sorted(self.success)
 
         manifest = {
