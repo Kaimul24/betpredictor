@@ -1,9 +1,7 @@
 from config import DATES
 from dotenv import load_dotenv
-import json
-import os
+import json, os, scrapy
 from itertools import islice
-import scrapy
 from utils import daterange
 from scrapers.items import OddsItem
 
@@ -84,16 +82,17 @@ class oddsSpider(scrapy.Spider):
             if away_starter_dict == None and game_data['gameId'] == 354113:
                 away_starter = 'Michael Lorenzen'
             else:
-                away_starter = ' '.join(islice(game_data['awayStarter'].values(), 2))
+                away_starter = ' '.join(islice(away_starter_dict.values(), 2))
 
             home_starter_dict = game_data['homeStarter']
             if home_starter_dict == None and game_data['gameId'] == 354113:
                 home_starter = 'JP Sears'
             else:
-                home_starter = ' '.join(islice(game_data['homeStarter'].values(), 2))
+                home_starter = ' '.join(islice(home_starter_dict.values(), 2))
 
             away_score = game_data['awayTeamScore']
             home_score = game_data['homeTeamScore']
+
             winner = away_team if away_score > home_score else home_team
 
             game_odds = game['oddsViews']

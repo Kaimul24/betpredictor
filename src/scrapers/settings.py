@@ -84,9 +84,8 @@ COOKIES_ENABLED = True
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 ITEM_PIPELINES = {
+    "scrapers.pipelines.SqlitePipeline": 200,
     "scrapers.pipelines.DateRecorderPipeline": 800,
-    "scrapers.pipelines.StatsPipeline": 200,
-    "scrapers.pipelines.OddsPipeline": 300,
 }
 
 SQLITE_PATH = str(DATABASE_PATH)

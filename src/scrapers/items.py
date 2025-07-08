@@ -18,7 +18,6 @@ class BatterStat(scrapy.Item):
     woba = scrapy.Field()
     barrel_percent = scrapy.Field()
     hard_hit = scrapy.Field()
-    # war = scrapy.Field()
     baserunning = scrapy.Field()
     scraped_at = scrapy.Field()
     date = scrapy.Field()
@@ -35,7 +34,6 @@ class PitcherStat(scrapy.Item):
     bb_percent = scrapy.Field()
     barrel_percent = scrapy.Field()
     hard_hit = scrapy.Field()
-    # war = scrapy.Field()
     siera = scrapy.Field()
     fip = scrapy.Field()
     scraped_at = scrapy.Field()
@@ -53,3 +51,21 @@ class OddsItem(scrapy.Item):
     sportsbook = scrapy.Field()
     away_odds = scrapy.Field()
     home_odds = scrapy.Field()
+
+class LineupItem(scrapy.Item):
+    date = scrapy.Field()
+    dh = scrapy.Field()
+    team_id = scrapy.Field()
+    opposing_team_id = scrapy.Field()
+    team_starter_id = scrapy.Field()
+    opposing_starter_id = scrapy.Field()
+    scraped_at = scrapy.Field()
+
+class LineupPlayerItem(scrapy.Item):
+    date = scrapy.Field()
+    dh = scrapy.Field()
+    team_id = scrapy.Field()
+    player_id = scrapy.Field()
+    position = scrapy.Field()
+    batting_order = scrapy.Field()
+    scraped_at = scrapy.Field()

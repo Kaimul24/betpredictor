@@ -3,9 +3,8 @@ import json
 from dotenv import load_dotenv
 import os
 from config import DATES, LG_AVG_STATS
-from scrapers.items import BatterStat, PitcherStat
+from scrapers.items import BatterStat, PitcherStat, LineupItem, LineupPlayerItem
 from datetime import datetime
-import numpy as np
 
 load_dotenv()
 TEAM_URL = os.getenv("TEAM_URL")
@@ -58,26 +57,44 @@ class fgSpider(scrapy.Spider):
                     callback=self.parse_roster,
                     cb_kwargs={"year": year},
                 )
+            
 
     def parse_roster(self, response, year):
         payload = json.loads(response.text)
 
-        if payload == []:
+        lineups_to_yield = []
+        players_to_yield = []
+
+        if payload == [] or payload == None:
             self.logger.warning(f"No roster data found for {year}")
+            self.logger.warning(f'Payload is None for {response}')
             return
 
         for g in payload:
             lineup = g['lineupInfo']
+            game_info = g['gameInfo'][0]
+            home_starter_id = None
 
             for p in lineup:
                 id = p['playerId']
-                pos_str = p['position']
-                pos_list = pos_str.split("-")
-                # May not need this stuff
-                if "CF" in pos_list or "RF" in pos_list or "LF" in pos_list:
-                    pos = "OF"
-                else:
-                    pos = pos_list[0]
+                pos = p['position']
+
+                batting_order = p['BatOrder']
+
+                if pos == 'P':
+                    home_starter_id = p['playerId']
+                    if year != '2021':
+                        batting_order = None 
+
+                player_item = LineupPlayerItem()
+                player_item['date'] = game_info['gameDate'][:10]
+                player_item['dh'] = game_info['dh']
+                player_item['team_id'] = game_info['teamid']
+                player_item['player_id'] = id
+                player_item['position'] = pos
+                player_item['batting_order'] = batting_order
+                player_item['scraped_at'] = datetime.now()
+                players_to_yield.append(player_item)
 
                 if id in self.seen_ids:
                     continue
@@ -93,9 +110,28 @@ class fgSpider(scrapy.Spider):
                     callback=self.parse_game_log,
                 )
 
+            lineup_item = LineupItem()
+            lineup_item['team_id'] = game_info['teamid']
+            lineup_item['opposing_team_id'] = game_info['oppteamid']
+            lineup_item['date'] = game_info['gameDate'][:10]
+            lineup_item['dh'] = game_info['dh']
+            lineup_item['team_starter_id'] = home_starter_id
+            lineup_item['opposing_starter_id'] = game_info['oppSP']
+            lineup_item['scraped_at'] = datetime.now()
+            lineups_to_yield.append(lineup_item)
+
+        for lineup_ in lineups_to_yield:
+            yield lineup_
+
+        for player in players_to_yield:
+            yield player
+
     def parse_game_log(self, response, year, id):
-        
         payload = json.loads(response.text)
+
+        if payload == None:
+            self.logger.warning(f'Payload is None for {response}\nYear: {year}\nID: {id}')
+            return
 
         stats = payload.get("mlb", [])
 
@@ -176,18 +212,3 @@ class fgSpider(scrapy.Spider):
                     yield item
             else:
                 continue
-
-
-
-# For each date, fetch the unique player ID's and store them in a hashset
-    # Also store position?, playerNameRoute
-# For each player ID, go to the gamelog page for that player and then scrape/store their stats
-    # Same fields as before, indexed on player ID, game date, dh field
-        # dh field: 0: no dh, 1: 1st game, 2: 2nd game
-
-# https://www.fangraphs.com/api/players/game-log?playerid=15640&position=OF&type=0&gds=2021-04-01&gde=2025-10-31&season=
-
-# https://www.fangraphs.com/api/teams/lineup/games?teamid=14&season=2021
-    # Get lineups for the whole season and extract player IDs, position (may need mappings), dh field
-# vlad - 1B
-# https://www.fangraphs.com/api/leaders/pitch-type?season=2021&startdate=2021-04-13&enddate=2021-04-13&pitchtype=FA%2CFC%2CFO%2CFS%2CSI%2CCH%2CSL%2CCU%2CKN%2CKC%2CSC%2CEP&position=bat&stands=&throws=&pteamids=&bteamids=&pitcherids=&batterids=&pitches=0&groupbylevel=player&groupbytime=game&includepitchpct=false&sortstat=Mov&sortdir=default&pagenum=1&pageitems=2000000000

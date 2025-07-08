@@ -100,3 +100,40 @@ CREATE INDEX IF NOT EXISTS idx_batting_team_player_date
 
 CREATE INDEX IF NOT EXISTS idx_pitching_team_player_date
   ON pitching_stats(team, player_id, game_date);
+
+CREATE TABLE IF NOT EXISTS lineups (
+  game_date     TEXT NOT NULL,
+  team_id       INTEGER NOT NULL,
+  dh            INTEGER NOT NULL,
+  opposing_team_id INTEGER NOT NULL,
+  team_starter_id TEXT,
+  opposing_starter_id TEXT,
+  scraped_at    TEXT,
+  PRIMARY KEY (game_date, team_id, dh)
+);
+
+CREATE TABLE IF NOT EXISTS lineup_players (
+  game_date     TEXT NOT NULL,
+  team_id       INTEGER NOT NULL,
+  dh            INTEGER NOT NULL,
+  player_id     TEXT NOT NULL,
+  position      TEXT NOT NULL,
+  batting_order INTEGER,
+  scraped_at    TEXT,
+  PRIMARY KEY (game_date, team_id, dh, player_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lineups_date
+  ON lineups(game_date);
+
+CREATE INDEX IF NOT EXISTS idx_lineup_players_date
+  ON lineup_players(game_date);
+
+CREATE INDEX IF NOT EXISTS idx_lineup_players_player
+  ON lineup_players(player_id, game_date);
+
+CREATE INDEX IF NOT EXISTS idx_lineup_players_position
+  ON lineup_players(position, game_date);
+
+CREATE INDEX IF NOT EXISTS idx_lineup_players_batting_order
+  ON lineup_players(batting_order, game_date);

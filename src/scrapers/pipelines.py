@@ -6,11 +6,11 @@
 
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
-import sqlite3, json, os
+import sqlite3, json
 from pathlib import Path
-from scrapers.items import BatterStat, PitcherStat, OddsItem
+from scrapers.items import BatterStat, PitcherStat, OddsItem, LineupItem, LineupPlayerItem
 
-class OddsPipeline:
+class SqlitePipeline:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self.ddl_path = Path(__file__).with_name("schema.sql")
@@ -24,9 +24,6 @@ class OddsPipeline:
         self.conn = sqlite3.connect(self.db_path)
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.cur = self.conn.cursor()
-
-        # self.cur.execute("DROP TABLE IF EXISTS odds")
-
         self.cur.executescript(self.ddl_path.read_text())
 
     def close_spider(self, spider):
@@ -34,93 +31,79 @@ class OddsPipeline:
         self.conn.close()
 
     def process_item(self, item, spider):
-        if not isinstance(item, OddsItem):
+        if not isinstance(item, (OddsItem, BatterStat, PitcherStat, LineupItem, LineupPlayerItem)):
             return item
 
         p = ItemAdapter(item)
 
-        self.cur.execute(
-            """
-            INSERT OR REPLACE INTO odds
-            (game_date, away_team, home_team,
-             away_starter, home_starter,
-             away_score, home_score, winner,
-             sportsbook, away_odds, home_odds)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                p["date"],
-                p["away_team"],
-                p["home_team"],
-                p.get("away_starter"),
-                p.get("home_starter"),
-                p.get("away_score"),
-                p.get("home_score"),
-                p.get("winner"),
-                p["sportsbook"],
-                p["away_odds"],
-                p["home_odds"],
-            ),
-        )
-
-        return item
-
-class StatsPipeline:
-    def __init__(self, db_path):
-        self.db_path = db_path
-        self.ddl_path = Path(__file__).with_name("schema.sql")
-
-    @classmethod
-    def from_crawler(cls, crawler):
-        db_path = crawler.settings.get('SQLITE_PATH', 'stats.db')
-        return cls(db_path=db_path)
-
-    def open_spider(self, spider):
-        self.conn = sqlite3.connect(self.db_path)
-        self.conn.execute("PRAGMA foreign_keys = ON")
-        self.cur = self.conn.cursor()
-
-        # self.cur.execute("DROP TABLE IF EXISTS batting_stats")
-        # self.cur.execute("DROP TABLE IF EXISTS pitching_stats")
-        # self.cur.execute("DROP TABLE IF EXISTS players")
-
-        self.cur.executescript(self.ddl_path.read_text())
-
-    def close_spider(self, spider):
-        self.conn.commit()
-        self.conn.close()
-
-    def process_item(self, item, spider):
-        if not isinstance(item, (BatterStat, PitcherStat)):
-            return item
-
-        p = ItemAdapter(item)
-        
-        self.cur.execute(
-            "INSERT OR REPLACE INTO players(player_id, name, current_team, last_updated) VALUES(?,?,?,?)",
-            (p['player_id'], p['name'], p['team'], p['scraped_at'])
-        )
-
-        if isinstance(item, BatterStat):
-            self.cur.execute("""
-                INSERT OR REPLACE INTO batting_stats
-                (player_id, game_date, team, dh, ab, pa, ops, bb_k,
-                 wrc_plus, woba, barrel_percent, hard_hit, baserunning, scraped_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (p['player_id'], p['date'], p['team'], p['dh'], p['ab'], p['pa'], p['ops'],
-                 p['bb_k'], p['wrc_plus'], p['woba'], p['barrel_percent'], p['hard_hit'],
-                 p['baserunning'], p['scraped_at'])
+        if isinstance(item, OddsItem):
+            self.cur.execute(
+                """
+                INSERT OR REPLACE INTO odds
+                (game_date, away_team, home_team,
+                 away_starter, home_starter,
+                 away_score, home_score, winner,
+                 sportsbook, away_odds, home_odds)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    p["date"],
+                    p["away_team"],
+                    p["home_team"],
+                    p.get("away_starter"),
+                    p.get("home_starter"),
+                    p.get("away_score"),
+                    p.get("home_score"),
+                    p.get("winner"),
+                    p["sportsbook"],
+                    p["away_odds"],
+                    p["home_odds"],
+                ),
+            )
+        elif isinstance(item, (BatterStat, PitcherStat)):
+            self.cur.execute(
+                "INSERT OR REPLACE INTO players(player_id, name, current_team, last_updated) VALUES(?,?,?,?)",
+                (p['player_id'], p['name'], p['team'], p['scraped_at'])
             )
 
-        if isinstance(item, PitcherStat):
+            if isinstance(item, BatterStat):
+                self.cur.execute("""
+                    INSERT OR REPLACE INTO batting_stats
+                    (player_id, game_date, team, dh, ab, pa, ops, bb_k,
+                     wrc_plus, woba, barrel_percent, hard_hit, baserunning, scraped_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (p['player_id'], p['date'], p['team'], p['dh'], p['ab'], p['pa'], p['ops'],
+                     p['bb_k'], p['wrc_plus'], p['woba'], p['barrel_percent'], p['hard_hit'],
+                     p['baserunning'], p['scraped_at'])
+                )
+
+            if isinstance(item, PitcherStat):
+                self.cur.execute("""
+                    INSERT OR REPLACE INTO pitching_stats
+                    (player_id, game_date, team, dh, era, ip, k_percent, bb_percent,
+                     barrel_percent, hard_hit, siera, fip, scraped_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (p['player_id'], p['date'], p['team'], p['dh'], p['era'], p['ip'],
+                     p['k_percent'], p['bb_percent'], p['barrel_percent'],
+                     p['hard_hit'], p['siera'], p['fip'], p['scraped_at'])
+                )
+        elif isinstance(item, LineupItem):
             self.cur.execute("""
-                INSERT OR REPLACE INTO pitching_stats
-                (player_id, game_date, team, dh, era, ip, k_percent, bb_percent,
-                 barrel_percent, hard_hit, siera, fip, scraped_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (p['player_id'], p['date'], p['team'], p['dh'], p['era'], p['ip'],
-                 p['k_percent'], p['bb_percent'], p['barrel_percent'],
-                 p['hard_hit'], p['siera'], p['fip'], p['scraped_at'])
+                INSERT OR REPLACE INTO lineups
+                (game_date, team_id, dh, opposing_team_id, 
+                 team_starter_id, opposing_starter_id, scraped_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (p['date'], p['team_id'], p['dh'], p['opposing_team_id'],
+                 p['team_starter_id'], p['opposing_starter_id'], p['scraped_at'])
+            )
+
+        elif isinstance(item, LineupPlayerItem):
+            self.cur.execute("""
+                INSERT OR REPLACE INTO lineup_players
+                (game_date, team_id, dh, player_id, position, batting_order, scraped_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (p['date'], p['team_id'], p['dh'], p['player_id'],
+                 p['position'], p['batting_order'], p['scraped_at'])
             )
 
         return item
