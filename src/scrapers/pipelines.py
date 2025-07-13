@@ -27,9 +27,16 @@ class SqlitePipeline:
         
         self.conn = sqlite3.connect(self.db_path)
         self.conn.execute("PRAGMA foreign_keys = ON")
-        self.conn.execute("PRAGMA journal_mode = WAL")  # Enable WAL mode
+        self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.execute("PRAGMA synchronous = NORMAL")
         self.cur = self.conn.cursor()
+        
+        if spider.name == 'fg':
+            tables_to_drop = ['lineup_players', 'lineups', 'batting_stats', 'pitching_stats', 'players']
+            for table in tables_to_drop:
+                self.cur.execute(f"DROP TABLE IF EXISTS {table}")
+            self.conn.commit()
+        
         self.cur.executescript(self.ddl_path.read_text())
 
 
