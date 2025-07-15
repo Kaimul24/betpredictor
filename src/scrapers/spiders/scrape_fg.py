@@ -35,8 +35,7 @@ class fgSpider(scrapy.Spider):
                     "timeout": 45_000,
                 },
             },
-            callback=self.after_handshake,
-            dont_filter=True,
+            callback=self.after_handshake
         )
     
     async def after_handshake(self, response):
@@ -45,7 +44,7 @@ class fgSpider(scrapy.Spider):
         self.cookies = {c["name"]: c["value"] for c in cookies}
         await page.close()
 
-        self.seen_ids = set()
+        self.seen_player_season = set()
 
         for team_id in range(1, 31):
             for year in DATES.keys():
@@ -84,7 +83,13 @@ class fgSpider(scrapy.Spider):
                 if pos == 'P':
                     home_starter_id = p['playerId']
                     if year != '2021':
-                        batting_order = None 
+                        batting_order = None
+
+                key = (id, year)
+                if key in self.seen_player_season:
+                    continue
+
+                self.seen_player_season.add(id)
 
                 player_item = LineupPlayerItem()
                 player_item['date'] = game_info['gameDate'][:10]
@@ -96,10 +101,6 @@ class fgSpider(scrapy.Spider):
                 player_item['scraped_at'] = datetime.now()
                 players_to_yield.append(player_item)
 
-                if id in self.seen_ids:
-                    continue
-
-                self.seen_ids.add(id)
                 url = GAME_LOG_URL.format(id, pos, year)
 
                 yield scrapy.Request(
