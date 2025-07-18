@@ -83,7 +83,7 @@ class SqlitePipeline:
             if isinstance(item, BatterStat):
                 self.cur.execute("""
                     INSERT OR REPLACE INTO batting_stats
-                    (player_id, game_date, team, dh, ab, pa, ops, bb_k,
+                    (player_id, game_date, team, dh, ab, pa, ops, babip, bb_k,
                      wrc_plus, woba, barrel_percent, hard_hit, baserunning, scraped_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (p['player_id'], p['date'], p['team'], p['dh'], p['ab'], p['pa'], p['ops'],
@@ -94,7 +94,7 @@ class SqlitePipeline:
             if isinstance(item, PitcherStat):
                 self.cur.execute("""
                     INSERT OR REPLACE INTO pitching_stats
-                    (player_id, game_date, team, dh, era, ip, k_percent, bb_percent,
+                    (player_id, game_date, team, dh, era, babip, ip, k_percent, bb_percent,
                      barrel_percent, hard_hit, siera, fip, scraped_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (p['player_id'], p['date'], p['team'], p['dh'], p['era'], p['ip'],
@@ -144,4 +144,6 @@ class DateRecorderPipeline:
             "missing":   sorted(set(requested) - set(scraped)),
         }
 
+        with open("dates_manifest.json", "w") as f:
+            json.dump(manifest, f, indent=2)
 

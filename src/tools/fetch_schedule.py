@@ -4,7 +4,7 @@ import time
 import json
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-from config import DATES, TEAM_ABBR_MAP, connect_database
+from src.config import DATES, TEAM_ABBR_MAP, connect_database
 
 games_requested = set()
 games_received = set()

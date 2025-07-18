@@ -146,6 +146,8 @@ venv.bak/
 *.csv
 test*
 
+Notes.md
+
 # stats data
 data/
 
