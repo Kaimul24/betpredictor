@@ -152,23 +152,25 @@ class fgSpider(scrapy.Spider):
                     item['player_id'] = game['playerid']
                     item['name'] = game['PlayerName']
                     item['team'] = game['Team']
+                    item['batorder'] = game['BatOrder']
+                    item['pos'] = game['Pos']
                     item['dh'] = game['dh']
                     item['ab'] = game['AB']
                     item['pa'] = game['PA']
 
-                    ops = game.get("OPS%", LG_AVG_STATS[str(year)]['Bats']['ops'])
+                    ops = game.get("OPS", LG_AVG_STATS[str(year)]['Bats']['ops'])
                     item['ops'] = ops
 
                     babip = game.get("BABIP", LG_AVG_STATS[str(year)]['Bats']['babip'])
                     item['babip'] = babip
 
-                    bb_k = game.get("BB/K%", LG_AVG_STATS[str(year)]['Bats']['bb_k'])
+                    bb_k = game.get("BB/K", LG_AVG_STATS[str(year)]['Bats']['bb_k'])
                     item['bb_k'] = bb_k
 
                     wrc_plus = game.get("wRC+", 100)
                     item['wrc_plus'] = wrc_plus
                     
-                    woba = game.get("wOBA%", LG_AVG_STATS[str(year)]['Bats']['woba'])
+                    woba = game.get("wOBA", LG_AVG_STATS[str(year)]['Bats']['woba'])
                     item['woba'] = woba
 
                     barrel_percent = game.get("Barrel%", LG_AVG_STATS[str(year)]['Bats']['barrel_percent'])
@@ -177,7 +179,22 @@ class fgSpider(scrapy.Spider):
                     hard_hit = game.get("HardHit%", LG_AVG_STATS[str(year)]['Bats']['hard_hit'])
                     item['hard_hit'] = hard_hit
 
+                    ev = game.get("EV", LG_AVG_STATS[str(year)]['Bats']['ev'])
+                    item['ev'] = ev
+
+                    iso = game.get("ISO", LG_AVG_STATS[str(year)]['Bats']['iso'])
+                    item['iso'] = iso
+
+                    gb_fb = game.get("GB/FB", LG_AVG_STATS[str(year)]['Bats']['gb_fb'])
+                    item['gb_fb'] = gb_fb
+
                     item['baserunning'] = game['wBSR']
+                    
+                    item['wraa'] = game['wRAA']
+
+                    # wpa = game.get("WPA", LG_AVG_STATS[str(year)]['Bats']['wpa'])
+                    item['wpa'] = game['WPA']
+
                     item['date'] = game['gamedate']
                     item['scraped_at'] = datetime.now()
                     yield item
@@ -187,8 +204,12 @@ class fgSpider(scrapy.Spider):
                     item['player_id'] = game['playerid']
                     item['name'] = game['PlayerName']
                     item['team'] = game['Team']
-                    item['ip'] = game['IP']
                     item['dh'] = game['dh']
+                    item['games'] = game['G']
+                    item['gs'] = game['GS']
+                    item['ip'] = game['IP']
+
+                    item['runs'] = game['R']
 
                     era = game.get("ERA", LG_AVG_STATS[str(year)]['Throws']['era'])
                     item['era'] = era
@@ -208,11 +229,30 @@ class fgSpider(scrapy.Spider):
                     hard_hit = game.get("HardHit%", LG_AVG_STATS[str(year)]['Throws']['hard_hit'])
                     item['hard_hit'] = hard_hit
 
+                    ev = game.get("EV", LG_AVG_STATS[str(year)]['Throws']['ev'])
+                    item['ev'] = ev
+
+                    hr_fb = game.get("HR/FB", LG_AVG_STATS[str(year)]['Throws']['hr_fb'])
+                    item['hr_fb'] = hr_fb
+
                     siera = game.get("SIERA", LG_AVG_STATS[str(year)]['Throws']['siera'])
                     item['siera'] = siera
 
                     fip = game.get("FIP", LG_AVG_STATS[str(year)]['Throws']['fip'])
                     item['fip'] = fip
+
+                    stuff = game.get("pb_stuff", 100)
+                    item['stuff'] = stuff
+
+                    item['ifbb'] = game['IFFB']
+                    
+                    wpa = game.get("WPA", 'UNKNOWN ERROR') #REMOVE LATER
+                    if wpa == 'UNKNOWN ERROR':
+                        print(f'\n***ERROR: WPA IS UNKNOWN***\n')
+                    item['wpa'] = wpa
+
+                    gmli = game.get("gmLI", LG_AVG_STATS[str(year)]['Throws']['gmli'])
+                    item['gmli'] = gmli
 
                     item['date'] = game['gamedate']
                     item['scraped_at'] = datetime.now()

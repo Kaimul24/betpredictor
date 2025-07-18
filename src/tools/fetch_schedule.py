@@ -46,7 +46,9 @@ def fetch_game_weather(gamePk, gameDateTime):
 
 def fetch_schedule():
     conn, cursor = connect_database()
+    cursor.execute("DELETE FROM schedule")
     conn.commit()
+    print("Existing schedule data cleared.")
     
     total_games = 0
     scraped_at = datetime.now().isoformat()
@@ -64,7 +66,7 @@ def fetch_schedule():
             
             print(f"Found {year_games} games for {year}")
             
-            batch_size = 256
+            batch_size = 128
             failed_games = []
             
             with ThreadPoolExecutor(max_workers=batch_size) as executor:
@@ -89,6 +91,10 @@ def fetch_schedule():
                     
                     for game in batch:
                         try:
+                            if game['away_name'] == 'American League All-Stars' or game['home_name'] == 'American League All-Stars':
+                                print(f"SKIPPING ALL STAR GAME {game['game_date']}")
+                                print()
+                                continue
                             gamePk = game['game_id']
                             
                             try:

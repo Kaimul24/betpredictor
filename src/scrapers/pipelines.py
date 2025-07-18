@@ -83,23 +83,26 @@ class SqlitePipeline:
             if isinstance(item, BatterStat):
                 self.cur.execute("""
                     INSERT OR REPLACE INTO batting_stats
-                    (player_id, game_date, team, dh, ab, pa, ops, babip, bb_k,
-                     wrc_plus, woba, barrel_percent, hard_hit, baserunning, scraped_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (p['player_id'], p['date'], p['team'], p['dh'], p['ab'], p['pa'], p['ops'],
-                     p['babip'], p['bb_k'], p['wrc_plus'], p['woba'], p['barrel_percent'], p['hard_hit'],
-                     p['baserunning'], p['scraped_at'])
+                    (player_id, game_date, team, batorder, pos, dh, ab, pa, ops, babip, bb_k,
+                     wrc_plus, woba, barrel_percent, hard_hit, ev, iso, gb_fb, baserunning, 
+                     wraa, wpa, scraped_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (p['player_id'], p['date'], p['team'], p['batorder'], p['pos'], p['dh'], p['ab'], p['pa'],
+                     p['ops'], p['babip'], p['bb_k'], p['wrc_plus'], p['woba'], p['barrel_percent'], p['hard_hit'], p['ev'],
+                     p['iso'], p['gb_fb'], p['baserunning'], p['wraa'], p['wpa'], p['scraped_at'])
                 )
 
             if isinstance(item, PitcherStat):
                 self.cur.execute("""
                     INSERT OR REPLACE INTO pitching_stats
-                    (player_id, game_date, team, dh, era, babip, ip, k_percent, bb_percent,
-                     barrel_percent, hard_hit, siera, fip, scraped_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (p['player_id'], p['date'], p['team'], p['dh'], p['era'], p['ip'],
-                     p['babip'], p['k_percent'], p['bb_percent'], p['barrel_percent'],
-                     p['hard_hit'], p['siera'], p['fip'], p['scraped_at'])
+                    (player_id, game_date, team, dh, games, gs, era, babip, ip, runs, k_percent, 
+                     bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, 
+                     ifbb, wpa, gmli, scraped_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (p['player_id'], p['date'], p['team'], p['dh'], p['games'], p ['gs'], p['era'], p['ip'],
+                     p['runs'], p['babip'], p['k_percent'], p['bb_percent'], p['barrel_percent'],
+                     p['hard_hit'], p['ev'], p['hr_fb'], p['siera'], p['fip'], p['stuff'], p['ifbb'],
+                     p['wpa'], p['gmli'], p['scraped_at'])
                 )
         elif isinstance(item, LineupItem):
             self.cur.execute("""

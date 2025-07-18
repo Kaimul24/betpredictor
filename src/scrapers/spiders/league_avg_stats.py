@@ -72,7 +72,6 @@ class LeagueAverageSpider(scrapy.Spider):
         data = payload.get("data", [])
         stats = data[0]
 
-        # Initialize year data if not exists
         if year not in self.year_data:
             self.year_data[year] = {'year': year}
 
@@ -84,7 +83,10 @@ class LeagueAverageSpider(scrapy.Spider):
                 'bb_k': stats['BB/K'],
                 'woba': stats['wOBA'],
                 'barrel_percent': stats['Barrel%'],
-                'hard_hit': stats['HardHit%']
+                'hard_hit': stats['HardHit%'],
+                'ev': stats['EV'],
+                'iso': stats['ISO'],
+                'gb_fb': stats['GB/FB']
             }
         
         if type == 'Throws':
@@ -97,7 +99,10 @@ class LeagueAverageSpider(scrapy.Spider):
                 'barrel_percent': stats['Barrel%'],
                 'hard_hit': stats['HardHit%'],
                 'siera': stats['SIERA'],
-                'fip': stats['FIP']
+                'fip': stats['FIP'],
+                'ev': stats['EV'],
+                'hr_fb': stats['HR/FB'],
+                'gmli': stats['gmLI']
             }
 
         if 'Bats' in self.year_data[year] and 'Throws' in self.year_data[year]:
