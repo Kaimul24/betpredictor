@@ -159,6 +159,9 @@ class fgSpider(scrapy.Spider):
                     ops = game.get("OPS%", LG_AVG_STATS[str(year)]['Bats']['ops'])
                     item['ops'] = ops
 
+                    babip = game.get("BABIP", LG_AVG_STATS[str(year)]['Bats']['babip'])
+                    item['babip'] = babip
+
                     bb_k = game.get("BB/K%", LG_AVG_STATS[str(year)]['Bats']['bb_k'])
                     item['bb_k'] = bb_k
 
@@ -189,6 +192,9 @@ class fgSpider(scrapy.Spider):
 
                     era = game.get("ERA", LG_AVG_STATS[str(year)]['Throws']['era'])
                     item['era'] = era
+
+                    babip = game.get("BABIP", LG_AVG_STATS[str(year)]['Throws']['babip'])
+                    item['babip'] = babip
                     
                     k_percent = game.get("K%", LG_AVG_STATS[str(year)]['Throws']['k_percent'])
                     item['k_percent'] = k_percent

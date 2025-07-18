@@ -85,9 +85,9 @@ class SqlitePipeline:
                     INSERT OR REPLACE INTO batting_stats
                     (player_id, game_date, team, dh, ab, pa, ops, bb_k,
                      wrc_plus, woba, barrel_percent, hard_hit, baserunning, scraped_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (p['player_id'], p['date'], p['team'], p['dh'], p['ab'], p['pa'], p['ops'],
-                     p['bb_k'], p['wrc_plus'], p['woba'], p['barrel_percent'], p['hard_hit'],
+                     p['babip'], p['bb_k'], p['wrc_plus'], p['woba'], p['barrel_percent'], p['hard_hit'],
                      p['baserunning'], p['scraped_at'])
                 )
 
@@ -96,9 +96,9 @@ class SqlitePipeline:
                     INSERT OR REPLACE INTO pitching_stats
                     (player_id, game_date, team, dh, era, ip, k_percent, bb_percent,
                      barrel_percent, hard_hit, siera, fip, scraped_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (p['player_id'], p['date'], p['team'], p['dh'], p['era'], p['ip'],
-                     p['k_percent'], p['bb_percent'], p['barrel_percent'],
+                     p['babip'], p['k_percent'], p['bb_percent'], p['barrel_percent'],
                      p['hard_hit'], p['siera'], p['fip'], p['scraped_at'])
                 )
         elif isinstance(item, LineupItem):
@@ -143,6 +143,5 @@ class DateRecorderPipeline:
             "scraped":   scraped,
             "missing":   sorted(set(requested) - set(scraped)),
         }
-        with open("dates_manifest.json", "w") as f:
-            json.dump(manifest, f, indent=2)
+
 

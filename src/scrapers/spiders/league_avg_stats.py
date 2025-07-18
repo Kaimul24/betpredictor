@@ -80,6 +80,7 @@ class LeagueAverageSpider(scrapy.Spider):
             self.year_data[year]['Bats'] = {
                 'type': type,
                 'ops': stats['OPS'],
+                'babip': stats['BABIP'],
                 'bb_k': stats['BB/K'],
                 'woba': stats['wOBA'],
                 'barrel_percent': stats['Barrel%'],
@@ -90,6 +91,7 @@ class LeagueAverageSpider(scrapy.Spider):
             self.year_data[year]['Throws'] = {
                 'type': type,
                 'era': stats['ERA'],
+                'babip': stats['BABIP'],
                 'k_percent': stats['K%'],
                 'bb_percent': stats['BB%'],
                 'barrel_percent': stats['Barrel%'],
@@ -98,7 +100,6 @@ class LeagueAverageSpider(scrapy.Spider):
                 'fip': stats['FIP']
             }
 
-        # Check if both Bats and Throws data are collected for this year
         if 'Bats' in self.year_data[year] and 'Throws' in self.year_data[year]:
             yield self.year_data[year]
             

@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS players (
 CREATE TABLE IF NOT EXISTS schedule (
   game_id       TEXT PRIMARY KEY,
   game_date     TEXT NOT NULL,
+  game_datetime TEXT NOT NULL,
   away_team     TEXT NOT NULL,
   home_team     TEXT NOT NULL,
   away_team_abbr TEXT,
@@ -19,6 +20,9 @@ CREATE TABLE IF NOT EXISTS schedule (
   status        TEXT,
   away_probable_pitcher TEXT,
   home_probable_pitcher TEXT,
+  wind          TEXT,
+  condition     TEXT,
+  temp          INTEGER,
   scraped_at    TEXT
 );
 
@@ -54,6 +58,7 @@ CREATE TABLE IF NOT EXISTS batting_stats (
   ab              INTEGER,
   pa              INTEGER,
   ops             REAL,
+  babip           REAL,
   bb_k            REAL,
   wrc_plus        REAL,
   woba            REAL,
@@ -71,6 +76,7 @@ CREATE TABLE IF NOT EXISTS pitching_stats (
   team            TEXT,
   dh              INTEGER,
   era             REAL,
+  babip           REAL,
   ip              REAL,
   k_percent       REAL,
   bb_percent      REAL,
