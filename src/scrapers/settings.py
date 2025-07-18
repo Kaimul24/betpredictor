@@ -7,6 +7,11 @@
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+from config import DATABASE_PATH
+
 BOT_NAME = "scrapers"
 
 SPIDER_MODULES = ["scrapers.spiders"]
@@ -23,7 +28,7 @@ LOG_LEVEL = 'INFO'
 ROBOTSTXT_OBEY = False
 
 # Configure maximum concurrent requests performed by Scrapy (default: 16)
-CONCURRENT_REQUESTS = 3
+CONCURRENT_REQUESTS = 16
 
 COOKIES_ENABLED = True
 
@@ -41,7 +46,7 @@ PLAYWRIGHT_LAUNCH_OPTIONS = {"headless": True}
 # Configure a delay for requests for the same website (default: 0)
 # See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay
 # See also autothrottle settings and docs
-DOWNLOAD_DELAY = 2
+DOWNLOAD_DELAY = 0.15
 # The download delay setting will honor only one of:
 #CONCURRENT_REQUESTS_PER_DOMAIN = 4
 #CONCURRENT_REQUESTS_PER_IP = 16
@@ -79,11 +84,11 @@ COOKIES_ENABLED = True
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 ITEM_PIPELINES = {
+    "scrapers.pipelines.SqlitePipeline": 200,
     "scrapers.pipelines.DateRecorderPipeline": 800,
-    #"scrapers.pipelines.StatsPipeline": 100
 }
 
-SQLITE_PATH = '../data/mlb_stats.sqlite'
+SQLITE_PATH = str(DATABASE_PATH)
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
@@ -94,7 +99,7 @@ AUTOTHROTTLE_START_DELAY = 5
 AUTOTHROTTLE_MAX_DELAY = 60
 # The average number of requests Scrapy should be sending in parallel to
 # each remote server
-AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
+AUTOTHROTTLE_TARGET_CONCURRENCY = 4.0
 # Enable showing throttling stats for every response received:
 #AUTOTHROTTLE_DEBUG = False
 

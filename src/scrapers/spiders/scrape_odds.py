@@ -1,10 +1,9 @@
 from config import DATES
 from dotenv import load_dotenv
-import json
-import os
+import json, os, scrapy
 from itertools import islice
-import scrapy
 from utils import daterange
+from scrapers.items import OddsItem
 
 load_dotenv()
 ODDS_URL = os.getenv("ODDS_URL")
@@ -44,19 +43,18 @@ class oddsSpider(scrapy.Spider):
         }
 
         for year, (d0, d1) in DATES.items():
-            if int(year) == 2021:
-                for d in daterange(d0, d1):
-                    day = d.strftime("%Y-%m-%d")
-                    self.requested_dates.add(day)
-                    url = ODDS_URL.format(day)
+            for d in daterange(d0, d1):
+                day = d.strftime("%Y-%m-%d")
+                self.requested_dates.add(day)
+                url = ODDS_URL.format(day)
 
-                    yield scrapy.Request(
-                        url,
-                        cookies=self.cookies,
-                        headers=json_headers,
-                        callback=self.parse,
-                        cb_kwargs={"date": day},
-                    )
+                yield scrapy.Request(
+                    url,
+                    cookies=self.cookies,
+                    headers=json_headers,
+                    callback=self.parse,
+                    cb_kwargs={"date": day},
+                )
 
     def parse(self, response, date):
         payload = json.loads(response.text)
@@ -71,8 +69,6 @@ class oddsSpider(scrapy.Spider):
         games = odds_table['gameRows']
 
         for game in games:
-            g = {}
-            g['date'] = date
             game_data = game['gameView']
 
             away_team = game_data['awayTeam']['shortName']
@@ -81,27 +77,39 @@ class oddsSpider(scrapy.Spider):
             if away_team == 'AL' or home_team == 'AL':
                 self.logger.warning(f"Skipping odds for All Star Game on: {date}")
                 return
+            
+            away_starter_dict = game_data['awayStarter']
+            if away_starter_dict == None and game_data['gameId'] == 354113:
+                away_starter = 'Michael Lorenzen'
+            else:
+                away_starter = ' '.join(islice(away_starter_dict.values(), 2))
 
-            g['away_team'] = away_team
-            g['home_team'] = home_team
-
-            g['away_starter'] = ' '.join(islice(game_data['awayStarter'].values(), 2))
-            g['home_starter'] = ' '.join(islice(game_data['homeStarter'].values(), 2))
+            home_starter_dict = game_data['homeStarter']
+            if home_starter_dict == None and game_data['gameId'] == 354113:
+                home_starter = 'JP Sears'
+            else:
+                home_starter = ' '.join(islice(home_starter_dict.values(), 2))
 
             away_score = game_data['awayTeamScore']
             home_score = game_data['homeTeamScore']
-            winner = away_team if away_score > home_score else home_team
 
-            g['winner'] = winner
+            winner = away_team if away_score > home_score else home_team
 
             game_odds = game['oddsViews']
 
             for odds in game_odds:
                 if odds is not None:
-                    sportsbook = odds['sportsbook']
-                    curr_odds = {}
-                    curr_odds['away_odds'] = odds['openingLine']['awayOdds']
-                    curr_odds['home_odds'] = odds['openingLine']['homeOdds']
-                    g[sportsbook] = curr_odds
+                    item = OddsItem()
+                    item['date'] = date
+                    item['away_team'] = away_team
+                    item['home_team'] = home_team
+                    item['away_starter'] = away_starter
+                    item['home_starter'] = home_starter
+                    item['away_score'] = away_score
+                    item['home_score'] = home_score
+                    item['winner'] = winner
+                    item['sportsbook'] = odds['sportsbook']
+                    item['away_odds'] = odds['openingLine']['awayOdds']
+                    item['home_odds'] = odds['openingLine']['homeOdds']
 
-            yield g
+                    yield item
