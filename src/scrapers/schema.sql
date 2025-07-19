@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS players (
   player_id TEXT PRIMARY KEY,      
   name      TEXT,
+  pos       TEXT,
   current_team TEXT,
   last_updated TEXT
 );
@@ -159,3 +160,25 @@ CREATE INDEX IF NOT EXISTS idx_lineup_players_position
 
 CREATE INDEX IF NOT EXISTS idx_lineup_players_batting_order
   ON lineup_players(batting_order, game_date);
+
+CREATE TABLE IF NOT EXISTS fielding (
+  name            TEXT NOT NULL,
+  year            TEXT NOT NULL,
+  frv             REAL,
+  total_innings   REAL,
+  innings_C       REAL,
+  innings_1B      REAL,
+  innings_2B      REAL,
+  innings_3B      REAL,
+  innings_SS      REAL,
+  innings_LF      REAL,
+  innings_CF      REAL,
+  innings_RF      REAL,
+  PRIMARY KEY (name, year)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fielding_year
+  ON fielding(year);
+
+CREATE INDEX IF NOT EXISTS idx_fielding_name
+  ON fielding(name);

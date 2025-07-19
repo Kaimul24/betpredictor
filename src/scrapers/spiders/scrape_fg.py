@@ -147,7 +147,6 @@ class fgSpider(scrapy.Spider):
 
             if events > 0:
                 if type == 'G':
-                    
                     item = BatterStat()
                     item['player_id'] = game['playerid']
                     item['name'] = game['PlayerName']

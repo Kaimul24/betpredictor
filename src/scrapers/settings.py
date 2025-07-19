@@ -41,7 +41,16 @@ TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 
 PLAYWRIGHT_BROWSER_TYPE = "chromium" 
 PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 45000
-PLAYWRIGHT_LAUNCH_OPTIONS = {"headless": True}
+PLAYWRIGHT_LAUNCH_OPTIONS = {
+    "headless": True,
+    "args": ["--ignore-certificate-errors", "--ignore-ssl-errors"]
+}
+
+PLAYWRIGHT_CONTEXTS = {
+    "default": {
+        "ignore_https_errors": True
+    }
+}
 
 # Configure a delay for requests for the same website (default: 0)
 # See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay

@@ -86,3 +86,17 @@ class LineupPlayerItem(scrapy.Item):
     position = scrapy.Field()
     batting_order = scrapy.Field()
     scraped_at = scrapy.Field()
+
+class FRVItem(scrapy.Item):
+    name = scrapy.Field()
+    year = scrapy.Field()
+    frv = scrapy.Field()
+    total_innings = scrapy.Field()
+    innings_C  = scrapy.Field()
+    innings_1B = scrapy.Field()
+    innings_2B = scrapy.Field()
+    innings_3B = scrapy.Field()
+    innings_SS = scrapy.Field()
+    innings_LF = scrapy.Field()
+    innings_CF = scrapy.Field()
+    innings_RF = scrapy.Field()

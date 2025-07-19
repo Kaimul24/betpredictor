@@ -8,7 +8,7 @@
 from itemadapter import ItemAdapter
 import sqlite3, json
 from pathlib import Path
-from scrapers.items import BatterStat, PitcherStat, OddsItem, LineupItem, LineupPlayerItem
+from scrapers.items import BatterStat, PitcherStat, OddsItem, LineupItem, LineupPlayerItem, FRVItem
 
 class SqlitePipeline:
     def __init__(self, db_path: str):
@@ -37,6 +37,10 @@ class SqlitePipeline:
                 self.cur.execute(f"DROP TABLE IF EXISTS {table}")
             self.conn.commit()
         
+        if spider.name == 'fielding':
+            self.cur.execute("DROP TABLE IF EXISTS fielding")
+            self.conn.commit()
+        
         self.cur.executescript(self.ddl_path.read_text())
 
 
@@ -45,7 +49,7 @@ class SqlitePipeline:
         self.conn.close()
 
     def process_item(self, item, spider):
-        if not isinstance(item, (OddsItem, BatterStat, PitcherStat, LineupItem, LineupPlayerItem)):
+        if not isinstance(item, (OddsItem, BatterStat, PitcherStat, LineupItem, LineupPlayerItem, FRVItem)):
             return item
 
         p = ItemAdapter(item)
@@ -75,9 +79,10 @@ class SqlitePipeline:
                 ),
             )
         elif isinstance(item, (BatterStat, PitcherStat)):
+            pos = p.get("pos", 'P')
             self.cur.execute(
-                "INSERT OR REPLACE INTO players(player_id, name, current_team, last_updated) VALUES(?,?,?,?)",
-                (p['player_id'], p['name'], p['team'], p['scraped_at'])
+                "INSERT OR REPLACE INTO players(player_id, name, pos, current_team, last_updated) VALUES(?,?,?,?,?)",
+                (p['player_id'], p['name'], pos, p['team'], p['scraped_at'])
             )
 
             if isinstance(item, BatterStat):
@@ -99,8 +104,8 @@ class SqlitePipeline:
                      bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, 
                      ifbb, wpa, gmli, scraped_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (p['player_id'], p['date'], p['team'], p['dh'], p['games'], p ['gs'], p['era'], p['ip'],
-                     p['runs'], p['babip'], p['k_percent'], p['bb_percent'], p['barrel_percent'],
+                    (p['player_id'], p['date'], p['team'], p['dh'], p['games'], p['gs'], p['era'], p['babip'],
+                     p['ip'], p['runs'], p['k_percent'], p['bb_percent'], p['barrel_percent'],
                      p['hard_hit'], p['ev'], p['hr_fb'], p['siera'], p['fip'], p['stuff'], p['ifbb'],
                      p['wpa'], p['gmli'], p['scraped_at'])
                 )
@@ -121,6 +126,17 @@ class SqlitePipeline:
                 VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (p['date'], p['team_id'], p['dh'], p['player_id'],
                  p['position'], p['batting_order'], p['scraped_at'])
+            )
+
+        elif isinstance(item, FRVItem):
+            self.cur.execute("""
+                INSERT OR REPLACE INTO fielding
+                (name, year, frv, total_innings, innings_C, innings_1B, innings_2B, 
+                 innings_3B, innings_SS, innings_LF, innings_CF, innings_RF)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (p['name'], p['year'], p['frv'], p['total_innings'], p['innings_C'],
+                 p['innings_1B'], p['innings_2B'], p['innings_3B'], p['innings_SS'],
+                 p['innings_LF'], p['innings_CF'], p['innings_RF'])
             )
 
         return item
