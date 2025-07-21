@@ -64,7 +64,7 @@ class fieldingSpider(scrapy.Spider):
 
             item = FRVItem()
             item['name'] = normalized_name
-            item['year'] = row['year']
+            item['season'] = row['season']
             item['frv'] = row['run_value']
             item['total_innings'] = int(row['outs']) / 3
             

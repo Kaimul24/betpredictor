@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS schedule (
   game_id       TEXT PRIMARY KEY,
   game_date     TEXT NOT NULL,
   game_datetime TEXT NOT NULL,
+  season        INTEGER NOT NULL,
   away_team     TEXT NOT NULL,
   home_team     TEXT NOT NULL,
   away_team_abbr TEXT,
@@ -24,6 +25,8 @@ CREATE TABLE IF NOT EXISTS schedule (
   wind          TEXT,
   condition     TEXT,
   temp          INTEGER,
+  away_score    INTEGER,
+  home_score    INTEGER,
   scraped_at    TEXT
 );
 
@@ -32,6 +35,9 @@ CREATE INDEX IF NOT EXISTS idx_schedule_date
 
 CREATE INDEX IF NOT EXISTS idx_schedule_teams
   ON schedule(away_team, home_team);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_year
+  ON schedule(season);
 
 CREATE TABLE IF NOT EXISTS odds (
   game_date     TEXT,
@@ -45,11 +51,15 @@ CREATE TABLE IF NOT EXISTS odds (
   sportsbook    TEXT,
   away_odds     REAL,
   home_odds     REAL,
+  season          INTEGER NOT NULL,
   PRIMARY KEY (game_date, away_team, home_team, sportsbook)
 );
 
 CREATE INDEX IF NOT EXISTS idx_odds_date
   ON odds(game_date);
+
+CREATE INDEX IF NOT EXISTS idx_odds_year
+  ON odds(season);
 
 CREATE TABLE IF NOT EXISTS batting_stats (
   player_id       TEXT, 
@@ -73,6 +83,7 @@ CREATE TABLE IF NOT EXISTS batting_stats (
   baserunning     REAL,
   wraa            REAL,
   wpa             REAL,
+  season          INTEGER NOT NULL,
   scraped_at      TEXT,
   PRIMARY KEY (player_id, game_date, dh),
   FOREIGN KEY (player_id) REFERENCES players(player_id)
@@ -101,6 +112,7 @@ CREATE TABLE IF NOT EXISTS pitching_stats (
   ifbb            INTEGER,
   wpa             REAL,
   gmli            REAL,
+  season          INTEGER NOT NULL,
   scraped_at      TEXT,
   PRIMARY KEY (player_id, game_date, dh),
   FOREIGN KEY (player_id) REFERENCES players(player_id)
@@ -124,6 +136,18 @@ CREATE INDEX IF NOT EXISTS idx_batting_team_player_date
 CREATE INDEX IF NOT EXISTS idx_pitching_team_player_date
   ON pitching_stats(team, player_id, game_date);
 
+CREATE INDEX IF NOT EXISTS idx_batting_year_team
+  ON batting_stats(season, team);
+
+CREATE INDEX IF NOT EXISTS idx_pitching_year_team
+  ON pitching_stats(season, team);
+
+CREATE INDEX IF NOT EXISTS idx_lineups_year
+  ON lineups(season);
+
+CREATE INDEX IF NOT EXISTS idx_lineup_players_year
+  ON lineup_players(season);
+
 CREATE TABLE IF NOT EXISTS lineups (
   game_date     TEXT NOT NULL,
   team_id       INTEGER NOT NULL,
@@ -131,6 +155,7 @@ CREATE TABLE IF NOT EXISTS lineups (
   opposing_team_id INTEGER NOT NULL,
   team_starter_id TEXT,
   opposing_starter_id TEXT,
+  season        INTEGER NOT NULL,
   scraped_at    TEXT,
   PRIMARY KEY (game_date, team_id, dh)
 );
@@ -142,6 +167,7 @@ CREATE TABLE IF NOT EXISTS lineup_players (
   player_id     TEXT NOT NULL,
   position      TEXT NOT NULL,
   batting_order INTEGER,
+  season          INTEGER NOT NULL,
   scraped_at    TEXT,
   PRIMARY KEY (game_date, team_id, dh, player_id)
 );
@@ -163,7 +189,7 @@ CREATE INDEX IF NOT EXISTS idx_lineup_players_batting_order
 
 CREATE TABLE IF NOT EXISTS fielding (
   name            TEXT NOT NULL,
-  year            TEXT NOT NULL,
+  season            INTEGER NOT NULL,
   frv             REAL,
   total_innings   REAL,
   innings_C       REAL,
@@ -174,11 +200,11 @@ CREATE TABLE IF NOT EXISTS fielding (
   innings_LF      REAL,
   innings_CF      REAL,
   innings_RF      REAL,
-  PRIMARY KEY (name, year)
+  PRIMARY KEY (name, season)
 );
 
 CREATE INDEX IF NOT EXISTS idx_fielding_year
-  ON fielding(year);
+  ON fielding(season);
 
 CREATE INDEX IF NOT EXISTS idx_fielding_name
-  ON fielding(name);
+  ON fielding(season);

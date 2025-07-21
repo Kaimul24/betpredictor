@@ -53,10 +53,10 @@ class oddsSpider(scrapy.Spider):
                     cookies=self.cookies,
                     headers=json_headers,
                     callback=self.parse,
-                    cb_kwargs={"date": day},
+                    cb_kwargs={"date": day, "year": year},
                 )
 
-    def parse(self, response, date):
+    def parse(self, response, date, year):
         payload = json.loads(response.text)
         x = payload['pageProps']['oddsTables']
 
@@ -111,5 +111,5 @@ class oddsSpider(scrapy.Spider):
                     item['sportsbook'] = odds['sportsbook']
                     item['away_odds'] = odds['openingLine']['awayOdds']
                     item['home_odds'] = odds['openingLine']['homeOdds']
-
+                    item['season'] = year
                     yield item

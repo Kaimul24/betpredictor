@@ -148,8 +148,8 @@ test*
 
 Notes.md
 
-# stats data
-data/
+# DB
+*.sqlite*
 
 # Spyder project settings
 .spyderproject

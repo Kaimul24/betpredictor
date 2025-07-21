@@ -196,6 +196,7 @@ class fgSpider(scrapy.Spider):
 
                     item['date'] = game['gamedate']
                     item['scraped_at'] = datetime.now()
+                    item['season'] = game['season']
                     yield item
                 
                 elif type == 'W':
@@ -255,6 +256,7 @@ class fgSpider(scrapy.Spider):
 
                     item['date'] = game['gamedate']
                     item['scraped_at'] = datetime.now()
+                    item['season'] = game['season']
                     yield item
             else:
                 continue

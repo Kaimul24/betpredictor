@@ -1,25 +1,10 @@
 from datetime import date
 from pathlib import Path
-import sqlite3
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
 DATABASE_PATH = PROJECT_ROOT / 'data' / 'mlb_stats.sqlite'
 SCHEMA_PATH = PROJECT_ROOT / 'src' / 'scrapers' / 'schema.sql'
-
-def connect_database():
-    """Connect to the existing database without modifying schema. Returns connection and cursor."""
-    DATABASE_PATH.parent.mkdir(exist_ok=True)
-    
-    conn = sqlite3.connect(str(DATABASE_PATH))
-    cursor = conn.cursor()
-    
-    with open(SCHEMA_PATH, 'r') as f:
-        schema = f.read()
-    cursor.executescript(schema)
-    
-    conn.commit()
-    return conn, cursor
 
 DATES = {
     '2021': [date(2021, 4, 1), date(2021, 10, 4)],

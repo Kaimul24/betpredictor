@@ -29,6 +29,7 @@ class BatterStat(scrapy.Item):
     wpa = scrapy.Field()
     scraped_at = scrapy.Field()
     date = scrapy.Field()
+    season = scrapy.Field()  # Optional - will be auto-populated from date if not provided
 
 class PitcherStat(scrapy.Item):
     player_id = scrapy.Field()
@@ -55,6 +56,7 @@ class PitcherStat(scrapy.Item):
     gmli = scrapy.Field()
     scraped_at = scrapy.Field()
     date = scrapy.Field()
+    season = scrapy.Field()  # Optional - will be auto-populated from date if not provided
 
 class OddsItem(scrapy.Item):
     date = scrapy.Field()
@@ -68,6 +70,7 @@ class OddsItem(scrapy.Item):
     sportsbook = scrapy.Field()
     away_odds = scrapy.Field()
     home_odds = scrapy.Field()
+    season = scrapy.Field()  # Optional - will be auto-populated from date if not provided
 
 class LineupItem(scrapy.Item):
     date = scrapy.Field()
@@ -77,6 +80,7 @@ class LineupItem(scrapy.Item):
     team_starter_id = scrapy.Field()
     opposing_starter_id = scrapy.Field()
     scraped_at = scrapy.Field()
+    season = scrapy.Field()  # Optional - will be auto-populated from date if not provided
 
 class LineupPlayerItem(scrapy.Item):
     date = scrapy.Field()
@@ -86,10 +90,11 @@ class LineupPlayerItem(scrapy.Item):
     position = scrapy.Field()
     batting_order = scrapy.Field()
     scraped_at = scrapy.Field()
+    season = scrapy.Field()  # Optional - will be auto-populated from date if not provided
 
 class FRVItem(scrapy.Item):
     name = scrapy.Field()
-    year = scrapy.Field()
+    season = scrapy.Field()
     frv = scrapy.Field()
     total_innings = scrapy.Field()
     innings_C  = scrapy.Field()

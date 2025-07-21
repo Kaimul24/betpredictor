@@ -6,9 +6,10 @@
 
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
-import sqlite3, json
+import json
 from pathlib import Path
 from scrapers.items import BatterStat, PitcherStat, OddsItem, LineupItem, LineupPlayerItem, FRVItem
+from data.database import get_database_manager, execute_query
 
 class SqlitePipeline:
     def __init__(self, db_path: str):
@@ -21,32 +22,26 @@ class SqlitePipeline:
         return cls(db_path=db_path)
 
     def open_spider(self, spider):
-        # Ensure the directory exists
-        db_dir = Path(self.db_path).parent
-        db_dir.mkdir(parents=True, exist_ok=True)
-        
-        self.conn = sqlite3.connect(self.db_path)
-        self.conn.execute("PRAGMA foreign_keys = ON")
-        self.conn.execute("PRAGMA journal_mode = WAL")
-        self.conn.execute("PRAGMA synchronous = NORMAL")
-        self.cur = self.conn.cursor()
-        
+        self.db_manager = get_database_manager(
+            db_path=self.db_path,
+            schema_path=self.ddl_path,
+            max_connections=5
+        )
+
         if spider.name == 'fg':
             tables_to_drop = ['lineup_players', 'lineups', 'batting_stats', 'pitching_stats', 'players']
             for table in tables_to_drop:
-                self.cur.execute(f"DROP TABLE IF EXISTS {table}")
-            self.conn.commit()
+                execute_query(f"DROP TABLE IF EXISTS {table}", readonly=False)
         
         if spider.name == 'fielding':
-            self.cur.execute("DROP TABLE IF EXISTS fielding")
-            self.conn.commit()
+            execute_query("DROP TABLE IF EXISTS fielding", readonly=False)
         
-        self.cur.executescript(self.ddl_path.read_text())
-
+        # Initialize schema
+        self.db_manager.initialize_schema()
 
     def close_spider(self, spider):
-        self.conn.commit()
-        self.conn.close()
+        # No need to explicitly close connections - handled by database manager
+        pass
 
     def process_item(self, item, spider):
         if not isinstance(item, (OddsItem, BatterStat, PitcherStat, LineupItem, LineupPlayerItem, FRVItem)):
@@ -55,14 +50,15 @@ class SqlitePipeline:
         p = ItemAdapter(item)
 
         if isinstance(item, OddsItem):
-            self.cur.execute(
+            
+            execute_query(
                 """
                 INSERT OR REPLACE INTO odds
                 (game_date, away_team, home_team,
                  away_starter, home_starter,
                  away_score, home_score, winner,
-                 sportsbook, away_odds, home_odds)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                 sportsbook, away_odds, home_odds, season)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     p["date"],
@@ -76,67 +72,79 @@ class SqlitePipeline:
                     p["sportsbook"],
                     p["away_odds"],
                     p["home_odds"],
+                    p['season'],
                 ),
+                readonly=False
             )
         elif isinstance(item, (BatterStat, PitcherStat)):
             pos = p.get("pos", 'P')
-            self.cur.execute(
+            execute_query(
                 "INSERT OR REPLACE INTO players(player_id, name, pos, current_team, last_updated) VALUES(?,?,?,?,?)",
-                (p['player_id'], p['name'], pos, p['team'], p['scraped_at'])
+                (p['player_id'], p['name'], pos, p['team'], p['scraped_at']),
+                readonly=False
             )
 
             if isinstance(item, BatterStat):
-                self.cur.execute("""
+                
+                execute_query("""
                     INSERT OR REPLACE INTO batting_stats
                     (player_id, game_date, team, batorder, pos, dh, ab, pa, ops, babip, bb_k,
                      wrc_plus, woba, barrel_percent, hard_hit, ev, iso, gb_fb, baserunning, 
-                     wraa, wpa, scraped_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     wraa, wpa, season, scraped_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (p['player_id'], p['date'], p['team'], p['batorder'], p['pos'], p['dh'], p['ab'], p['pa'],
                      p['ops'], p['babip'], p['bb_k'], p['wrc_plus'], p['woba'], p['barrel_percent'], p['hard_hit'], p['ev'],
-                     p['iso'], p['gb_fb'], p['baserunning'], p['wraa'], p['wpa'], p['scraped_at'])
+                     p['iso'], p['gb_fb'], p['baserunning'], p['wraa'], p['wpa'], p['season'], p['scraped_at']),
+                    readonly=False
                 )
 
             if isinstance(item, PitcherStat):
-                self.cur.execute("""
+                
+                execute_query("""
                     INSERT OR REPLACE INTO pitching_stats
                     (player_id, game_date, team, dh, games, gs, era, babip, ip, runs, k_percent, 
                      bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, 
-                     ifbb, wpa, gmli, scraped_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     ifbb, wpa, gmli, season, scraped_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (p['player_id'], p['date'], p['team'], p['dh'], p['games'], p['gs'], p['era'], p['babip'],
                      p['ip'], p['runs'], p['k_percent'], p['bb_percent'], p['barrel_percent'],
                      p['hard_hit'], p['ev'], p['hr_fb'], p['siera'], p['fip'], p['stuff'], p['ifbb'],
-                     p['wpa'], p['gmli'], p['scraped_at'])
+                     p['wpa'], p['gmli'], p['season'], p['scraped_at']),
+                    readonly=False
                 )
         elif isinstance(item, LineupItem):
-            self.cur.execute("""
+            
+            execute_query("""
                 INSERT OR REPLACE INTO lineups
                 (game_date, team_id, dh, opposing_team_id, 
-                 team_starter_id, opposing_starter_id, scraped_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                 team_starter_id, opposing_starter_id, season, scraped_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (p['date'], p['team_id'], p['dh'], p['opposing_team_id'],
-                 p['team_starter_id'], p['opposing_starter_id'], p['scraped_at'])
+                 p['team_starter_id'], p['opposing_starter_id'], p['season'], p['scraped_at']),
+                readonly=False
             )
 
         elif isinstance(item, LineupPlayerItem):
-            self.cur.execute("""
+            
+            execute_query("""
                 INSERT OR REPLACE INTO lineup_players
-                (game_date, team_id, dh, player_id, position, batting_order, scraped_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (game_date, team_id, dh, player_id, position, batting_order, season, scraped_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (p['date'], p['team_id'], p['dh'], p['player_id'],
-                 p['position'], p['batting_order'], p['scraped_at'])
+                 p['position'], p['batting_order'], p['season'], p['scraped_at']),
+                readonly=False
             )
 
         elif isinstance(item, FRVItem):
-            self.cur.execute("""
+            execute_query("""
                 INSERT OR REPLACE INTO fielding
-                (name, year, frv, total_innings, innings_C, innings_1B, innings_2B, 
+                (name, season, frv, total_innings, innings_C, innings_1B, innings_2B, 
                  innings_3B, innings_SS, innings_LF, innings_CF, innings_RF)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (p['name'], p['year'], p['frv'], p['total_innings'], p['innings_C'],
+                (p['name'], p['season'], p['frv'], p['total_innings'], p['innings_C'],
                  p['innings_1B'], p['innings_2B'], p['innings_3B'], p['innings_SS'],
-                 p['innings_LF'], p['innings_CF'], p['innings_RF'])
+                 p['innings_LF'], p['innings_CF'], p['innings_RF']),
+                readonly=False
             )
 
         return item
