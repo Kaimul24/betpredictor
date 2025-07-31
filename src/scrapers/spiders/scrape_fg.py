@@ -93,8 +93,10 @@ class fgSpider(scrapy.Spider):
 
                 player_item = LineupPlayerItem()
                 player_item['date'] = game_info['gameDate'][:10]
+                player_item['season'] = year
                 player_item['dh'] = game_info['dh']
                 player_item['team_id'] = game_info['teamid']
+                player_item['team'] = game_info['Team']
                 player_item['player_id'] = id
                 player_item['position'] = pos
                 player_item['batting_order'] = batting_order
@@ -113,8 +115,11 @@ class fgSpider(scrapy.Spider):
 
             lineup_item = LineupItem()
             lineup_item['team_id'] = game_info['teamid']
+            lineup_item['team'] = game_info['Team']
             lineup_item['opposing_team_id'] = game_info['oppteamid']
+            lineup_item['opposing_team'] = game_info['oppTeam']
             lineup_item['date'] = game_info['gameDate'][:10]
+            lineup_item['season'] = year
             lineup_item['dh'] = game_info['dh']
             lineup_item['team_starter_id'] = home_starter_id
             lineup_item['opposing_starter_id'] = game_info['oppSP']
@@ -196,7 +201,7 @@ class fgSpider(scrapy.Spider):
 
                     item['date'] = game['gamedate']
                     item['scraped_at'] = datetime.now()
-                    item['season'] = game['season']
+                    item['season'] = year
                     yield item
                 
                 elif type == 'W':
@@ -256,7 +261,7 @@ class fgSpider(scrapy.Spider):
 
                     item['date'] = game['gamedate']
                     item['scraped_at'] = datetime.now()
-                    item['season'] = game['season']
+                    item['season'] = year
                     yield item
             else:
                 continue

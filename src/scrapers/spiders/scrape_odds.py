@@ -1,4 +1,4 @@
-from config import DATES
+from config import DATES, ODDS_TEAM_ABBR_MAP
 from dotenv import load_dotenv
 import json, os, scrapy
 from itertools import islice
@@ -78,6 +78,9 @@ class oddsSpider(scrapy.Spider):
                 self.logger.warning(f"Skipping odds for All Star Game on: {date}")
                 return
             
+            away_team_mapped = ODDS_TEAM_ABBR_MAP.get(away_team, away_team)
+            home_team_mapped = ODDS_TEAM_ABBR_MAP.get(home_team, home_team)
+            
             away_starter_dict = game_data['awayStarter']
             if away_starter_dict == None and game_data['gameId'] == 354113:
                 away_starter = 'Michael Lorenzen'
@@ -93,7 +96,7 @@ class oddsSpider(scrapy.Spider):
             away_score = game_data['awayTeamScore']
             home_score = game_data['homeTeamScore']
 
-            winner = away_team if away_score > home_score else home_team
+            winner = away_team_mapped if away_score > home_score else home_team_mapped
 
             game_odds = game['oddsViews']
 
@@ -101,8 +104,8 @@ class oddsSpider(scrapy.Spider):
                 if odds is not None:
                     item = OddsItem()
                     item['date'] = date
-                    item['away_team'] = away_team
-                    item['home_team'] = home_team
+                    item['away_team'] = away_team_mapped
+                    item['home_team'] = home_team_mapped
                     item['away_starter'] = away_starter
                     item['home_starter'] = home_starter
                     item['away_score'] = away_score

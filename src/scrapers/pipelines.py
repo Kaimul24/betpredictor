@@ -32,7 +32,9 @@ class SqlitePipeline:
             tables_to_drop = ['lineup_players', 'lineups', 'batting_stats', 'pitching_stats', 'players']
             for table in tables_to_drop:
                 execute_query(f"DROP TABLE IF EXISTS {table}", readonly=False)
-        
+        if spider.name == 'odds':
+            execute_query("DROP TABLE IF EXISTS odds", readonly=False)
+
         if spider.name == 'fielding':
             execute_query("DROP TABLE IF EXISTS fielding", readonly=False)
         
@@ -116,10 +118,10 @@ class SqlitePipeline:
             
             execute_query("""
                 INSERT OR REPLACE INTO lineups
-                (game_date, team_id, dh, opposing_team_id, 
+                (game_date, team_id, team, dh, opposing_team_id, opposing_team,
                  team_starter_id, opposing_starter_id, season, scraped_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (p['date'], p['team_id'], p['dh'], p['opposing_team_id'],
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (p['date'], p['team_id'], p['team'], p['dh'], p['opposing_team_id'], p['opposing_team'],
                  p['team_starter_id'], p['opposing_starter_id'], p['season'], p['scraped_at']),
                 readonly=False
             )
@@ -128,9 +130,9 @@ class SqlitePipeline:
             
             execute_query("""
                 INSERT OR REPLACE INTO lineup_players
-                (game_date, team_id, dh, player_id, position, batting_order, season, scraped_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (p['date'], p['team_id'], p['dh'], p['player_id'],
+                (game_date, team_id, team, dh, player_id, position, batting_order, season, scraped_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (p['date'], p['team_id'], p['team'], p['dh'], p['player_id'],
                  p['position'], p['batting_order'], p['season'], p['scraped_at']),
                 readonly=False
             )

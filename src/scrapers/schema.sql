@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS players (
 CREATE TABLE IF NOT EXISTS schedule (
   game_id       TEXT PRIMARY KEY,
   game_date     TEXT NOT NULL,
-  game_datetime TEXT NOT NULL,
+  game_datetime TEXT,
   season        INTEGER NOT NULL,
   away_team     TEXT NOT NULL,
   home_team     TEXT NOT NULL,
@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS schedule (
   temp          INTEGER,
   away_score    INTEGER,
   home_score    INTEGER,
+  winning_team  TEXT,
+  losing_team   TEXT,
   scraped_at    TEXT
 );
 
@@ -51,7 +53,7 @@ CREATE TABLE IF NOT EXISTS odds (
   sportsbook    TEXT,
   away_odds     REAL,
   home_odds     REAL,
-  season          INTEGER NOT NULL,
+  season          INTEGER,
   PRIMARY KEY (game_date, away_team, home_team, sportsbook)
 );
 
@@ -142,17 +144,13 @@ CREATE INDEX IF NOT EXISTS idx_batting_year_team
 CREATE INDEX IF NOT EXISTS idx_pitching_year_team
   ON pitching_stats(season, team);
 
-CREATE INDEX IF NOT EXISTS idx_lineups_year
-  ON lineups(season);
-
-CREATE INDEX IF NOT EXISTS idx_lineup_players_year
-  ON lineup_players(season);
-
 CREATE TABLE IF NOT EXISTS lineups (
   game_date     TEXT NOT NULL,
   team_id       INTEGER NOT NULL,
+  team          TEXT,
   dh            INTEGER NOT NULL,
   opposing_team_id INTEGER NOT NULL,
+  opposing_team   TEXT,
   team_starter_id TEXT,
   opposing_starter_id TEXT,
   season        INTEGER NOT NULL,
@@ -163,6 +161,7 @@ CREATE TABLE IF NOT EXISTS lineups (
 CREATE TABLE IF NOT EXISTS lineup_players (
   game_date     TEXT NOT NULL,
   team_id       INTEGER NOT NULL,
+  team          TEXT,
   dh            INTEGER NOT NULL,
   player_id     TEXT NOT NULL,
   position      TEXT NOT NULL,
@@ -175,8 +174,14 @@ CREATE TABLE IF NOT EXISTS lineup_players (
 CREATE INDEX IF NOT EXISTS idx_lineups_date
   ON lineups(game_date);
 
+CREATE INDEX IF NOT EXISTS idx_lineups_team_date
+  ON lineups(game_date, team);
+
 CREATE INDEX IF NOT EXISTS idx_lineup_players_date
   ON lineup_players(game_date);
+
+CREATE INDEX IF NOT EXISTS idx_lineup_players_team_date
+  ON lineup_players(game_date, team);
 
 CREATE INDEX IF NOT EXISTS idx_lineup_players_player
   ON lineup_players(player_id, game_date);
@@ -186,6 +191,12 @@ CREATE INDEX IF NOT EXISTS idx_lineup_players_position
 
 CREATE INDEX IF NOT EXISTS idx_lineup_players_batting_order
   ON lineup_players(batting_order, game_date);
+
+CREATE INDEX IF NOT EXISTS idx_lineups_year
+  ON lineups(season);
+
+CREATE INDEX IF NOT EXISTS idx_lineup_players_year
+  ON lineup_players(season);
 
 CREATE TABLE IF NOT EXISTS fielding (
   name            TEXT NOT NULL,
@@ -207,4 +218,4 @@ CREATE INDEX IF NOT EXISTS idx_fielding_year
   ON fielding(season);
 
 CREATE INDEX IF NOT EXISTS idx_fielding_name
-  ON fielding(season);
+  ON fielding(name);

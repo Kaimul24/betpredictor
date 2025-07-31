@@ -38,14 +38,14 @@ TEAM_ABBR_MAP = {
     'Baltimore Orioles': 'BAL',
     'Boston Red Sox': 'BOS',
     'Chicago Cubs': 'CHC',
-    'Chicago White Sox': 'CWS',
+    'Chicago White Sox': 'CHW',
     'Cincinnati Reds': 'CIN',
     'Cleveland Guardians': 'CLE',
     'Cleveland Indians': 'CLE',
     'Colorado Rockies': 'COL',
     'Detroit Tigers': 'DET',
     'Houston Astros': 'HOU',
-    'Kansas City Royals': 'KC',
+    'Kansas City Royals': 'KCR',
     'Los Angeles Angels': 'LAA',
     'Los Angeles Dodgers': 'LAD',
     'Miami Marlins': 'MIA',
@@ -53,15 +53,30 @@ TEAM_ABBR_MAP = {
     'Minnesota Twins': 'MIN',
     'New York Mets': 'NYM',
     'New York Yankees': 'NYY',
-    'Oakland Athletics': 'OAK',
+    'Oakland Athletics': 'ATH',
+    'Athletics': 'ATH', # MAY NEED TO CHANGE
     'Philadelphia Phillies': 'PHI',
     'Pittsburgh Pirates': 'PIT',
-    'San Diego Padres': 'SD',
-    'San Francisco Giants': 'SF',
+    'San Diego Padres': 'SDP',
+    'San Francisco Giants': 'SFG',
     'Seattle Mariners': 'SEA',
     'St. Louis Cardinals': 'STL',
-    'Tampa Bay Rays': 'TB',
+    'Tampa Bay Rays': 'TBR',
     'Texas Rangers': 'TEX',
     'Toronto Blue Jays': 'TOR',
-    'Washington Nationals': 'WSH'
+    'Washington Nationals': 'WSN'
+}
+
+ODDS_TEAM_ABBR_MAP = {
+    'AZ': 'ARI',
+    'KC': 'KCR',
+    'OAK': 'ATH',
+    'SD': 'SDP',
+    'SF': 'SFG',
+    'TB': 'TBR',
+    'WAS': 'WSN'
+}
+
+TEAM_ID_MAP = {
+    
 }

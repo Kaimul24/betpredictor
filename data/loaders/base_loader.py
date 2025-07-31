@@ -14,7 +14,7 @@ class BaseDataLoader(ABC):
         pass
 
     @abstractmethod
-    def load_up_to_game(self, date: date, team_id: str, dh: int = 0) -> pd.DataFrame:
+    def load_up_to_game(self, date: date, team_abbr: str, dh: int = 0) -> pd.DataFrame:
         pass
 
     def _time_filter(self, date: date, dh: int = 0) -> tuple[str, list]:
@@ -61,13 +61,16 @@ class BaseDataLoader(ABC):
         4. Numerical columns have valid values (no inf, etc.)
         """
         # Check required columns
+        if df.empty:
+            return df
+        
         missing = set(required_columns) - set(df.columns)
         if missing:
             raise ValueError(f"Missing required columns: {missing}")
             
         # Validate data types and values
         for col in df.columns:
-            if 'date' in col.lower():
+            if 'game_date' in col.lower():
                 # Ensure dates are parsed correctly
                 df[col] = pd.to_datetime(df[col])
             elif df[col].dtype in ['float64', 'int64']:
