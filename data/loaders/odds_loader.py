@@ -1,6 +1,7 @@
 '''
 Odds loader
 '''
+
 from data.loaders.base_loader import BaseDataLoader
 import pandas as pd
 from datetime import date
@@ -24,8 +25,28 @@ class OddsLoader(BaseDataLoader):
         df = self._execute_query(query, [start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')])
         return self._validate_dataframe(df, self.columns)
 
+    def load_for_season(self, season: int) -> pd.DataFrame:
+        """Load all odds for a season"""
+        params = [season]
+        query = f"""
+        SELECT 
+        \t{",\n\t".join(self.columns)}
+        FROM odds
+        WHERE season = ?
+        ORDER BY game_date
+        """
+        df = self._execute_query(query, params)
+        return self._validate_dataframe(df, self.columns)
+
     def load_up_to_game(self, date: date, team_abbr: str, dh: int = 0) -> pd.DataFrame:
-        where, params = self._time_filter(date, dh)
+        """
+        dh must be zero in this case because table has no dh column
+        """
+
+        if dh != 0:
+            raise ValueError("odds table does not have dh field.")
+        
+        where, params = self._time_filter(date, 0)
         query = f'''
         SELECT 
             *,
@@ -54,6 +75,7 @@ class OddsLoader(BaseDataLoader):
             away_odds,
             home_odds,
             winner,
+            sportsbook,
             season
         FROM odds
         WHERE game_date = ?

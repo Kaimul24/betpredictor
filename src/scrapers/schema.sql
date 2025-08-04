@@ -6,6 +6,22 @@ CREATE TABLE IF NOT EXISTS players (
   last_updated TEXT
 );
 
+-- FILL WHEN SCRAPING SCHEDULE TO GET ROSTERS FOR EACH GAME
+-- TABLE WILL BE USED WHEN BUILDING BATTING FEATURES
+CREATE TABLE IF NOT EXISTS rosters (
+  game_date TEXT NOT NULL,
+  team TEXT NOT NULL,
+  season TEXT,
+  player_name TEXT NOT NULL,
+  position TEXT NOT NULL,
+  status TEXT NOT NULL,
+  scraped_at TEXT,
+  PRIMARY KEY (game_date, player_name, team)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rosters_team_date
+  ON rosters(game_date, team);
+
 CREATE TABLE IF NOT EXISTS schedule (
   game_id       TEXT PRIMARY KEY,
   game_date     TEXT NOT NULL,
@@ -15,8 +31,7 @@ CREATE TABLE IF NOT EXISTS schedule (
   home_team     TEXT NOT NULL,
   away_team_abbr TEXT,
   home_team_abbr TEXT,
-  doubleheader  TEXT,
-  game_num      INTEGER,
+  dh            INTEGER,
   venue_name    TEXT,
   venue_id      INTEGER,
   status        TEXT,
@@ -147,7 +162,7 @@ CREATE INDEX IF NOT EXISTS idx_pitching_year_team
 CREATE TABLE IF NOT EXISTS lineups (
   game_date     TEXT NOT NULL,
   team_id       INTEGER NOT NULL,
-  team          TEXT,
+  team          TEXT NOT NULL,
   dh            INTEGER NOT NULL,
   opposing_team_id INTEGER NOT NULL,
   opposing_team   TEXT,
@@ -155,20 +170,20 @@ CREATE TABLE IF NOT EXISTS lineups (
   opposing_starter_id TEXT,
   season        INTEGER NOT NULL,
   scraped_at    TEXT,
-  PRIMARY KEY (game_date, team_id, dh)
+  PRIMARY KEY (game_date, team, dh)
 );
 
 CREATE TABLE IF NOT EXISTS lineup_players (
   game_date     TEXT NOT NULL,
   team_id       INTEGER NOT NULL,
-  team          TEXT,
+  team          TEXT NOT NULL,
   dh            INTEGER NOT NULL,
   player_id     TEXT NOT NULL,
   position      TEXT NOT NULL,
   batting_order INTEGER,
   season          INTEGER NOT NULL,
   scraped_at    TEXT,
-  PRIMARY KEY (game_date, team_id, dh, player_id)
+  PRIMARY KEY (game_date, team, dh, player_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_lineups_date
@@ -185,6 +200,9 @@ CREATE INDEX IF NOT EXISTS idx_lineup_players_team_date
 
 CREATE INDEX IF NOT EXISTS idx_lineup_players_player
   ON lineup_players(player_id, game_date);
+
+CREATE INDEX IF NOT EXISTS idx_lineup_players_game
+  ON lineup_players(game_date, dh, team);
 
 CREATE INDEX IF NOT EXISTS idx_lineup_players_position
   ON lineup_players(position, game_date);

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import date, datetime
+from pandas.core.api import DataFrame as DataFrame
 import pandas as pd
 import logging
 from data.database import get_database_manager
@@ -10,11 +11,15 @@ class BaseDataLoader(ABC):
         self.db_manager = get_database_manager()
     
     @abstractmethod
-    def load_for_date_range(self, start: date, end: date) -> pd.DataFrame:
+    def load_for_date_range(self, start: date, end: date) -> DataFrame:
         pass
 
     @abstractmethod
-    def load_up_to_game(self, date: date, team_abbr: str, dh: int = 0) -> pd.DataFrame:
+    def load_up_to_game(self, date: date, team_abbr: str, dh: int = 0) -> DataFrame:
+        pass
+
+    @abstractmethod
+    def load_for_season(self, season: int) -> DataFrame:
         pass
 
     def _time_filter(self, date: date, dh: int = 0) -> tuple[str, list]:
@@ -22,7 +27,7 @@ class BaseDataLoader(ABC):
         if dh <= 1:
             return "game_date < ?", [date.strftime('%Y-%m-%d')]
         else:
-            return "game_date < ? OR (game_date = ? AND game_num < ?)", [
+            return "game_date < ? OR (game_date = ? AND dh < ?)", [
                 date.strftime('%Y-%m-%d'), date.strftime('%Y-%m-%d'), dh
             ]
 
@@ -32,25 +37,25 @@ class BaseDataLoader(ABC):
         if dh <= 1:
             return "year = ? AND game_date < ?", [year, date.strftime('%Y-%m-%d')]
         else:
-            return "year = ? AND (game_date < ? OR (game_date = ? AND game_num < ?))", [
+            return "year = ? AND (game_date < ? OR (game_date = ? AND dh < ?))", [
                 year, date.strftime('%Y-%m-%d'), date.strftime('%Y-%m-%d'), dh
             ]
 
         
-    def _execute_query(self, query: str, params: list = None) -> pd.DataFrame:
+    def _execute_query(self, query: str, params: list | None = None) -> DataFrame:
         """Execute query using database manager."""
         try:
             results = self.db_manager.execute_read_query(query, tuple(params or []))
             if results:
-                df = pd.DataFrame([dict(row) for row in results])
+                df = DataFrame([dict(row) for row in results])
                 return df
             else:
-                return pd.DataFrame()
+                return DataFrame()
         except Exception as e:
             logging.error(f"Query failed: {e}\nQuery: {query}\nParams: {params}")
-            return pd.DataFrame()
+            return DataFrame()
 
-    def _validate_dataframe(self, df: pd.DataFrame, required_columns: list[str]) -> pd.DataFrame:
+    def _validate_dataframe(self, df: DataFrame, required_columns: list[str]) -> DataFrame:
         """
         Validate loaded data meets requirements.
         

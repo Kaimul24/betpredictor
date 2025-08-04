@@ -6,6 +6,40 @@ PROJECT_ROOT = Path(__file__).parent.parent
 DATABASE_PATH = PROJECT_ROOT / 'data' / 'mlb_stats.sqlite'
 SCHEMA_PATH = PROJECT_ROOT / 'src' / 'scrapers' / 'schema.sql'
 
+TEAM_TO_TEAM_ID_STATSAPI_MAP = {
+    'LAA': 108,
+    'ARI': 109,
+    'BAL': 110,
+    'BOS': 111,
+    'CHC': 112,
+    'CIN': 113,
+    'CLE': 114,
+    'COL': 115,
+    'DET': 116,
+    'HOU': 117,
+    'KCR': 118,
+    'LAD': 119,
+    'WSN': 120,
+    'NYM': 121,
+    'OAK': 133,
+    'ATH': 133,
+    'PIT': 134,
+    'SDP': 135,
+    'SEA': 136,
+    'SFG': 137,
+    'STL': 138,
+    'TBR': 139,
+    'TEX': 140,
+    'TOR': 141,
+    'MIN': 142,
+    'PHI': 143,
+    'ATL': 144,
+    'CHW': 145,
+    'MIA': 146,
+    'NYY': 147,
+    'MIL': 158
+}
+
 DATES = {
     '2021': [date(2021, 4, 1), date(2021, 10, 4)],
     '2022': [date(2022, 4, 7), date(2022, 10, 6)],
@@ -75,8 +109,4 @@ ODDS_TEAM_ABBR_MAP = {
     'SF': 'SFG',
     'TB': 'TBR',
     'WAS': 'WSN'
-}
-
-TEAM_ID_MAP = {
-    
 }

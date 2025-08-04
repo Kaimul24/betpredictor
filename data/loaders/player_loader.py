@@ -17,21 +17,25 @@ class PlayerLoader(BaseDataLoader):
                                  'bb_percent', 'barrel_percent', 'hard_hit', 'ev',
                                  'hr_fb', 'siera', 'fip', 'stuff', 'ifbb', 'wpa',
                                  'gmli', 'season']
-        
-    def _time_filter(self, date: date, dh: int = 0) -> tuple[str, list]:
-        """Generate time-based filter conditions for doubleheader handling."""
-        if dh <= 1:
-            return "game_date < ?", [date.strftime('%Y-%m-%d')]
-        else:
-            return "game_date < ? OR (game_date = ? AND dh < ?)", [
-                date.strftime('%Y-%m-%d'), date.strftime('%Y-%m-%d'), dh
-            ]
 
     def load_for_date_range(self, start: date, end: date) -> DataFrame:
         pass
 
     def load_up_to_game(self, date: date, team_abbr: str, dh: int = 0) -> DataFrame:
         pass
+
+    def load_for_season(self, season: int) -> DataFrame:
+        params = [season]
+        query = f"""
+        SELECT
+        \t{",\n\t".join(self.batting_columns)}
+        FROM batting_stats
+        WHERE season = ?
+        ORDER BY game_date, dh
+        """
+        df = self._execute_query(query, params)
+        return self._validate_dataframe(df, self.batting_columns)
+
 
     def load_batting_stats_for_date_range(self, start: date, end: date, team_abbr: Optional[str] = None) -> DataFrame:
         team_filter = ""
@@ -133,8 +137,3 @@ class PlayerLoader(BaseDataLoader):
     
     def load_fielding_stats(self, season: int) -> DataFrame:
         pass
-    
-    def load_lineup_stats(self, team: str, date: date) -> DataFrame:
-        pass
-
-    
