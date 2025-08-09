@@ -4,9 +4,10 @@ import time
 import json
 import logging
 from typing import Tuple, Union, List
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from src.config import DATES, TEAM_ABBR_MAP, TEAM_TO_TEAM_ID_STATSAPI_MAP
+from src.utils import normalize_names, normalize_datetime_string
 from data.database import get_database_manager
 
 logging.basicConfig(level=logging.INFO)
@@ -85,7 +86,6 @@ def fetch_game_weather(gamePk: int, gameDateTime: str) -> Tuple[str, str, Union[
 def fetch_schedule():
     db_manager = get_database_manager()
     
-    # Initialize schema to ensure all tables exist
     try:
         db_manager.initialize_schema(force_recreate=False)
         logger.info("Database schema initialized.")
@@ -158,7 +158,6 @@ def fetch_schedule():
                         games_requested.add(f'{gamePk}, {gameDateTime}')
                         weather = executor.submit(fetch_game_weather, gamePk, gameDateTime)
                         
-                        # Only fetch roster data if team abbreviations are valid
                         if home_abbr and away_abbr:
                             home_roster = executor.submit(fetch_roster_for_date, home_abbr, date)
                             away_roster = executor.submit(fetch_roster_for_date, away_abbr, date)
@@ -229,11 +228,11 @@ def fetch_schedule():
                                 losing_team = TEAM_ABBR_MAP.get(game['losing_team'], None)
                             else:
                                 if away_score > home_score:
-                                    winning_team = away_team
-                                    losing_team = home_team
+                                    winning_team = away_abbr
+                                    losing_team = home_abbr
                                 elif home_score > away_score:
-                                    winning_team = home_team
-                                    losing_team = away_team
+                                    winning_team = home_abbr
+                                    losing_team = away_abbr
                                 else:  
                                     if not (game['status'] == 'Postponed' or game['status'] == 'Cancelled'):
                                         logger.error(f"Tie game: {gamePk}")
@@ -245,10 +244,8 @@ def fetch_schedule():
                             weather_batch_data.append((
                                 game['game_id'],
                                 game['game_date'],
-                                game['game_datetime'],
+                                normalize_datetime_string(game['game_datetime']),
                                 year,
-                                game['away_name'],
-                                game['home_name'],
                                 away_abbr,
                                 home_abbr,
                                 dh,
@@ -261,13 +258,14 @@ def fetch_schedule():
                                 losing_team,
                                 game['away_probable_pitcher'],
                                 game['home_probable_pitcher'],
+                                normalize_names(game['away_probable_pitcher']),
+                                normalize_names(game['home_probable_pitcher']),
                                 wind,
                                 condition,
                                 temp,
                                 scraped_at
                             ))
 
-                            # Add roster data for both teams
                             logger.debug(f"Processing roster data for game {gamePk}: away_roster={len(away_roster_data)}, home_roster={len(home_roster_data)}")
                             for player_name, team, position, status in away_roster_data:
                                 roster_batch_data.append((
@@ -304,9 +302,9 @@ def fetch_schedule():
                         db_manager.execute_many_write_queries("""
                             INSERT OR REPLACE INTO schedule (
                                 game_id, game_date, game_datetime, season, away_team, home_team,
-                                away_team_abbr, home_team_abbr, dh, venue_name, venue_id, status,
-                                away_score, home_score, winning_team, losing_team, away_probable_pitcher,
-                                home_probable_pitcher, wind, condition, temp, scraped_at
+                                dh, venue_name, venue_id, status,away_score, home_score, winning_team, 
+                                losing_team, away_probable_pitcher,home_probable_pitcher, 
+                                away_starter_normalized, home_starter_normalized, wind, condition, temp, scraped_at
                             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, weather_batch_data)
                     
@@ -354,7 +352,7 @@ def fetch_schedule():
                         for gamePk, date, away_abbr, home_abbr, game in roster_failed_games:
                             try:
                                 logger.info(f"Retrying roster fetch for game {gamePk}...")
-                                # Convert string date to date object if needed for retry
+   
                                 if isinstance(date, str):
                                     date = datetime.strptime(date, '%Y-%m-%d').date()
                                 
@@ -362,7 +360,6 @@ def fetch_schedule():
                                     away_roster_data = fetch_roster_for_date(away_abbr, date)
                                     home_roster_data = fetch_roster_for_date(home_abbr, date)
                                     
-                                    # Add roster data for both teams
                                     for player_name, team, position, status in away_roster_data:
                                         roster_retry_data.append((
                                             game['game_date'],
@@ -414,3 +411,14 @@ if __name__ == "__main__":
     fetch_schedule()
     db_manager = get_database_manager()
     
+
+"""
+params = {
+    'sportId': 1,
+    'start_date': '2021-04-13',
+    'end_date': '2021-04-13',
+    'hydrate': 'team,weather,linescore(matchup,runners),xrefId,flags,statusFlags,venue(timezone,location),decisions,person,probablePitcher,stats,game(content(media(epg),summary),tickets),seriesStatus(useOverride=true)'
+}
+data = statsapi.get('schedule', params=params, force=False)
+games = data['dates'][0]['games']
+"""

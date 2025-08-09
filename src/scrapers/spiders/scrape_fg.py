@@ -5,6 +5,7 @@ import os
 from config import DATES, LG_AVG_STATS
 from scrapers.items import BatterStat, PitcherStat, LineupItem, LineupPlayerItem
 from datetime import datetime
+from src.utils import normalize_names
 
 load_dotenv()
 TEAM_URL = os.getenv("TEAM_URL")
@@ -155,6 +156,7 @@ class fgSpider(scrapy.Spider):
                     item = BatterStat()
                     item['player_id'] = game['playerid']
                     item['name'] = game['PlayerName']
+                    item['normalized_player_name'] = normalize_names(game['PlayerName'])
                     item['team'] = game['Team']
                     item['batorder'] = game['BatOrder']
                     item['pos'] = game['Pos']
@@ -208,6 +210,7 @@ class fgSpider(scrapy.Spider):
                     item = PitcherStat()
                     item['player_id'] = game['playerid']
                     item['name'] = game['PlayerName']
+                    item['normalized_player_name'] = normalize_names(game['PlayerName'])
                     item['team'] = game['Team']
                     item['dh'] = game['dh']
                     item['games'] = game['G']

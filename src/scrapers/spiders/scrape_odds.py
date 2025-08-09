@@ -2,7 +2,7 @@ from config import DATES, ODDS_TEAM_ABBR_MAP
 from dotenv import load_dotenv
 import json, os, scrapy
 from itertools import islice
-from utils import daterange
+from utils import daterange, normalize_names, normalize_datetime_string
 from scrapers.items import OddsItem
 
 load_dotenv()
@@ -70,6 +70,7 @@ class oddsSpider(scrapy.Spider):
 
         for game in games:
             game_data = game['gameView']
+            game_datetime = game_data['startDate']
 
             away_team = game_data['awayTeam']['shortName']
             home_team = game_data['homeTeam']['shortName']
@@ -104,10 +105,13 @@ class oddsSpider(scrapy.Spider):
                 if odds is not None:
                     item = OddsItem()
                     item['date'] = date
+                    item['game_datetime'] = normalize_datetime_string(game_datetime)
                     item['away_team'] = away_team_mapped
                     item['home_team'] = home_team_mapped
                     item['away_starter'] = away_starter
                     item['home_starter'] = home_starter
+                    item['away_starter_normalized'] = normalize_names(away_starter)
+                    item['home_starter_normalized'] = normalize_names(home_starter)
                     item['away_score'] = away_score
                     item['home_score'] = home_score
                     item['winner'] = winner

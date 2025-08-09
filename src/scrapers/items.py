@@ -8,6 +8,7 @@ import scrapy
 class BatterStat(scrapy.Item):
     player_id = scrapy.Field()
     name = scrapy.Field()
+    normalized_player_name = scrapy.Field()
     team = scrapy.Field()
     batorder = scrapy.Field()
     pos = scrapy.Field()
@@ -34,6 +35,7 @@ class BatterStat(scrapy.Item):
 class PitcherStat(scrapy.Item):
     player_id = scrapy.Field()
     name = scrapy.Field()
+    normalized_player_name = scrapy.Field()
     team = scrapy.Field()
     dh = scrapy.Field()
     games = scrapy.Field()
@@ -60,10 +62,13 @@ class PitcherStat(scrapy.Item):
 
 class OddsItem(scrapy.Item):
     date = scrapy.Field()
+    game_datetime = scrapy.Field()
     away_team = scrapy.Field()
     home_team = scrapy.Field()
     away_starter = scrapy.Field()
     home_starter = scrapy.Field()
+    away_starter_normalized = scrapy.Field()
+    home_starter_normalized = scrapy.Field()
     away_score = scrapy.Field()
     home_score = scrapy.Field()
     winner = scrapy.Field()
@@ -97,6 +102,7 @@ class LineupPlayerItem(scrapy.Item):
 
 class FRVItem(scrapy.Item):
     name = scrapy.Field()
+    normalized_player_name = scrapy.Field()
     season = scrapy.Field()
     frv = scrapy.Field()
     total_innings = scrapy.Field()

@@ -6,18 +6,19 @@ from data.loaders.base_loader import BaseDataLoader
 from datetime import date
 from typing import Union
 from itertools import islice
+from pandas.core.api import DataFrame as DataFrame
 import pandas as pd
 
 class GameLoader(BaseDataLoader):
 
     def __init__(self):
         super().__init__()
-        self.columns = ['game_id', 'game_date', 'game_datetime', 'season','away_team_abbr', 
-                        'home_team_abbr', 'dh', 'venue_name', 'status', 'away_probable_pitcher',
-                        'home_probable_pitcher', 'wind', 'condition', 'temp',  'away_score',
-                        'home_score', 'winning_team', 'losing_team']
+        self.columns = ['game_id', 'game_date', 'game_datetime', 'season','away_team', 
+                        'home_team', 'dh', 'venue_name', 'status', 'away_probable_pitcher',
+                        'home_probable_pitcher', 'away_starter_normalized', 'home_starter_normalized', 
+                        'wind', 'condition', 'temp',  'away_score', 'home_score', 'winning_team', 'losing_team']
         
-    def load_for_season(self, season: int) -> pd.DataFrame:
+    def load_for_season(self, season: int) -> DataFrame:
         """Load all games for a season"""
         params = [season]
         query = f"""
@@ -31,7 +32,7 @@ class GameLoader(BaseDataLoader):
         return self._validate_dataframe(df, self.columns)
 
 
-    def load_for_date_range(self, start: date, end: date) -> pd.DataFrame:
+    def load_for_date_range(self, start: date, end: date) -> DataFrame:
         """
         Load all games in a range of dates
         """
@@ -46,7 +47,7 @@ class GameLoader(BaseDataLoader):
         return self._validate_dataframe(df, self.columns)
 
     
-    def load_up_to_game(self, date: date, team_abbr: str, dh: int = 0) -> pd.DataFrame:
+    def load_up_to_game(self, date: date, team_abbr: str, dh: int = 0) -> DataFrame:
         """
         Load all games for a team up until date. Handles doubleheaders.
         """
@@ -56,19 +57,19 @@ class GameLoader(BaseDataLoader):
         SELECT 
         \t{",\n\t".join(self.columns)},
             CASE 
-                WHEN home_team_abbr = ? THEN 'home'
-                WHEN away_team_abbr = ? THEN 'away'
+                WHEN home_team = ? THEN 'home'
+                WHEN away_team = ? THEN 'away'
             END as team_side
         FROM schedule
         WHERE ({where})
-            AND (home_team_abbr = ? OR away_team_abbr = ?)
+            AND (home_team = ? OR away_team = ?)
         ORDER BY game_date, dh
         """
         
         all_params = [team_abbr, team_abbr] + params + [team_abbr, team_abbr]
         return self._execute_query(query, all_params)
     
-    def load_season_games(self, season: int, team_abbr: str = None) -> pd.DataFrame:
+    def load_season_games(self, season: int, team_abbr: str = None) -> DataFrame:
         """
         Load all games for a specific season, optionally filtered by team.
         """
@@ -77,7 +78,7 @@ class GameLoader(BaseDataLoader):
             SELECT 
             \t{",\n\t".join(self.columns)}
             FROM schedule 
-            WHERE season = ? AND (home_team_abbr = ? OR away_team_abbr = ?)
+            WHERE season = ? AND (home_team = ? OR away_team = ?)
             ORDER BY game_date, dh
             """
             params = [season, team_abbr, team_abbr]
@@ -92,7 +93,7 @@ class GameLoader(BaseDataLoader):
         
         return self._execute_query(query, params)
 
-    def load_up_to_game_season(self, date: date, team_abbr: str, dh: int = 0) -> pd.DataFrame:
+    def load_up_to_game_season(self, date: date, team_abbr: str, dh: int = 0) -> DataFrame:
         """
         Load all games for a team up until date within the same season only.
         """
@@ -103,8 +104,8 @@ class GameLoader(BaseDataLoader):
         SELECT 
         \t{",\n\t".join(self.columns)},
             CASE 
-                WHEN home_team_abbr = ? THEN 'home'
-                WHEN away_team_abbr = ? THEN 'away'
+                WHEN home_team = ? THEN 'home'
+                WHEN away_team = ? THEN 'away'
             END as team_side,
             CASE
                 WHEN winning_team = ? THEN 1
@@ -112,7 +113,7 @@ class GameLoader(BaseDataLoader):
             END as team_won
         FROM schedule
         WHERE season = ? AND ({where})
-            AND (home_team_abbr = ? OR away_team_abbr = ?)
+            AND (home_team = ? OR away_team = ?)
         ORDER BY game_date, dh
         """
         

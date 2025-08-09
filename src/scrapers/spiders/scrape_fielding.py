@@ -4,6 +4,7 @@ from unidecode import unidecode
 from scrapers.items import FRVItem
 from dotenv import load_dotenv
 from config import DATES
+from src.utils import normalize_names
 
 load_dotenv()
 FRV_URL = os.getenv("FRV_URL")
@@ -64,6 +65,7 @@ class fieldingSpider(scrapy.Spider):
 
             item = FRVItem()
             item['name'] = normalized_name
+            item['normalized_player_name'] = normalize_names(normalized_name)
             item['season'] = row['season']
             item['frv'] = row['run_value']
             item['total_innings'] = int(row['outs']) / 3

@@ -11,8 +11,9 @@ class OddsLoader(BaseDataLoader):
 
     def __init__(self):
         super().__init__()
-        self.columns = ['game_date', 'away_team', 'home_team', 'away_starter', 'home_starter', 'away_score', 'home_score',
-                        'winner', 'sportsbook', 'away_odds', 'home_odds', 'season']
+        self.columns = ['game_date', 'game_datetime', 'away_team', 'home_team', 'away_starter', 'home_starter', 
+                        'away_starter_normalized', 'home_starter_normalized', 'away_score',
+                        'home_score', 'winner', 'sportsbook', 'away_odds', 'home_odds', 'season']
         
     def load_for_date_range(self, start: date, end: date) -> pd.DataFrame:
         query = """
@@ -66,6 +67,7 @@ class OddsLoader(BaseDataLoader):
         query = """
         SELECT
             game_date,
+            game_datetime,
             away_team,
             home_team,
             away_starter,

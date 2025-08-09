@@ -7,9 +7,6 @@
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent))
 from config import DATABASE_PATH
 
 BOT_NAME = "scrapers"

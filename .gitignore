@@ -141,12 +141,15 @@ venv.bak/
 # DS_store
 .DS_store
 
-# json files
+# json/csv files
 *.json
 *.csv
-test*
-
 Notes.md
+
+# temp test scripts
+testDB.py
+test_games.py
+testPA.py
 
 # DB
 *.sqlite*

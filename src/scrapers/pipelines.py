@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from scrapers.items import BatterStat, PitcherStat, OddsItem, LineupItem, LineupPlayerItem, FRVItem
 from data.database import get_database_manager, execute_query
+from src.utils import normalize_names
 
 class SqlitePipeline:
     def __init__(self, db_path: str):
@@ -56,18 +57,23 @@ class SqlitePipeline:
             execute_query(
                 """
                 INSERT OR REPLACE INTO odds
-                (game_date, away_team, home_team,
+                (game_date, game_datetime, away_team, home_team,
                  away_starter, home_starter,
+                 away_starter_normalized,
+                 home_starter_normalized,
                  away_score, home_score, winner,
                  sportsbook, away_odds, home_odds, season)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     p["date"],
+                    p["game_datetime"],
                     p["away_team"],
                     p["home_team"],
                     p.get("away_starter"),
                     p.get("home_starter"),
+                    p.get("away_starter_normalized"),
+                    p.get("home_starter_normalized"),
                     p.get("away_score"),
                     p.get("home_score"),
                     p.get("winner"),
@@ -80,9 +86,10 @@ class SqlitePipeline:
             )
         elif isinstance(item, (BatterStat, PitcherStat)):
             pos = p.get("pos", 'P')
+            normalized_name = normalize_names(p['name'])
             execute_query(
-                "INSERT OR REPLACE INTO players(player_id, name, pos, current_team, last_updated) VALUES(?,?,?,?,?)",
-                (p['player_id'], p['name'], pos, p['team'], p['scraped_at']),
+                "INSERT OR REPLACE INTO players(player_id, name, normalized_player_name, pos, current_team, last_updated) VALUES(?,?,?,?,?,?)",
+                (p['player_id'], p['name'], normalized_name, pos, p['team'], p['scraped_at']),
                 readonly=False
             )
 
@@ -138,12 +145,13 @@ class SqlitePipeline:
             )
 
         elif isinstance(item, FRVItem):
+            normalized_name = normalize_names(p['name'])
             execute_query("""
                 INSERT OR REPLACE INTO fielding
-                (name, season, frv, total_innings, innings_C, innings_1B, innings_2B, 
+                (name, normalized_player_name, season, frv, total_innings, innings_C, innings_1B, innings_2B, 
                  innings_3B, innings_SS, innings_LF, innings_CF, innings_RF)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (p['name'], p['season'], p['frv'], p['total_innings'], p['innings_C'],
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (p['name'], normalized_name, p['season'], p['frv'], p['total_innings'], p['innings_C'],
                  p['innings_1B'], p['innings_2B'], p['innings_3B'], p['innings_SS'],
                  p['innings_LF'], p['innings_CF'], p['innings_RF']),
                 readonly=False

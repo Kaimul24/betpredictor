@@ -25,6 +25,9 @@ class PlayerLoader(BaseDataLoader):
         pass
 
     def load_for_season(self, season: int) -> DataFrame:
+        pass
+
+    def load_for_season_batter(self, season: int) -> DataFrame:
         params = [season]
         query = f"""
         SELECT
@@ -35,6 +38,18 @@ class PlayerLoader(BaseDataLoader):
         """
         df = self._execute_query(query, params)
         return self._validate_dataframe(df, self.batting_columns)
+    
+    def load_for_season_pitcher(self, season: int) -> DataFrame:
+        params = [season]
+        query = f"""
+        SELECT
+        \t{",\n\t".join(self.pitching_columns)}
+        FROM pitching_stats
+        WHERE season = ?
+        ORDER BY game_date, dh
+        """
+        df = self._execute_query(query, params)
+        return self._validate_dataframe(df, self.pitching_columns)
 
 
     def load_batting_stats_for_date_range(self, start: date, end: date, team_abbr: Optional[str] = None) -> DataFrame:

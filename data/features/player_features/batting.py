@@ -11,12 +11,12 @@ from data.database import get_database_manager
 
 class BattingFeatures(BaseFeatures):
 
-    def __init__(self):
-        pass
+    def __init__(self, season: int):
+        super().__init__(season)
 
-    def load_data(self, season: int) -> DataFrame:
+    def load_data(self) -> DataFrame:
         loader = PlayerLoader()
-        df = loader.load_for_season(season)
+        df = loader.load_for_season_batter(self.season)
 
         if df.empty:
             print("DF is empty")
@@ -27,7 +27,7 @@ class BattingFeatures(BaseFeatures):
         pass
 
         
-data = BattingFeatures().load_data(2021)
-print(len(data))
+# data = BattingFeatures().load_data(2021)
+# print(len(data))
 
-db = get_database_manager()
+# db = get_database_manager()

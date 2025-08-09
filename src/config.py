@@ -40,6 +40,10 @@ TEAM_TO_TEAM_ID_STATSAPI_MAP = {
     'MIL': 158
 }
 
+VENUE_ID_TO_TIMEZONE_MAP = {
+    
+}
+
 DATES = {
     '2021': [date(2021, 4, 1), date(2021, 10, 4)],
     '2022': [date(2022, 4, 7), date(2022, 10, 6)],

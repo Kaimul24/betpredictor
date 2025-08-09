@@ -45,6 +45,7 @@ class TeamLoader(BaseDataLoader):
             season,
             team, 
             player_name,
+            normalized_player_name,
             position,
             status
         FROM rosters
