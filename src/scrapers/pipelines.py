@@ -11,6 +11,7 @@ from pathlib import Path
 from scrapers.items import BatterStat, PitcherStat, OddsItem, LineupItem, LineupPlayerItem, FRVItem
 from data.database import get_database_manager, execute_query
 from src.utils import normalize_names
+from src.tools.update_table_columns import auto_update_schema_for_tool
 
 class SqlitePipeline:
     def __init__(self, db_path: str):
@@ -34,13 +35,22 @@ class SqlitePipeline:
             for table in tables_to_drop:
                 execute_query(f"DROP TABLE IF EXISTS {table}", readonly=False)
         if spider.name == 'odds':
-            execute_query("DROP TABLE IF EXISTS odds", readonly=False)
+            # Drop tables that might have schema conflicts
+            # Need to drop in order to avoid foreign key constraint errors
+            tables_to_drop = ['odds']
+            for table in tables_to_drop:
+                execute_query(f"DROP TABLE IF EXISTS {table}", readonly=False)
 
         if spider.name == 'fielding':
             execute_query("DROP TABLE IF EXISTS fielding", readonly=False)
         
         # Initialize schema
         self.db_manager.initialize_schema()
+        
+        # Ensure schema is up to date with any missing columns
+        schema_updated = auto_update_schema_for_tool(f"scraper_{spider.name}")
+        if not schema_updated:
+            spider.logger.warning("Schema update check failed, but continuing with scraping")
 
     def close_spider(self, spider):
         # No need to explicitly close connections - handled by database manager

@@ -150,6 +150,8 @@ Notes.md
 testDB.py
 test_games.py
 testPA.py
+test_weather.py
+test_sch.py
 
 # DB
 *.sqlite*
