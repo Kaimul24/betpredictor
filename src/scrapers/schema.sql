@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS schedule (
   game_id       TEXT PRIMARY KEY,
   game_date     TEXT NOT NULL,
   game_datetime TEXT,
+  day_night_game TEXT,
   season        INTEGER NOT NULL,
   away_team     TEXT NOT NULL,
   home_team     TEXT NOT NULL,
@@ -49,12 +50,6 @@ CREATE TABLE IF NOT EXISTS schedule (
   losing_team   TEXT,
   scraped_at    TEXT
 );
-
-CREATE INDEX IF NOT EXISTS idx_schedule_date
-  ON schedule(game_date);
-
-CREATE INDEX IF NOT EXISTS idx_schedule_teams
-  ON schedule(away_team, home_team);
 
 CREATE INDEX IF NOT EXISTS idx_schedule_year
   ON schedule(season);
@@ -253,3 +248,15 @@ CREATE INDEX IF NOT EXISTS idx_players_normalized_name
 
 CREATE INDEX IF NOT EXISTS idx_rosters_normalized_name
   ON rosters(normalized_player_name);
+
+CREATE TABLE IF NOT EXISTS park_factors (
+  venue_id     INTEGER,
+  venue_name   TEXT,
+  season       INTEGER,
+  park_factor  INTEGER,
+  scraped_at   TEXT,
+  PRIMARY KEY (venue_id, season)
+)
+
+CREATE INDEX IF NOT EXISTS idx_park_factors_season
+  ON park_factors(season)

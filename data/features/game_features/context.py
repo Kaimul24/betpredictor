@@ -1,5 +1,5 @@
 """
-Handles weather, venue/park factors, game time metrics.
+Handles weather, venue/park factors, game time metrics. Also handles home/away score targets.
 """
 
 import pandas as pd
@@ -19,15 +19,33 @@ class GameContextFeatures(BaseFeatures):
     def load_data(self) -> DataFrame:
         return self.schedule_data
     
-    def weather_features(self) -> DataFrame:
+    def create_features(self):
+        """
+        Performs feature engineering for game context features such as weather,
+        venue, park factors, day/night game, etc. 
+        
+        
+        """
         pass
+    
+    def load_game_scores(self) -> DataFrame:
+        pass
+    
+    def weather_features(self) -> DataFrame:
+        "Returns all weather features. Calls helper functions for condition and wind"
+        wind_cols = self._encode_wind()
+        condition_cols = self._encode_condition()
+        temp = self.schedule_data['temp']
+        return pd.concat([temp.reset_index(drop=True),
+                            condition_cols.reset_index(drop=True),
+                            wind_cols.reset_index(drop=True)], axis=1)
 
-    def _get_park_factor(self):
+    def _get_park_metrics(self):
         pass
 
     def _relative_game_time(self):
         pass
-
+    
     
 
     def _encode_wind(self) -> DataFrame:

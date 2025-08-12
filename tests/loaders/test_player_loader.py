@@ -71,13 +71,13 @@ class TestPlayerLoader:
     
     def test_load_for_season_basic(self, player_loader, sample_batting_stats):
         """Test loading batting stats for a season"""
-        df = player_loader.load_for_season(season=2024)
+        df = player_loader.load_for_season_batter(season=2024)
         assert_dataframe_not_empty(df)
         assert len(df) == 6
 
     def test_load_for_season_invalid_season(self, player_loader, sample_batting_stats):
         """Test loading batting stats for an invalid season"""
-        df = player_loader.load_for_season(season=2020)
+        df = player_loader.load_for_season_batter(season=2020)
         assert len(df) == 0
 
     def test_load_batter_stats_basic(self, player_loader, sample_batting_stats):

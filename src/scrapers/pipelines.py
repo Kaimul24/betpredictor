@@ -8,7 +8,7 @@
 from itemadapter import ItemAdapter
 import json
 from pathlib import Path
-from scrapers.items import BatterStat, PitcherStat, OddsItem, LineupItem, LineupPlayerItem, FRVItem
+from scrapers.items import BatterStat, PitcherStat, OddsItem, LineupItem, LineupPlayerItem, FRVItem, ParkFactorItem
 from data.database import get_database_manager, execute_query
 from src.utils import normalize_names
 from src.tools.update_table_columns import auto_update_schema_for_tool
@@ -57,7 +57,7 @@ class SqlitePipeline:
         pass
 
     def process_item(self, item, spider):
-        if not isinstance(item, (OddsItem, BatterStat, PitcherStat, LineupItem, LineupPlayerItem, FRVItem)):
+        if not isinstance(item, (ParkFactorItem, OddsItem, BatterStat, PitcherStat, LineupItem, LineupPlayerItem, FRVItem)):
             return item
 
         p = ItemAdapter(item)
@@ -94,6 +94,15 @@ class SqlitePipeline:
                 ),
                 readonly=False
             )
+
+        elif isinstance(item, ParkFactorItem):
+            
+            execute_query(
+                "INSERT OR REPLACE INTO park_factors(venue_id, venue_name, season, park_factor, scraped_at) VALUES(?,?,?,?,?)",
+                (p['venue_id'], p['venue_name'], p['season'], p['park_factor'], p['scraped_at']),
+                readonly=False
+            )
+
         elif isinstance(item, (BatterStat, PitcherStat)):
             pos = p.get("pos", 'P')
             normalized_name = normalize_names(p['name'])

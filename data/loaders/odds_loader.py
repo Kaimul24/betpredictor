@@ -29,9 +29,10 @@ class OddsLoader(BaseDataLoader):
     def load_for_season(self, season: int) -> pd.DataFrame:
         """Load all odds for a season"""
         params = [season]
+        columns_str = ",\n\t".join(self.columns)
         query = f"""
         SELECT 
-        \t{",\n\t".join(self.columns)}
+        \t{columns_str}
         FROM odds
         WHERE season = ?
         ORDER BY game_date

@@ -29,9 +29,10 @@ class PlayerLoader(BaseDataLoader):
 
     def load_for_season_batter(self, season: int) -> DataFrame:
         params = [season]
+        columns_str = ",\n\t".join(self.batting_columns)
         query = f"""
         SELECT
-        \t{",\n\t".join(self.batting_columns)}
+        \t{columns_str}
         FROM batting_stats
         WHERE season = ?
         ORDER BY game_date, dh
@@ -41,9 +42,10 @@ class PlayerLoader(BaseDataLoader):
     
     def load_for_season_pitcher(self, season: int) -> DataFrame:
         params = [season]
+        columns_str = ",\n\t".join(self.pitching_columns)
         query = f"""
         SELECT
-        \t{",\n\t".join(self.pitching_columns)}
+        \t{columns_str}
         FROM pitching_stats
         WHERE season = ?
         ORDER BY game_date, dh
@@ -60,9 +62,10 @@ class PlayerLoader(BaseDataLoader):
             team_filter = "AND team = ?"
             params.append(team_abbr)
 
+        columns_str = ",\n\t".join(self.batting_columns)
         query = f"""
         SELECT
-        \t{",\n\t".join(self.batting_columns)}
+        \t{columns_str}
         FROM batting_stats
         WHERE game_date BETWEEN ? AND ? {team_filter}
         ORDER by game_date, dh
@@ -73,9 +76,10 @@ class PlayerLoader(BaseDataLoader):
 
     def load_batting_stats_up_to_game(self, date: date, team_abbr: str, dh: int = 0) -> DataFrame:
         where, params = self._time_filter(date, dh)
+        columns_str = ",\n\t".join(self.batting_columns)
         query = f"""
         SELECT
-        \t{",\n\t".join(self.batting_columns)}
+        \t{columns_str}
         FROM batting_stats
         WHERE ({where}) AND team = ?
         ORDER by game_date, dh
@@ -91,9 +95,10 @@ class PlayerLoader(BaseDataLoader):
             team_filter = "AND team = ?"
             params.append(team_id)
         
+        columns_str = ",\n\t".join(self.pitching_columns)
         query = f"""
         SELECT
-        \t{",\n\t".join(self.pitching_columns)}
+        \t{columns_str}
         FROM pitching_stats
         WHERE game_date BETWEEN ? AND ? {team_filter}
         ORDER by game_date, dh
@@ -104,9 +109,10 @@ class PlayerLoader(BaseDataLoader):
     
     def load_pitching_stats_up_to_game(self, date: date, team_abbr: str, dh: int = 0) -> DataFrame:
         where, params = self._time_filter(date, dh)
+        columns_str = ",\n\t".join(self.pitching_columns)
         query = f"""
         SELECT
-        \t{",\n\t".join(self.pitching_columns)}
+        \t{columns_str}
         FROM pitching_stats
         WHERE ({where}) AND team = ?
         ORDER by game_date, dh
@@ -122,9 +128,10 @@ class PlayerLoader(BaseDataLoader):
             year_filter = "AND season = ?"
             params.append(season)
 
+        columns_str = ",\n\t".join(self.batting_columns)
         query = f"""
         SELECT
-        \t{",\n\t".join(self.batting_columns)}
+        \t{columns_str}
         FROM batting_stats
         WHERE player_id = ? {year_filter}
         ORDER BY game_date, dh
@@ -140,9 +147,10 @@ class PlayerLoader(BaseDataLoader):
             year_filter = "AND season = ?"
             params.append(season)
 
+        columns_str = ",\n\t".join(self.pitching_columns)
         query = f"""
         SELECT
-        \t{",\n\t".join(self.pitching_columns)}
+        \t{columns_str}
         FROM pitching_stats
         WHERE player_id = ? {year_filter}
         ORDER BY game_date, dh

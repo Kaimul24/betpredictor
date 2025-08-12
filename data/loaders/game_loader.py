@@ -13,17 +13,19 @@ class GameLoader(BaseDataLoader):
 
     def __init__(self):
         super().__init__()
-        self.columns = ['game_id', 'game_date', 'game_datetime', 'season','away_team', 
-                        'home_team', 'dh', 'venue_name', 'status', 'away_probable_pitcher',
-                        'home_probable_pitcher', 'away_starter_normalized', 'home_starter_normalized', 
-                        'wind', 'condition', 'temp',  'away_score', 'home_score', 'winning_team', 'losing_team']
+        self.columns = ['game_id', 'game_date', 'game_datetime', 'day_night_game', 'season','away_team', 
+                        'home_team', 'dh', 'venue_name', 'venue_id', 'venue_elevation', 'venue_timezone',
+                        'venue_gametime_offset', 'status', 'away_probable_pitcher','home_probable_pitcher', 
+                        'away_starter_normalized', 'home_starter_normalized', 'wind', 'condition', 
+                        'temp',  'away_score', 'home_score', 'winning_team', 'losing_team']
         
     def load_for_season(self, season: int) -> DataFrame:
         """Load all games for a season"""
         params = [season]
+        columns_str = ",\n\t".join(self.columns)
         query = f"""
         SELECT 
-        \t{",\n\t".join(self.columns)}
+        \t{columns_str}
         FROM schedule
         WHERE season = ?
         ORDER BY game_date, dh
@@ -36,9 +38,10 @@ class GameLoader(BaseDataLoader):
         """
         Load all games in a range of dates
         """
+        columns_str = ",\n\t".join(self.columns)
         query = f"""
         SELECT 
-        \t{",\n\t".join(self.columns)}
+        \t{columns_str}
         FROM schedule
         WHERE game_date BETWEEN ? and ?
         ORDER BY game_date, dh
@@ -52,10 +55,11 @@ class GameLoader(BaseDataLoader):
         Load all games for a team up until date. Handles doubleheaders.
         """
         where, params = self._time_filter(date, dh)
+        columns_str = ",\n\t".join(self.columns)
 
         query = f"""
         SELECT 
-        \t{",\n\t".join(self.columns)},
+        \t{columns_str},
             CASE 
                 WHEN home_team = ? THEN 'home'
                 WHEN away_team = ? THEN 'away'
@@ -73,10 +77,11 @@ class GameLoader(BaseDataLoader):
         """
         Load all games for a specific season, optionally filtered by team.
         """
+        columns_str = ",\n\t".join(self.columns)
         if team_abbr:
             query = f"""
             SELECT 
-            \t{",\n\t".join(self.columns)}
+            \t{columns_str}
             FROM schedule 
             WHERE season = ? AND (home_team = ? OR away_team = ?)
             ORDER BY game_date, dh
@@ -84,7 +89,7 @@ class GameLoader(BaseDataLoader):
             params = [season, team_abbr, team_abbr]
         else:
             query = f"""
-            SELECT \t{",\n\t".join(self.columns)} 
+            SELECT \t{columns_str} 
             FROM schedule 
             WHERE season = ?
             ORDER BY game_date, dh
@@ -99,10 +104,11 @@ class GameLoader(BaseDataLoader):
         """
         season = date.year
         where, params = self._time_filter(date, dh)
+        columns_str = ",\n\t".join(self.columns)
         
         query = f"""
         SELECT 
-        \t{",\n\t".join(self.columns)},
+        \t{columns_str},
             CASE 
                 WHEN home_team = ? THEN 'home'
                 WHEN away_team = ? THEN 'away'

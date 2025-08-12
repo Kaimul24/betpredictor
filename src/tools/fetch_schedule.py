@@ -1,9 +1,7 @@
 import statsapi
-import requests
 import time
-import json
 import logging
-from typing import Tuple, Union, List
+from typing import Tuple, List
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from src.config import DATES, TEAM_ABBR_MAP, TEAM_TO_TEAM_ID_STATSAPI_MAP
@@ -47,43 +45,6 @@ def fetch_roster_for_date(team: str, date: str) -> List[Tuple[str, str, str, str
 
     return roster_data
 
-# def fetch_game_weather(gamePk: int, gameDateTime: str) -> Tuple[str, str, Union[int, None]]:
-#     max_retries = 3
-#     retry_delay = 1
-    
-#     for attempt in range(max_retries):
-#         try:
-#             g = statsapi.get('game', {'gamePk': gamePk}, force=False)
-#             weather = g['gameData']['weather']
-#             games_received.add(f'{gamePk}, {gameDateTime}')
-#             wind = weather.get('wind', '')
-#             condition = weather.get('condition', '')
-#             temp = weather.get('temp', None)
-
-#             if wind == '' or condition =='' or temp == None:
-#                 logger.info("Successful weather API call, but some values are null")
-#                 logger.info(f"Game: {gamePk} Date: {gameDateTime}")
-#                 logger.info(f"Wind: {wind}; Condition {condition}; Temp {temp}")
-#             return wind, condition, temp
-            
-#         except (requests.exceptions.ConnectTimeout, 
-#                 requests.exceptions.ConnectionError,
-#                 requests.exceptions.ReadTimeout) as e:
-            
-#             if attempt < max_retries - 1: 
-#                 logger.warning(f"API timeout for game {gamePk}, retrying in {retry_delay} seconds... (attempt {attempt + 1}/{max_retries})")
-#                 time.sleep(retry_delay)
-#                 retry_delay *= 2
-#             else:
-#                 logger.error(f"Failed to fetch weather for game {gamePk} after {max_retries} attempts: {e}")
-#                 return '', '', None
-            
-#         except Exception as e:
-#             logger.error(f"Unknown error fetching weather for game {gamePk}: {e}")
-#             return '', '', None
-    
-#     return '', '', None
-
 def fetch_schedule():
     db_manager = get_database_manager()
     
@@ -91,7 +52,6 @@ def fetch_schedule():
         db_manager.initialize_schema(force_recreate=False)
         logger.info("Database schema initialized.")
         
-        # Ensure schema is up to date with any missing columns
         schema_updated = auto_update_schema_for_tool("fetch_schedule")
         if not schema_updated:
             logger.warning("Schema update check failed, but continuing with schedule fetch")
@@ -224,6 +184,7 @@ def fetch_schedule():
                             
                             game_date_str = game['officialDate']
                             gameDateTime = game['gameDate']
+                            day_night_game = game['dayNight']
 
                             weather_data = game.get('weather', {})
                             weather_condition = weather_data.get('condition', None)
@@ -265,6 +226,7 @@ def fetch_schedule():
                                 gamePk,
                                 game_date_str,
                                 normalize_datetime_string(gameDateTime),
+                                day_night_game,
                                 year,
                                 away_abbr,
                                 home_abbr,
@@ -325,12 +287,12 @@ def fetch_schedule():
                     if schedule_batch_data:
                         db_manager.execute_many_write_queries("""
                             INSERT OR REPLACE INTO schedule (
-                                game_id, game_date, game_datetime, season, away_team, home_team,
-                                dh, venue_name, venue_id, venue_elevation, venue_timezone, 
+                                game_id, game_date, game_datetime, day_night_game, season, away_team, 
+                                home_team, dh, venue_name, venue_id, venue_elevation, venue_timezone, 
                                 venue_gametime_offset, status, away_probable_pitcher, home_probable_pitcher, 
                                 away_starter_normalized, home_starter_normalized, wind, condition, temp,
                                 away_score, home_score, winning_team, losing_team,  scraped_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, schedule_batch_data)
                     
                     if roster_batch_data:

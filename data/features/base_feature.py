@@ -13,3 +13,7 @@ class BaseFeatures(ABC):
     @abstractmethod
     def load_data(self) -> DataFrame:
         pass
+
+    @abstractmethod
+    def create_features(self) -> DataFrame:
+        pass

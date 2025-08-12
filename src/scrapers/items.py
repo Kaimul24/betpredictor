@@ -114,3 +114,10 @@ class FRVItem(scrapy.Item):
     innings_LF = scrapy.Field()
     innings_CF = scrapy.Field()
     innings_RF = scrapy.Field()
+
+class ParkFactorItem(scrapy.Item):
+    venue_id = scrapy.Field()
+    venue_name = scrapy.Field()
+    season = scrapy.Field()
+    park_factor = scrapy.Field()
+    scraped_at = scrapy.Field()
