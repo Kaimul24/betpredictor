@@ -77,6 +77,7 @@ class TeamLoader(BaseDataLoader):
         SELECT
             game_date,
             team,
+            opposing_team,
             dh,
             player_id,
             position,

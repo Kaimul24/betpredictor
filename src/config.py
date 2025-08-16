@@ -5,6 +5,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 DATABASE_PATH = PROJECT_ROOT / 'data' / 'mlb_stats.sqlite'
 SCHEMA_PATH = PROJECT_ROOT / 'src' / 'scrapers' / 'schema.sql'
+FEATURES_CACHE_PATH = PROJECT_ROOT / 'data' / 'features' 
 
 TEAM_TO_TEAM_ID_STATSAPI_MAP = {
     'LAA': 108,
@@ -102,7 +103,40 @@ TEAM_ABBR_MAP = {
     'Tampa Bay Rays': 'TBR',
     'Texas Rangers': 'TEX',
     'Toronto Blue Jays': 'TOR',
-    'Washington Nationals': 'WSN'
+    'Washington Nationals': 'WSN',
+    'Diamondbacks': 'ARI',
+    'Braves': 'ATL',
+    'Orioles': 'BAL',
+    'Red Sox': 'BOS',
+    'Cubs': 'CHC',
+    'White Sox': 'CHW',
+    'Reds': 'CIN',
+    'Cleveland': 'CLE',
+    'Guardians': 'CLE',
+    'Indians': 'CLE',
+    'Rockies': 'COL',
+    'Tigers': 'DET',
+    'Astros': 'HOU',
+    'Royals': 'KCR',
+    'Angels': 'LAA',
+    'Dodgers': 'LAD',
+    'Marlins': 'MIA',
+    'Brewers': 'MIL',
+    'Twins': 'MIN',
+    'Mets': 'NYM',
+    'Yankees': 'NYY',
+    'Athletics': 'ATH',
+    'Athletics': 'ATH',
+    'Phillies': 'PHI',
+    'Pirates': 'PIT',
+    'Padres': 'SDP',
+    'Giants': 'SFG',
+    'Mariners': 'SEA',
+    'Cardinals': 'STL',
+    'Rays': 'TBR',
+    'Rangers': 'TEX',
+    'Blue Jays': 'TOR',
+    'Nationals': 'WSN',
 }
 
 ODDS_TEAM_ABBR_MAP = {

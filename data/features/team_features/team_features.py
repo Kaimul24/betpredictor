@@ -7,7 +7,7 @@ from data.features.base_feature import BaseFeatures
 from pandas.core.api import DataFrame as DataFrame
 from typing import Optional
 
-class ScheduleFeatures(BaseFeatures):
+class TeamFeatures(BaseFeatures):
 
     def __init__(self, season: int):
         super().__init__(season)
@@ -31,9 +31,9 @@ class ScheduleFeatures(BaseFeatures):
     
 
 def main():
-    sch_feats = ScheduleFeatures(2021)
-    sch_data = sch_feats.load_data()
-    print(len(sch_data))
+    team_feats = TeamFeatures(2021)
+    team_data = team_feats.load_data()
+    print(len(team_data))
 
 if __name__ == "__main__":
     main()  

@@ -19,6 +19,8 @@ class GameLoader(BaseDataLoader):
                         'away_starter_normalized', 'home_starter_normalized', 'wind', 'condition', 
                         'temp',  'away_score', 'home_score', 'winning_team', 'losing_team']
         
+        self.venue_columns = ['venue_id', 'venue_name', 'season', 'park_factor']
+        
     def load_for_season(self, season: int) -> DataFrame:
         """Load all games for a season"""
         params = [season]
@@ -125,4 +127,19 @@ class GameLoader(BaseDataLoader):
         
         all_params = [team_abbr] * 3 + [season] + params + [team_abbr] * 2
         return self._execute_query(query, all_params)
+    
+    def load_park_factor_season(self, season: int) -> DataFrame:
+        """
+        Load park factor metrics for a season
+        """
+        columns_str = ",\n\t".join(self.venue_columns)
+        query = f"""
+        SELECT
+        \t{columns_str}
+        FROM park_factors
+        WHERE season = ? 
+            AND park_factor IS NOT NULL;
+        """
+        df = self._execute_query(query, params=[season])
+        return self._validate_dataframe(df, self.venue_columns)
 

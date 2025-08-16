@@ -63,7 +63,7 @@ def clean_db(synthetic_db):
     """
     tables = [
         'lineup_players', 'lineups', 'batting_stats', 'pitching_stats', 
-        'fielding', 'rosters', 'odds', 'schedule', 'players'
+        'fielding', 'rosters', 'odds', 'schedule', 'players', 'park_factors'
     ]
     
     with synthetic_db.get_writer_connection() as conn:
@@ -256,6 +256,23 @@ def insert_rosters(dbm, roster: List[Tuple]) -> None:
         roster_with_normalized.append((game_date, season, team, player_name, normalized_name, position, status))
 
     dbm.execute_many_write_queries(query, roster_with_normalized)
+
+
+def insert_park_factors(dbm, park_factors: List[Tuple]) -> None:
+    """
+    Insert park factor data for testing.
+    
+    Args:
+        dbm: Database manager instance
+        park_factors: List of tuples with park factor data
+                     (venue_id, venue_name, season, park_factor)
+    """
+    query = """
+    INSERT INTO park_factors (venue_id, venue_name, season, park_factor) 
+    VALUES (?, ?, ?, ?)
+    """
+    
+    dbm.execute_many_write_queries(query, park_factors)
 
 
 def assert_dataframe_schema(df: pd.DataFrame, expected_columns: List[str]) -> None:

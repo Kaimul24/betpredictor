@@ -171,3 +171,12 @@ CREATE TABLE IF NOT EXISTS rosters (
   PRIMARY KEY (game_date, player_name, team)
 );
 
+CREATE TABLE IF NOT EXISTS park_factors (
+  venue_id     INTEGER,
+  venue_name   TEXT,
+  season       INTEGER,
+  park_factor  INTEGER,
+  scraped_at   TEXT,
+  PRIMARY KEY (venue_id, season)
+);
+

@@ -2,7 +2,7 @@ import scrapy
 import json
 from dotenv import load_dotenv
 import os
-from config import DATES, LG_AVG_STATS
+from config import DATES, LG_AVG_STATS, TEAM_ABBR_MAP
 from scrapers.items import BatterStat, PitcherStat, LineupItem, LineupPlayerItem
 from datetime import datetime
 from src.utils import normalize_names
@@ -91,13 +91,24 @@ class fgSpider(scrapy.Spider):
                     continue
 
                 self.seen_player_season.add(id)
+                team = game_info['Team']
+                team_abbr = TEAM_ABBR_MAP.get(team, None)
+                if team_abbr == None:
+                    raise ValueError(f"Bug in team abbr map: {team}")
+                
+                opposing_team = game_info['oppTeam']
+                opposing_team_abbr = TEAM_ABBR_MAP.get(opposing_team, None)
+                if opposing_team_abbr == None:
+                    raise ValueError(f"Bug in team opp abbr map: {opposing_team}")
 
                 player_item = LineupPlayerItem()
                 player_item['date'] = game_info['gameDate'][:10]
                 player_item['season'] = year
                 player_item['dh'] = game_info['dh']
                 player_item['team_id'] = game_info['teamid']
-                player_item['team'] = game_info['Team']
+                player_item['team'] = team_abbr
+                player_item['opposing_team_id'] = game_info['oppteamid']
+                player_item['opposing_team'] = opposing_team_abbr
                 player_item['player_id'] = id
                 player_item['position'] = pos
                 player_item['batting_order'] = batting_order

@@ -31,29 +31,35 @@ class SqlitePipeline:
         )
 
         if spider.name == 'fg':
-            tables_to_drop = ['lineup_players', 'lineups', 'batting_stats', 'pitching_stats', 'players']
+            execute_query("PRAGMA foreign_keys = OFF", readonly=False)
+            tables_to_drop = [
+                'lineup_players', 
+                'lineups', 
+                'batting_stats', 
+                'pitching_stats',
+                'players'
+            ]
             for table in tables_to_drop:
                 execute_query(f"DROP TABLE IF EXISTS {table}", readonly=False)
+                
+            execute_query("PRAGMA foreign_keys = ON", readonly=False)
+            
         if spider.name == 'odds':
-            # Drop tables that might have schema conflicts
-            # Need to drop in order to avoid foreign key constraint errors
+
             tables_to_drop = ['odds']
             for table in tables_to_drop:
                 execute_query(f"DROP TABLE IF EXISTS {table}", readonly=False)
 
         if spider.name == 'fielding':
             execute_query("DROP TABLE IF EXISTS fielding", readonly=False)
-        
-        # Initialize schema
+
         self.db_manager.initialize_schema()
-        
-        # Ensure schema is up to date with any missing columns
+
         schema_updated = auto_update_schema_for_tool(f"scraper_{spider.name}")
         if not schema_updated:
             spider.logger.warning("Schema update check failed, but continuing with scraping")
 
     def close_spider(self, spider):
-        # No need to explicitly close connections - handled by database manager
         pass
 
     def process_item(self, item, spider):
@@ -72,8 +78,9 @@ class SqlitePipeline:
                  away_starter_normalized,
                  home_starter_normalized,
                  away_score, home_score, winner,
-                 sportsbook, away_odds, home_odds, season)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 sportsbook, away_opening_odds, home_opening_odds,
+                  away_current_odds, home_current_odds, season)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?)
                 """,
                 (
                     p["date"],
@@ -88,8 +95,10 @@ class SqlitePipeline:
                     p.get("home_score"),
                     p.get("winner"),
                     p["sportsbook"],
-                    p["away_odds"],
-                    p["home_odds"],
+                    p["away_opening_odds"],
+                    p["home_opening_odds"],
+                    p["away_current_odds"],
+                    p["home_current_odds"],
                     p['season'],
                 ),
                 readonly=False
@@ -156,9 +165,9 @@ class SqlitePipeline:
             
             execute_query("""
                 INSERT OR REPLACE INTO lineup_players
-                (game_date, team_id, team, dh, player_id, position, batting_order, season, scraped_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (p['date'], p['team_id'], p['team'], p['dh'], p['player_id'],
+                (game_date, team_id, team, opposing_team_id, opposing_team, dh, player_id, position, batting_order, season, scraped_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (p['date'], p['team_id'], p['team'], p['opposing_team_id'], p['opposing_team'], p['dh'], p['player_id'],
                  p['position'], p['batting_order'], p['season'], p['scraped_at']),
                 readonly=False
             )

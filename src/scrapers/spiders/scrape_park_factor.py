@@ -40,41 +40,39 @@ class pfSpider(scrapy.Spider):
             "Sec-Fetch-Mode": "cors",
         }
 
-        yield scrapy.Request(
-            PF_URL,
-            cookies=self.cookies,
-            headers=json_headers,
-            callback=self.parse
-        )
+        for year in DATES.keys():
+            url = PF_URL.format(year)
 
-    def parse(self, response):
+            yield scrapy.Request(
+                url,
+                cookies=self.cookies,
+                headers=json_headers,
+                callback=self.parse,
+                cb_kwargs={'year': year}
+            )
+
+    def parse(self, response, year):
         script_text = "".join(response.css("div.article-template script::text").getall())
 
         if not script_text:
             script_text = response.text
 
-        m = re.search(r"var\s+data\s*=\s*(\[[\s\S]*?\])\s*;", script_text)
-        if not m:
+        data = re.search(r"var\s+data\s*=\s*(\[[\s\S]*?\])\s*;", script_text)
+        if not data:
             self.logger.error("Couldn't find `var data = [...]` on the page.")
             return
 
-        raw_json = m.group(1)
+        raw_json = data.group(1)
         rows = json.loads(raw_json)
 
         for row in rows:
-            for year in DATES.keys():
-                item = ParkFactorItem()
-                venue_id = row['venue_id']
-                venue_name = row['venue_name']
-                pf_year_str = f"metric_value_{year}"
-                park_factor_year = row[pf_year_str]
-
-                item['venue_id'] = venue_id
-                item['venue_name'] = venue_name
-                item['season'] = year
-                item['park_factor'] = park_factor_year
-                item['scraped_at'] = datetime.now()
-                yield item
+            item = ParkFactorItem()
+            item['venue_id'] = row['venue_id']
+            item['venue_name'] = row['venue_name']
+            item['season'] = year
+            item['park_factor'] = row['index_woba']
+            item['scraped_at'] = datetime.now()
+            yield item
                 
 
 

@@ -73,8 +73,10 @@ class OddsItem(scrapy.Item):
     home_score = scrapy.Field()
     winner = scrapy.Field()
     sportsbook = scrapy.Field()
-    away_odds = scrapy.Field()
-    home_odds = scrapy.Field()
+    away_opening_odds = scrapy.Field()
+    home_opening_odds = scrapy.Field()
+    away_current_odds = scrapy.Field()
+    home_current_odds = scrapy.Field()
     season = scrapy.Field()
 
 class LineupItem(scrapy.Item):
@@ -94,6 +96,8 @@ class LineupPlayerItem(scrapy.Item):
     dh = scrapy.Field()
     team_id = scrapy.Field()
     team = scrapy.Field()
+    opposing_team_id = scrapy.Field()
+    opposing_team = scrapy.Field()
     player_id = scrapy.Field()
     position = scrapy.Field()
     batting_order = scrapy.Field()

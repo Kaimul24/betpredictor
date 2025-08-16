@@ -1,5 +1,6 @@
 """
 Handles computation of pitching stats features. Classifies each pitcher as starter/reliever.
+Also handles bullpen status
 """
 
 import pandas as pd

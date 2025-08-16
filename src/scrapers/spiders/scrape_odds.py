@@ -57,8 +57,15 @@ class oddsSpider(scrapy.Spider):
                 )
 
     def parse(self, response, date, year):
-        payload = json.loads(response.text)
-        x = payload['pageProps']['oddsTables']
+        # raw_html = response.css('script#__NEXT_DATA__::text').get()
+
+        # if raw_html is None:
+        #     raise ValueError("No __NEXT_DATA__ script tag found on page; check url")
+        
+        # payload = json.loads(raw_html)
+        raw_json = response.css('script#__NEXT_DATA__::text').get()
+        payload = json.loads(raw_json)
+        x = payload['props']['pageProps']['oddsTables']
 
         if x == []:
             self.logger.warning(f"No odds data found for date: {date}")
@@ -116,7 +123,27 @@ class oddsSpider(scrapy.Spider):
                     item['home_score'] = home_score
                     item['winner'] = winner
                     item['sportsbook'] = odds['sportsbook']
-                    item['away_odds'] = odds['openingLine']['awayOdds']
-                    item['home_odds'] = odds['openingLine']['homeOdds']
+                    item['away_opening_odds'] = odds['openingLine']['awayOdds']
+                    item['home_opening_odds'] = odds['openingLine']['homeOdds']
+                    item['away_current_odds'] = odds['currentLine']['awayOdds']
+                    item['home_current_odds'] = odds['currentLine']['homeOdds']
+                    
                     item['season'] = year
                     yield item
+
+
+"""
+"page": "/betting-odds/[league]",
+            "query": {
+                "date": "2021-04-14",
+                "league": "mlb-baseball"
+            },
+            "buildId": "nOwST0v5KNHMp7dxb-TIk",
+            "assetPrefix": "/sbr-odds",
+            "isFallback": false,
+            "gssp": true,
+            "appGip": true,
+            "scriptLoader": [
+            ]
+
+"""

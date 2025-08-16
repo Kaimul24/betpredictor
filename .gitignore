@@ -137,6 +137,8 @@ env.bak/
 venv.bak/
 .betpredictor
 .betpredictorOLD
+.github
+*.parquet
 
 # DS_store
 .DS_store

@@ -1,56 +1,61 @@
 """
-Handles weather, venue/park factors, game time metrics. Also handles home/away score targets.
+Handles weather, venue/park factors, game time metrics.
 """
 
 import pandas as pd
 from data.features.base_feature import BaseFeatures
+from data.loaders.game_loader import GameLoader
 from pandas.core.api import DataFrame as DataFrame
 from sklearn.preprocessing import OneHotEncoder
 
-from data.database import get_database_manager
-
-
 class GameContextFeatures(BaseFeatures):
 
-    def __init__(self, season: int, schedule_data: DataFrame) -> None:
-        super().__init__(season)
-        self.schedule_data = schedule_data
+    def __init__(self, data: DataFrame, season: int) -> None:
+        super().__init__(season, data)
+
+        self.park_factor_data = GameLoader().load_park_factor_season(season)
 
     def load_data(self) -> DataFrame:
-        return self.schedule_data
+        return self.data
     
-    def create_features(self):
+    def load_features(self) -> DataFrame:
         """
         Performs feature engineering for game context features such as weather,
         venue, park factors, day/night game, etc. 
-        
-        
         """
-        pass
+        self.data = self.data.reset_index().copy()
+        weather_features = self._create_weather_features()
+        day_night_col = self._day_night_game()
+
+        venue_to_park_factor = self.park_factor_data.set_index('venue_id')['park_factor'].copy()
+        self.data['park_factor'] = self.data['venue_id'].map(venue_to_park_factor)
+
+        essential_cols = ['game_id', 'game_date', 'game_datetime', 'away_team', 'home_team', 'dh', 'park_factor', 'venue_elevation']
+        context_data = self.data[essential_cols].copy()
+
+        return pd.concat([context_data.reset_index(drop=True),
+            weather_features.reset_index(drop=True),
+            day_night_col.reset_index(drop=True)], axis=1
+        )
     
-    def load_game_scores(self) -> DataFrame:
-        pass
+    def _day_night_game(self) -> DataFrame:
+        """Binary encoding of the day_night column. 1 is day, 0 is night."""
+        day_night_col = self.data[['day_night_game']].copy()
+        day_night_game = (day_night_col == "day").astype(int)
+        return day_night_game
     
-    def weather_features(self) -> DataFrame:
+    def _create_weather_features(self) -> DataFrame:
         "Returns all weather features. Calls helper functions for condition and wind"
         wind_cols = self._encode_wind()
         condition_cols = self._encode_condition()
-        temp = self.schedule_data['temp']
+        temp = self.data['temp']
         return pd.concat([temp.reset_index(drop=True),
                             condition_cols.reset_index(drop=True),
                             wind_cols.reset_index(drop=True)], axis=1)
 
-    def _get_park_metrics(self):
-        pass
-
-    def _relative_game_time(self):
-        pass
-    
-    
-
     def _encode_wind(self) -> DataFrame:
         """Encodes the wind column."""
-        wind_encoded = self.schedule_data[['wind']].copy()
+        wind_encoded = self.data[['wind']].copy()
         wind_encoded[['wind_magnitude' , 'wind_direction']] \
             = wind_encoded['wind'].str.split(',', expand=True)
         
@@ -85,7 +90,7 @@ class GameContextFeatures(BaseFeatures):
 
         encoded = encoder.fit_transform(wind_encoded[['wind_direction']])
         col_names = [f"wind_direction_{cat.replace(' ', '_')}" for cat in categories]
-        encoded_df = DataFrame(encoded, columns=col_names, index=self.schedule_data.index)
+        encoded_df = DataFrame(encoded, columns=col_names, index=self.data.index)
         
         encoded_df['wind_magnitude'] = wind_encoded['wind_magnitude']
 
@@ -97,8 +102,8 @@ class GameContextFeatures(BaseFeatures):
     def _encode_condition(self) -> DataFrame:
         """One-hot encode the 'condition' column."""
 
-        if 'condition' not in self.schedule_data.columns:
-            raise ValueError("'condition' column not found in schedule_data")
+        if 'condition' not in self.data.columns:
+            raise ValueError("'condition' column not found in data")
 
         categories = [
             "Cloudy",
@@ -114,7 +119,7 @@ class GameContextFeatures(BaseFeatures):
             "Unknown",
         ]
 
-        X = self.schedule_data[['condition']].copy()
+        X = self.data[['condition']].copy()
         X['condition'] = X['condition'].fillna('Unknown')
 
         encoder = OneHotEncoder(
@@ -126,34 +131,18 @@ class GameContextFeatures(BaseFeatures):
 
         encoded = encoder.fit_transform(X)
         col_names = [f"condition_{cat.replace(' ', '_')}" for cat in categories]
-        encoded_condition = pd.DataFrame(encoded, columns=col_names, index=self.schedule_data.index)
+        encoded_condition = pd.DataFrame(encoded, columns=col_names, index=self.data.index)
         assert all(encoded_condition[f"condition_{cat.replace(' ', '_')}"].dtype == 'int64' for cat in categories), "All wind direction columns should be int64"
         return encoded_condition
-       
 
+def main():
+    context_features = GameContextFeatures(2021).load_features()
+    print(context_features.isna().sum())
+
+    print(context_features[context_features.isna().any(axis=1)])
+    
 if __name__ == "__main__":
-    db_manager = get_database_manager()
-    # cols = ['wind', 'condition', 'temp']
-    # for col in cols:
-    #     query = f"""
-    #     SELECT DISTINCT {col}
-    #     FROM schedule;
-    #     """
-    #     result = db_manager.execute_read_query(query)
-    #     df = DataFrame([dict(row) for row in result])
-    #     print(df)
-    query = """
-    SELECT * FROM schedule;
-    """
-    result = db_manager.execute_read_query(query)
-    schedule_data = DataFrame([dict(row) for row in result])
-
-    context_feats = GameContextFeatures(2021, schedule_data)
-    condition_data = context_feats._encode_condition()
-    print(condition_data)
-
-    wind_data = context_feats._encode_wind()
-    print(wind_data)
+    main()    
 
 
 
