@@ -41,8 +41,13 @@ TEAM_TO_TEAM_ID_STATSAPI_MAP = {
     'MIL': 158
 }
 
-VENUE_ID_TO_TIMEZONE_MAP = {
-    
+INT_TO_MONTH_MAP_FIELDING = {
+    4: 'Mar/Apr',
+    5: 'May',
+    6: 'Jun',
+    7: 'Jul',
+    8: 'Aug',
+    9: 'Sep/Oct',
 }
 
 DATES = {

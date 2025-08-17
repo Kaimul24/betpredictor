@@ -17,15 +17,21 @@ class PlayerLoader(BaseDataLoader):
                                  'bb_percent', 'barrel_percent', 'hard_hit', 'ev',
                                  'hr_fb', 'siera', 'fip', 'stuff', 'ifbb', 'wpa',
                                  'gmli', 'season']
+        
+        self.fielding_columns = ['name', 'normalized_player_name', 'season', 'month',
+                                 'frv', 'total_innings', 'innings_c', 'innings_1B', 
+                                 'innings_2B', 'innings_3B', 'innings_SS', 'innings_LF',
+                                 'innings_CF', 'innings_RF',
+                                 ]
 
     def load_for_date_range(self, start: date, end: date) -> DataFrame:
-        pass
+        raise NotImplementedError("Use load_<batting/pitching_stats>_for_date_range instead.")
 
     def load_up_to_game(self, date: date, team_abbr: str, dh: int = 0) -> DataFrame:
-        pass
+        raise NotImplementedError("Use load_<batting/pitching_stats>up_to_game instead.")
 
     def load_for_season(self, season: int) -> DataFrame:
-        pass
+        raise NotImplementedError("Use load_for_season<batter/pitcher> instead.")
 
     def load_for_season_batter(self, season: int) -> DataFrame:
         params = [season]
@@ -163,4 +169,15 @@ class PlayerLoader(BaseDataLoader):
         return self._validate_dataframe(df, self.pitching_columns)
     
     def load_fielding_stats(self, season: int) -> DataFrame:
-        pass
+        """Loads fielding stats by season"""
+        params = [season]
+        columns_str = ",\n\t".join(self.fielding_columns)
+        query = f"""
+        SELECT
+        \t{columns_str}
+        FROM fielding
+        WHERE season = ?
+        ORDER BY season, month
+        """
+        df = self._execute_query(query, params)
+        return self._validate_dataframe(df, self.fielding_columns)

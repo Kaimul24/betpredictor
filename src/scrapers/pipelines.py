@@ -176,10 +176,10 @@ class SqlitePipeline:
             normalized_name = normalize_names(p['name'])
             execute_query("""
                 INSERT OR REPLACE INTO fielding
-                (name, normalized_player_name, season, frv, total_innings, innings_C, innings_1B, innings_2B, 
+                (name, normalized_player_name, season, month, frv, total_innings, innings_C, innings_1B, innings_2B, 
                  innings_3B, innings_SS, innings_LF, innings_CF, innings_RF)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (p['name'], normalized_name, p['season'], p['frv'], p['total_innings'], p['innings_C'],
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (p['name'], normalized_name, p['season'], p['month'], p['frv'], p['total_innings'], p['innings_C'],
                  p['innings_1B'], p['innings_2B'], p['innings_3B'], p['innings_SS'],
                  p['innings_LF'], p['innings_CF'], p['innings_RF']),
                 readonly=False

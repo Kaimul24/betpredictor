@@ -1,9 +1,8 @@
 import csv, os, scrapy
 from io import StringIO
-from unidecode import unidecode
 from scrapers.items import FRVItem
 from dotenv import load_dotenv
-from config import DATES
+from config import DATES, INT_TO_MONTH_MAP_FIELDING
 from src.utils import normalize_names
 
 load_dotenv()
@@ -41,7 +40,7 @@ class fieldingSpider(scrapy.Spider):
         await page.close()
 
         for year in DATES.keys():
-            url = FRV_URL.format(year)
+            url = FRV_URL.format(year, year)
             yield scrapy.Request(
                     url,
                     cookies=self.cookies,
@@ -60,24 +59,25 @@ class fieldingSpider(scrapy.Spider):
             return
         
         for row in data:
-            name = row['player_name']
-            normalized_name = ' '.join(reversed(unidecode(name).split(', ')))
-
             item = FRVItem()
-            item['name'] = normalized_name
-            item['normalized_player_name'] = normalize_names(normalized_name)
-            item['season'] = row['season']
-            item['frv'] = row['run_value']
-            item['total_innings'] = int(row['outs']) / 3
+            raw_name = row['name']
+            name = ' '.join(reversed(raw_name.split(', ')))
             
+            item['name'] = name
+            item['normalized_player_name'] = normalize_names(name)
+            item['season'] = year
+            item['month'] = row['api_game_date_month_mm']
+            item['frv'] = round(float(row['total_runs']), 2)
+
+            item['total_innings'] = int(row['outs_total']) / 3
             item['innings_C'] = int(row['outs_2']) / 3
-            item['innings_1B'] =int(row['outs_3']) / 3
-            item['innings_2B'] =int(row['outs_4']) / 3
-            item['innings_3B'] =int(row['outs_5']) / 3
-            item['innings_SS'] =int(row['outs_6']) / 3
-            item['innings_LF'] =int(row['outs_7']) / 3
-            item['innings_CF'] =int(row['outs_8']) / 3
-            item['innings_RF'] =int(row['outs_9']) / 3
+            item['innings_1B'] = int(row['outs_3']) / 3
+            item['innings_2B'] = int(row['outs_4']) / 3
+            item['innings_3B'] = int(row['outs_5']) / 3
+            item['innings_SS'] = int(row['outs_6']) / 3
+            item['innings_LF'] = int(row['outs_7']) / 3
+            item['innings_CF'] = int(row['outs_8']) / 3
+            item['innings_RF'] = int(row['outs_9']) / 3
             yield item
 
     

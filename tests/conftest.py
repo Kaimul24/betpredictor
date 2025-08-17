@@ -211,21 +211,21 @@ def insert_fielding_stats(dbm, stats: List[Tuple]) -> None:
     
     Args:
         dbm: Database manager instance
-        stats: List of tuples with fielding data (name, season, frv, total_innings)
+        stats: List of tuples with fielding data (name, season, month, frv, total_innings)
                 The normalized_player_name will be automatically generated from name
     """
     from src.utils import normalize_names
     
     query = """
-    INSERT INTO fielding (name, normalized_player_name, season, frv, total_innings) 
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO fielding (name, normalized_player_name, season, month, frv, total_innings) 
+    VALUES (?, ?, ?, ?, ?, ?)
     """
     
     fielding_with_normalized = []
     for stat in stats:
-        name, season, frv, total_innings = stat
+        name, season, month, frv, total_innings = stat
         normalized_name = normalize_names(name)
-        fielding_with_normalized.append((name, normalized_name, season, frv, total_innings))
+        fielding_with_normalized.append((name, normalized_name, season, month, frv, total_innings))
     
     dbm.execute_many_write_queries(query, fielding_with_normalized)
 

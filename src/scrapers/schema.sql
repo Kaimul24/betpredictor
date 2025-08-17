@@ -224,7 +224,8 @@ CREATE INDEX IF NOT EXISTS idx_lineup_players_year
 CREATE TABLE IF NOT EXISTS fielding (
   name            TEXT NOT NULL,
   normalized_player_name TEXT,
-  season            INTEGER NOT NULL,
+  season          INTEGER NOT NULL,
+  month           INTEGER,
   frv             REAL,
   total_innings   REAL,
   innings_C       REAL,
@@ -235,14 +236,11 @@ CREATE TABLE IF NOT EXISTS fielding (
   innings_LF      REAL,
   innings_CF      REAL,
   innings_RF      REAL,
-  PRIMARY KEY (name, season)
+  PRIMARY KEY (name, month, season)
 );
 
 CREATE INDEX IF NOT EXISTS idx_fielding_year
   ON fielding(season);
-
-CREATE INDEX IF NOT EXISTS idx_fielding_name
-  ON fielding(name);
 
 CREATE INDEX IF NOT EXISTS idx_fielding_normalized_name
   ON fielding(normalized_player_name);

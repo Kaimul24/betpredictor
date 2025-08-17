@@ -108,6 +108,7 @@ class FRVItem(scrapy.Item):
     name = scrapy.Field()
     normalized_player_name = scrapy.Field()
     season = scrapy.Field()
+    month = scrapy.Field()
     frv = scrapy.Field()
     total_innings = scrapy.Field()
     innings_C  = scrapy.Field()

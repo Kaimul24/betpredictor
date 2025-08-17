@@ -3,7 +3,7 @@ from datetime import date
 from data.loaders.player_loader import PlayerLoader
 from tests.conftest import (
     insert_players, insert_batting_stats, insert_pitching_stats,
-    assert_dataframe_not_empty
+    insert_fielding_stats, assert_dataframe_not_empty
 )
 
 
@@ -52,6 +52,21 @@ class TestPlayerLoader:
             ('player4', '2024-04-05', 'TEX', 0, 2.20, 7.0, 35.0, 2024),
         ]
         insert_pitching_stats(clean_db, stats)
+        return stats
+    
+    @pytest.fixture
+    def sample_fielding_stats(self, clean_db):
+        """Insert sample fielding stats for testing"""
+        stats = [
+            # (name, season, month, frv, total_innings)
+            ('Mike Trout', 2024, 'April', 5.2, 120.0),
+            ('Mike Trout', 2024, 'May', 3.8, 130.0),
+            ('Mookie Betts', 2024, 'April', 8.1, 125.0),
+            ('Mookie Betts', 2024, 'May', 6.5, 135.0),
+            ('Rafael Devers', 2024, 'April', -2.1, 110.0),
+            ('Jung Hoo Lee', 2023, 'April', 1.2, 15.0),  # Different season
+        ]
+        insert_fielding_stats(clean_db, stats)
         return stats
     
     def test_load_for_season_basic(self, player_loader, sample_batting_stats):
@@ -112,6 +127,34 @@ class TestPlayerLoader:
         
         assert_dataframe_not_empty(before_second_game)
         assert len(after_second_game) == 2
+
+    def test_load_fielding_stats_basic(self, player_loader, sample_fielding_stats):
+        """Test loading fielding stats for a season."""
+        df = player_loader.load_fielding_stats(season=2024)
+        assert_dataframe_not_empty(df)
+        assert len(df) == 5
+
+    def test_load_fielding_stats_invalid_season(self, player_loader, sample_fielding_stats):
+        """Test loading fielding stats for an invalid season."""
+        df = player_loader.load_fielding_stats(season=2020)
+        assert len(df) == 0
+
+    def test_load_fielding_stats_columns(self, player_loader, sample_fielding_stats):
+        """Test that fielding stats dataframe has expected columns."""
+        df = player_loader.load_fielding_stats(season=2024)
+        expected_columns = ['name', 'normalized_player_name', 'season', 'month', 
+                           'frv', 'total_innings']
+        for col in expected_columns:
+            assert col in df.columns, f"Missing column: {col}"
+
+    def test_load_fielding_stats_ordering(self, player_loader, sample_fielding_stats):
+        """Test that fielding stats are ordered by season, month."""
+        df = player_loader.load_fielding_stats(season=2024)
+       
+        mike_trout_data = df[df['name'] == 'Mike Trout'].reset_index(drop=True)
+        assert len(mike_trout_data) == 2
+        assert mike_trout_data.iloc[0]['month'] == 'April'
+        assert mike_trout_data.iloc[1]['month'] == 'May'
 
     @pytest.mark.skip(reason="player_vs_pitcher_matchup not yet implemented")
     def test_player_vs_pitcher_matchup(self, player_loader, sample_batting_stats, sample_pitching_stats):

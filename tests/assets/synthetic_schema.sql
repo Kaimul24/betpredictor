@@ -150,9 +150,10 @@ CREATE TABLE IF NOT EXISTS fielding (
   name            TEXT NOT NULL,
   normalized_player_name TEXT,
   season          INTEGER NOT NULL,
+  month           TEXT,
   frv             REAL,
   total_innings   REAL,
-  innings_C       REAL,
+  innings_c       REAL,
   innings_1B      REAL,
   innings_2B      REAL,
   innings_3B      REAL,
@@ -160,7 +161,7 @@ CREATE TABLE IF NOT EXISTS fielding (
   innings_LF      REAL,
   innings_CF      REAL,
   innings_RF      REAL,
-  PRIMARY KEY (name, season)
+  PRIMARY KEY (name, season, month)
 );
 
 CREATE TABLE IF NOT EXISTS rosters (
