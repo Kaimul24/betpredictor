@@ -141,12 +141,13 @@ class SqlitePipeline:
                     INSERT OR REPLACE INTO pitching_stats
                     (player_id, game_date, team, dh, games, gs, era, babip, ip, runs, k_percent, 
                      bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, 
-                     ifbb, wpa, gmli, season, scraped_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (p['player_id'], p['date'], p['team'], p['dh'], p['games'], p['gs'], p['era'], p['babip'],
-                     p['ip'], p['runs'], p['k_percent'], p['bb_percent'], p['barrel_percent'],
-                     p['hard_hit'], p['ev'], p['hr_fb'], p['siera'], p['fip'], p['stuff'], p['ifbb'],
-                     p['wpa'], p['gmli'], p['season'], p['scraped_at']),
+                     ifbb, wpa, gmli, fa_percent, fc_percent, si_percent, fa_velo, fc_velo,
+                     si_velo, season, scraped_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (p['player_id'], p['date'], p['team'], p['dh'], p['games'], p['gs'], p['era'], p['babip'], p['ip'], 
+                     p['runs'], p['k_percent'], p['bb_percent'], p['barrel_percent'], p['hard_hit'], p['ev'], p['hr_fb'], 
+                     p['siera'], p['fip'], p['stuff'], p['ifbb'], p['wpa'], p['gmli'], p['fa_percent'], p['fc_percent'], 
+                     p['si_percent'], p['fa_velo'], p['fc_velo'], p['si_velo'], p['season'], p['scraped_at']),
                     readonly=False
                 )
         elif isinstance(item, LineupItem):

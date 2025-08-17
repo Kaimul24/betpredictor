@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Optional
+from typing import Optional, Dict
 from pandas.core.api import DataFrame as DataFrame
 from data.loaders.base_loader import BaseDataLoader
 
@@ -16,7 +16,9 @@ class PlayerLoader(BaseDataLoader):
                                  'gs', 'era', 'babip', 'ip', 'runs', 'k_percent',
                                  'bb_percent', 'barrel_percent', 'hard_hit', 'ev',
                                  'hr_fb', 'siera', 'fip', 'stuff', 'ifbb', 'wpa',
-                                 'gmli', 'season']
+                                 'gmli',  'fa_percent', 'fc_percent', 'si_percent',
+                                 'fa_velo', 'fc_velo', 'si_velo' ,'season'
+                                 ]
         
         self.fielding_columns = ['name', 'normalized_player_name', 'season', 'month',
                                  'frv', 'total_innings', 'innings_c', 'innings_1B', 
@@ -181,3 +183,7 @@ class PlayerLoader(BaseDataLoader):
         """
         df = self._execute_query(query, params)
         return self._validate_dataframe(df, self.fielding_columns)
+    
+    def get_avg_batting_stats(self, season: int, stats: str = None) -> Dict[str, float]:
+        """Returns the league average batting stats. Default is all batting stats"""
+        pass

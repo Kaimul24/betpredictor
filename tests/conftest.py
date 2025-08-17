@@ -161,12 +161,16 @@ def insert_pitching_stats(dbm, stats: List[Tuple]) -> None:
     Args:
         dbm: Database manager instance
         stats: List of tuples with pitching data
-               (player_id, game_date, team, dh, era, ip, k_percent, season)
+               (player_id, game_date, team, dh, games, gs, era, babip, ip, runs, k_percent,
+                bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, ifbb, 
+                wpa, gmli, fa_percent, fc_percent, si_percent, fa_velo, fc_velo, si_velo, season)
     """
     query = """
     INSERT INTO pitching_stats (
-        player_id, game_date, team, dh, era, ip, k_percent, season
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        player_id, game_date, team, dh, games, gs, era, babip, ip, runs, k_percent,
+        bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, ifbb,
+        wpa, gmli, fa_percent, fc_percent, si_percent, fa_velo, fc_velo, si_velo, season
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     dbm.execute_many_write_queries(query, stats)
 

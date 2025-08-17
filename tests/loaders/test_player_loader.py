@@ -47,9 +47,15 @@ class TestPlayerLoader:
     def sample_pitching_stats(self, clean_db, sample_players):
         """Insert sample pitching stats for testing."""
         stats = [
-            # (player_id, game_date, team, dh, era, ip, k_percent, season)
-            ('player4', '2024-04-01', 'TEX', 0, 2.50, 6.0, 32.5, 2024),
-            ('player4', '2024-04-05', 'TEX', 0, 2.20, 7.0, 35.0, 2024),
+            # (player_id, game_date, team, dh, games, gs, era, babip, ip, runs, k_percent,
+            #  bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, ifbb, 
+            #  wpa, gmli, fa_percent, fc_percent, si_percent, fa_velo, fc_velo, si_velo, season)
+            ('player4', '2024-04-01', 'TEX', 0, 1, 1, 2.50, 0.285, 6.0, 2, 32.5, 
+             8.5, 6.2, 42.8, 89.5, 12.5, 3.20, 2.85, 105, 2, 0.15, 0.52, 
+             55.2, 18.3, 12.1, 94.2, 88.5, 91.8, 2024),
+            ('player4', '2024-04-05', 'TEX', 0, 1, 1, 2.20, 0.295, 7.0, 1, 35.0,
+             7.2, 5.8, 38.9, 90.2, 10.8, 2.95, 2.65, 110, 1, 0.22, 0.58,
+             58.1, 16.7, 14.2, 94.8, 89.1, 92.3, 2024),
         ]
         insert_pitching_stats(clean_db, stats)
         return stats
@@ -96,6 +102,44 @@ class TestPlayerLoader:
         assert 'era' in df.columns
         assert len(df) == 2
 
+    def test_load_pitcher_stats_columns(self, player_loader, sample_pitching_stats):
+        """Test that pitching stats dataframe has all expected columns."""
+        df = player_loader.load_pitcher_stats(player_id='player4', season=2024)
+        
+        expected_columns = [
+            'player_id', 'game_date', 'team', 'dh', 'games', 'gs', 'era', 'babip', 
+            'ip', 'runs', 'k_percent', 'bb_percent', 'barrel_percent', 'hard_hit', 
+            'ev', 'hr_fb', 'siera', 'fip', 'stuff', 'ifbb', 'wpa', 'gmli', 
+            'fa_percent', 'fc_percent', 'si_percent', 'fa_velo', 'fc_velo', 'si_velo', 'season'
+        ]
+        
+        for col in expected_columns:
+            assert col in df.columns, f"Missing column: {col}"
+        
+        # Test specific values to ensure data is loaded correctly
+        first_row = df.iloc[0]
+        assert first_row['era'] == 2.50
+        assert first_row['k_percent'] == 32.5
+        assert first_row['stuff'] == 105
+        assert first_row['fa_velo'] == 94.2
+
+    def test_load_for_season_pitcher(self, player_loader, sample_pitching_stats):
+        """Test loading pitching stats for a season"""
+        df = player_loader.load_for_season_pitcher(season=2024)
+        assert_dataframe_not_empty(df)
+        assert len(df) == 2
+        
+        # Verify all expected columns are present
+        expected_columns = [
+            'player_id', 'game_date', 'team', 'dh', 'games', 'gs', 'era', 'babip', 
+            'ip', 'runs', 'k_percent', 'bb_percent', 'barrel_percent', 'hard_hit', 
+            'ev', 'hr_fb', 'siera', 'fip', 'stuff', 'ifbb', 'wpa', 'gmli', 
+            'fa_percent', 'fc_percent', 'si_percent', 'fa_velo', 'fc_velo', 'si_velo', 'season'
+        ]
+        
+        for col in expected_columns:
+            assert col in df.columns, f"Missing column: {col}"
+
     def test_load_batting_stats_for_date_range_basic(self, player_loader, sample_batting_stats):
         """Test loading player stats for a date range."""
         df = player_loader.load_batting_stats_for_date_range(start=date(2024, 4, 1), end=date(2024, 4, 2))
@@ -127,6 +171,41 @@ class TestPlayerLoader:
         
         assert_dataframe_not_empty(before_second_game)
         assert len(after_second_game) == 2
+
+    def test_load_pitching_stats_for_date_range_basic(self, player_loader, sample_pitching_stats):
+        """Test loading pitching stats for a date range."""
+        df = player_loader.load_pitching_stats_for_date_range(start=date(2024, 4, 1), end=date(2024, 4, 6))
+
+        assert_dataframe_not_empty(df)
+        assert len(df) == 2
+        
+        expected_columns = ['era', 'k_percent', 'stuff', 'fa_velo', 'fip', 'siera']
+        for col in expected_columns:
+            assert col in df.columns, f"Missing column: {col}"
+
+    def test_load_pitching_stats_for_date_range_team(self, player_loader, sample_pitching_stats):
+        """Test loading pitching stats for a date range for a given team."""
+        df = player_loader.load_pitching_stats_for_date_range(start=date(2024, 4, 1), end=date(2024, 4, 6), team_id='TEX')
+
+        assert_dataframe_not_empty(df)
+        assert len(df) == 2
+
+    def test_load_pitching_stats_up_to_game(self, player_loader, sample_pitching_stats):
+        """Test loading pitching stats up to a specific game."""
+        before_first_game = player_loader.load_pitching_stats_up_to_game(date=date(2024, 4, 1),
+                            team_abbr='TEX', dh=0)
+        
+        assert len(before_first_game) == 0
+
+        after_first_game = player_loader.load_pitching_stats_up_to_game(date=date(2024, 4, 5),
+                            team_abbr='TEX', dh=0)
+        
+        assert_dataframe_not_empty(after_first_game)
+        assert len(after_first_game) == 1
+        
+        first_row = after_first_game.iloc[0]
+        assert first_row['era'] == 2.50
+        assert first_row['stuff'] == 105
 
     def test_load_fielding_stats_basic(self, player_loader, sample_fielding_stats):
         """Test loading fielding stats for a season."""

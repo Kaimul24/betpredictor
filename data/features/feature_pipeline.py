@@ -1,12 +1,16 @@
+#!/usr/bin/env python3
 """
 Orchestrates the feature engineering process for all features. Applies normalization.
 """
 
 import pandas as pd
 from pandas.core.api import DataFrame as DataFrame
-import logging, sys, os
+import logging, sys, argparse
 import numpy as np
 from typing import List
+
+logger = None
+args = None
 
 from src.config import PROJECT_ROOT
 
@@ -28,27 +32,42 @@ LOG_DIR = PROJECT_ROOT / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "feature_pipeline.log"
 
-logger = logging.getLogger("feature_pipeline")
-logger.setLevel(logging.DEBUG)
-logger.propagate = False 
+def create_args():
+    """Parse command line arguments"""
+    global args
+    parser = argparse.ArgumentParser(description="Feature engineering runner")
+    parser.add_argument("--force_recreate", action="store_true", help="Recreate batting rolling features, even if cached file exists")
+    parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
+    parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
+    args = parser.parse_args()
 
-if logger.handlers:
-    logger.handlers.clear()
+def setup_logging():
+    """Configure logging based on CLI arguments"""
+    logger = logging.getLogger("feature_pipeline")
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False 
 
-fmt = logging.Formatter(
-    "%(levelname)s:%(name)s:%(message)s"
-)
-
-fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
-fh.setLevel(logging.DEBUG)
-fh.setFormatter(fmt)
-
-sh = logging.StreamHandler(sys.stdout)
-sh.setLevel(logging.INFO)
-sh.setFormatter(fmt)
-
-logger.addHandler(fh)
-logger.addHandler(sh)
+    if logger.handlers:
+        logger.handlers.clear()
+    
+    fmt = logging.Formatter(
+        "%(levelname)s:%(name)s:%(message)s"
+    )
+    
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setLevel(logging.INFO)
+    sh.setFormatter(fmt)
+    logger.addHandler(sh)
+    
+    if hasattr(args, 'log') and args.log:
+        log_file = args.log_file if hasattr(args, 'log_file') and args.log_file else LOG_FILE
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
+        logger.info(f"Logging to file: {log_file}")
+    
+    return logger
 
 class FeaturePipeline():
 
@@ -179,7 +198,7 @@ class FeaturePipeline():
         return team_features
 
     
-    def _get_batting_features(self, schedule_df: DataFrame) -> DataFrame:
+    def _get_batting_features(self, schedule_df: DataFrame, force_recreate: bool = False) -> DataFrame:
         """Get batting features for all games efficiently"""
         raw_batter_data = self._load_batting_data()
         lineups_data = self._load_lineups_data()
@@ -187,7 +206,7 @@ class FeaturePipeline():
         batting_features = BattingFeatures(self.season, raw_batter_data)
         
         logger.info(f" Calculating batting rolling stats for {self.season}")
-        batting_features = batting_features.calculate_all_player_rolling_stats()
+        batting_features = batting_features.calculate_all_player_rolling_stats(force_recreate)
 
         logger.info(f" Merging schedule, lineups, and batting rolling stats for {self.season}")
         team_features = self._merge_schedule_with_batting_features(schedule_df, lineups_data, batting_features)
@@ -526,6 +545,8 @@ class FeaturePipeline():
         
     
     def start_pipeline(self):
+        create_args()
+
         logger.info("="*60)
         logger.info(f" Starting feature pipeline...")
         logger.info("="*60 + "\n")
@@ -535,9 +556,7 @@ class FeaturePipeline():
         odds_sch_matched = self._match_schedule_to_odds(schedule_data, odds_data)
 
         transformed_schedule = self._transform_schedule(odds_sch_matched)
-
-
-        batting_features = self._get_batting_features(transformed_schedule)
+        batting_features = self._get_batting_features(transformed_schedule, args.force_recreate)
         context_features = GameContextFeatures(schedule_data, self.season).load_features()
         context_features = context_features.drop(columns=['away_team', 'home_team'])
 
@@ -566,17 +585,20 @@ class FeaturePipeline():
         
         logger.info(f" Final merged dataset shape: {final_features.shape}")
 
-        # logger.debug("="*60 + "\n")
-        # logger.debug(" Final features DataFrame")
-        # logger.debug(final_features.to_string())
-        # logger.debug("="*60 + "\n")
+        logger.debug("="*60 + "\n")
+        logger.debug(" Final features DataFrame")
+        logger.debug(final_features.to_string())
+        logger.debug("="*60 + "\n")
 
         return final_features
         
 def main():
+    create_args()
+    global logger
+    logger = setup_logging()
+    
     feat_pipe = FeaturePipeline(2021)
-    sch = feat_pipe.start_pipeline()
-
+    features = feat_pipe.start_pipeline()
 
 
 if __name__ == "__main__":

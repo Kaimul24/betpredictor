@@ -273,6 +273,14 @@ class fgSpider(scrapy.Spider):
                     gmli = game.get("gmLI", LG_AVG_STATS[str(year)]['Throws']['gmli'])
                     item['gmli'] = gmli
 
+                    item['fa_percent'] = game.get('pfxFA%', 0.0)
+                    item['fc_percent'] = game.get('pfxFC%', 0.0)
+                    item['si_percent'] = game.get('pfxSI%', 0.0)
+
+                    item['fa_velo'] = game.get('pivFA', 0.0)
+                    item['fc_velo'] = game.get('pivFC', 0.0)
+                    item['si_velo'] = game.get('pivSI%', 0.0)
+
                     item['date'] = game['gamedate']
                     item['scraped_at'] = datetime.now()
                     item['season'] = year
