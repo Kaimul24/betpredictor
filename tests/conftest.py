@@ -105,14 +105,14 @@ def insert_odds_data(dbm, odds: List[Tuple]) -> None:
         dbm: Database manager instance  
         odds: List of tuples with odds data
               (game_date, game_datetime, away_team, home_team, away_starter, home_starter,
-               sportsbook, away_odds, home_odds, season)
+               sportsbook, away_opening_odds, home_opening_odds, away_current_odds, home_current_odds, season)
     """
     
     query = """
     INSERT INTO odds (
         game_date, game_datetime, away_team, home_team, away_starter, home_starter,
-        sportsbook, away_odds, home_odds, season
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        sportsbook, away_opening_odds, home_opening_odds, away_current_odds, home_current_odds, season
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     
     dbm.execute_many_write_queries(query, odds)
@@ -178,12 +178,12 @@ def insert_lineups(dbm, lineups: List[Tuple]) -> None:
     Args:
         dbm: Database manager instance
         lineups: List of tuples with lineup data
-                (game_date, team_id, dh, opposing_team_id, team_starter_id, season)
+                (game_date, team_id, team, dh, opposing_team_id, opposing_team, team_starter_id, season)
     """
     query = """
     INSERT INTO lineups (
-        game_date, team_id, dh, opposing_team_id, team_starter_id, season
-    ) VALUES (?, ?, ?, ?, ?, ?)
+        game_date, team_id, team, dh, opposing_team_id, opposing_team, team_starter_id, season
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """
     dbm.execute_many_write_queries(query, lineups)
 
@@ -195,12 +195,12 @@ def insert_lineup_players(dbm, players: List[Tuple]) -> None:
     Args:
         dbm: Database manager instance
         players: List of tuples with lineup player data
-                (game_date, team_id, team, dh, player_id, position, batting_order, season)
+                (game_date, team_id, team, opposing_team_id, opposing_team, dh, player_id, position, batting_order, season)
     """
     query = """
     INSERT INTO lineup_players (
-        game_date, team_id, team, dh, player_id, position, batting_order, season
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        game_date, team_id, team, opposing_team_id, opposing_team, dh, player_id, position, batting_order, season
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     dbm.execute_many_write_queries(query, players)
 
@@ -214,7 +214,6 @@ def insert_fielding_stats(dbm, stats: List[Tuple]) -> None:
         stats: List of tuples with fielding data (name, season, frv, total_innings)
                 The normalized_player_name will be automatically generated from name
     """
-    # Import normalize_names function
     from src.utils import normalize_names
     
     query = """
@@ -222,7 +221,6 @@ def insert_fielding_stats(dbm, stats: List[Tuple]) -> None:
     VALUES (?, ?, ?, ?, ?)
     """
     
-    # Add normalized_player_name to each fielding tuple
     fielding_with_normalized = []
     for stat in stats:
         name, season, frv, total_innings = stat
@@ -240,7 +238,6 @@ def insert_rosters(dbm, roster: List[Tuple]) -> None:
         roster: List of tuples with roster date (game_date, team, player_name, position, status)
                 The normalized_player_name will be automatically generated from player_name
     """
-    # Import normalize_names function
     from src.utils import normalize_names
     
     query = """
@@ -248,7 +245,6 @@ def insert_rosters(dbm, roster: List[Tuple]) -> None:
     VALUES (?, ?, ?, ?, ?, ?, ?)
     """
     
-    # Add normalized_player_name to each roster tuple
     roster_with_normalized = []
     for entry in roster:
         game_date, season, team, player_name, position, status = entry

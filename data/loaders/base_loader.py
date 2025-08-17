@@ -65,21 +65,19 @@ class BaseDataLoader(ABC):
         3. Date columns are properly formatted
         4. Numerical columns have valid values (no inf, etc.)
         """
-        # Check required columns
         if df.empty:
             return df
         
         missing = set(required_columns) - set(df.columns)
         if missing:
             raise ValueError(f"Missing required columns: {missing}")
-            
-        # Validate data types and values
+        
         for col in df.columns:
-            if 'game_date' in col.lower():
-                # Ensure dates are parsed correctly
-                df[col] = pd.to_datetime(df[col])
+            if 'game_date' in col.lower() or 'game_datetime' in col.lower():
+
+                df[col] = pd.to_datetime(df[col]).astype('datetime64[ns]')
             elif df[col].dtype in ['float64', 'int64']:
-                # Check for infinite values
+                
                 if df[col].isin([float('inf'), float('-inf')]).any():
                     print(f"Infinite values found in {col}")
                     df[col] = df[col].replace([float('inf'), float('-inf')], None)

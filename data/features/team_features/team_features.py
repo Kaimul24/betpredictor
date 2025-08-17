@@ -15,7 +15,7 @@ class TeamFeatures(BaseFeatures):
     def load_data(self) -> DataFrame:
         return GameLoader().load_for_season(self.season)
          
-    
+    #number of games in season - used for rolling window (last k games)
     def calc_win_percentage(self, schedule: DataFrame, num_games: Optional[int] = None) -> float:
         """
         Calculates the win percentage of a team for the season and optionally, last num_games.

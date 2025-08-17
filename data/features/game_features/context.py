@@ -30,7 +30,7 @@ class GameContextFeatures(BaseFeatures):
         venue_to_park_factor = self.park_factor_data.set_index('venue_id')['park_factor'].copy()
         self.data['park_factor'] = self.data['venue_id'].map(venue_to_park_factor)
 
-        essential_cols = ['game_id', 'game_date', 'game_datetime', 'away_team', 'home_team', 'dh', 'park_factor', 'venue_elevation']
+        essential_cols = ['game_id', 'game_date', 'game_datetime', 'away_team', 'home_team', 'dh', 'venue_name', 'venue_id', 'park_factor', 'venue_elevation']
         context_data = self.data[essential_cols].copy()
 
         return pd.concat([context_data.reset_index(drop=True),
@@ -136,11 +136,11 @@ class GameContextFeatures(BaseFeatures):
         return encoded_condition
 
 def main():
-    context_features = GameContextFeatures(2021).load_features()
-    print(context_features.isna().sum())
-
-    print(context_features[context_features.isna().any(axis=1)])
-    
+    from data.loaders.game_loader import GameLoader
+    game_loader = GameLoader()
+    game_data = game_loader.load_for_season(2021)
+    context_features = GameContextFeatures(game_data, 2021).load_features()
+    print(context_features.columns)
 if __name__ == "__main__":
     main()    
 

@@ -1,19 +1,4 @@
-"""
-Tests for TeamLoader class.
-
-Tests for team-level statistics and analysis functionality including:
-- Team records and standings
-- Bullpen usage patterns  
-- Strength of schedule calculations
-- Team trends and momentum
-- Aggregated player stats to team level
-
-Note: TeamLoader is currently empty/placeholder. These tests are prepared
-for when the loader is implemented.
-"""
-
 import pytest
-import pandas as pd
 from datetime import date
 from data.loaders.team_loader import TeamLoader
 from tests.conftest import (
@@ -61,23 +46,23 @@ class TestTeamLoader:
     @pytest.fixture
     def sample_lineup(self, clean_db):
         lineup = [
-            # (game_date, team_id, team, dh, player_id, position, batting_order, season)
-            ('2024-04-01', 30, 'SFG', 0, 'player1', 'DH', 1, '2024'),
-            ('2024-04-01', 30, 'SFG', 0, 'player2', 'C',  2, '2024'),
-            ('2024-04-01', 30, 'SFG', 0, 'player3', '1B', 3, '2024'),
-            ('2024-04-01', 30, 'SFG', 0, 'player4', '2B', 4, '2024'),
-            ('2024-04-01', 12,'LAA', 0, 'player5', '3B',  1,'2024'),
-            ('2024-04-01', 12,'LAA', 0, 'player6', 'SS',  2, '2024'),
-            ('2024-04-01', 12,'LAA', 0, 'player7', 'LF',  3,'2024'),
-            ('2024-04-01', 12,'LAA', 0, 'player8', 'CF',  4,'2024'),
-            ('2024-04-02', 30, 'SFG', 0, 'player1', 'DH', 1,'2024'),
-            ('2024-04-02', 30, 'SFG', 0, 'player2', 'C',  2,'2024'),
-            ('2024-04-02', 30, 'SFG', 0, 'player3', '1B', 3,'2024'),
-            ('2024-04-02', 30, 'SFG', 0, 'player4', '2B', 4,'2024'),
-            ('2024-04-02', 12, 'LAA', 0, 'player5', '3B', 1,'2024'),
-            ('2024-04-02', 12, 'LAA', 0, 'player6', 'SS', 2, '2024'),
-            ('2024-04-02', 12, 'LAA', 0, 'player7', 'LF', 3,'2024'),
-            ('2024-04-02', 12, 'LAA', 0, 'player8', 'CF', 4,'2024'),
+            # (game_date, team_id, team, opposing_team_id, opposing_team, dh, player_id, position, batting_order, season)
+            ('2024-04-01', 30, 'SFG', 12, 'LAA', 0, 'player1', 'DH', 1, '2024'),
+            ('2024-04-01', 30, 'SFG', 12, 'LAA', 0, 'player2', 'C',  2, '2024'),
+            ('2024-04-01', 30, 'SFG', 12, 'LAA', 0, 'player3', '1B', 3, '2024'),
+            ('2024-04-01', 30, 'SFG', 12, 'LAA', 0, 'player4', '2B', 4, '2024'),
+            ('2024-04-01', 12,'LAA', 30, 'SFG', 0, 'player5', '3B',  1,'2024'),
+            ('2024-04-01', 12,'LAA', 30, 'SFG', 0, 'player6', 'SS',  2, '2024'),
+            ('2024-04-01', 12,'LAA', 30, 'SFG', 0, 'player7', 'LF',  3,'2024'),
+            ('2024-04-01', 12,'LAA', 30, 'SFG', 0, 'player8', 'CF',  4,'2024'),
+            ('2024-04-02', 30, 'SFG', 12, 'LAA', 0, 'player1', 'DH', 1,'2024'),
+            ('2024-04-02', 30, 'SFG', 12, 'LAA', 0, 'player2', 'C',  2,'2024'),
+            ('2024-04-02', 30, 'SFG', 12, 'LAA', 0, 'player3', '1B', 3,'2024'),
+            ('2024-04-02', 30, 'SFG', 12, 'LAA', 0, 'player4', '2B', 4,'2024'),
+            ('2024-04-02', 12, 'LAA', 30, 'SFG', 0, 'player5', '3B', 1,'2024'),
+            ('2024-04-02', 12, 'LAA', 30, 'SFG', 0, 'player6', 'SS', 2, '2024'),
+            ('2024-04-02', 12, 'LAA', 30, 'SFG', 0, 'player7', 'LF', 3,'2024'),
+            ('2024-04-02', 12, 'LAA', 30, 'SFG', 0, 'player8', 'CF', 4,'2024'),
         ]
         insert_lineup_players(clean_db, lineup)
         return lineup

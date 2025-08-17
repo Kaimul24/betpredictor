@@ -62,7 +62,8 @@ class OddsLoader(BaseDataLoader):
         ORDER by game_date
         '''
         all_params = [team_abbr, team_abbr] + params + [team_abbr, team_abbr]
-        return self._execute_query(query, all_params)
+        df = self._execute_query(query, all_params)
+        return self._validate_dataframe(df, self.columns)
     
     def load_game_odds(self, game_date: date, away_team: str, home_team: str, away_starter: str, home_starter: str, sportsbook: Optional[str] = None):
         query = """
@@ -75,8 +76,10 @@ class OddsLoader(BaseDataLoader):
             home_starter,
             away_score,
             home_score,
-            away_odds,
-            home_odds,
+            away_opening_odds,
+            home_opening_odds,
+            away_current_odds,
+            home_current_odds,
             winner,
             sportsbook,
             season
@@ -98,4 +101,7 @@ class OddsLoader(BaseDataLoader):
             sportsbook_filter = ""
         
         query = query.format(sportsbook_filter=sportsbook_filter)
-        return self._execute_query(query, params)
+        df = self._execute_query(query, params)
+        
+        relevant_columns = [col for col in self.columns if col in ['game_date', 'game_datetime', 'away_team', 'home_team', 'away_starter', 'home_starter', 'away_score', 'home_score', 'away_opening_odds', 'home_opening_odds', 'away_current_odds', 'home_current_odds', 'winner', 'sportsbook', 'season']]
+        return self._validate_dataframe(df, relevant_columns)

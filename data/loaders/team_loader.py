@@ -53,9 +53,10 @@ class TeamLoader(BaseDataLoader):
         ORDER by game_date
         """
 
-        return self._execute_query(query, params)
-
-
+        df = self._execute_query(query, params)
+        
+        roster_columns = ['game_date', 'season', 'team', 'player_name', 'normalized_player_name', 'position', 'status']
+        return self._validate_dataframe(df, roster_columns)
 
     def load_lineup(self, season: int, team: Optional[str] = None, date: Optional[date] = None) -> DataFrame:
         """Load the starting lineups for season or optionally for a single date across all teams"""
@@ -88,7 +89,10 @@ class TeamLoader(BaseDataLoader):
         ORDER by game_date, dh
         """
 
-        return self._execute_query(query, params)
+        df = self._execute_query(query, params)
+        
+        lineup_columns = ['game_date', 'team', 'opposing_team', 'dh', 'player_id', 'position', 'batting_order', 'season']
+        return self._validate_dataframe(df, lineup_columns)
         
     
     # def rest_days(self, date: date, team_abbr: str) -> int:

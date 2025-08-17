@@ -1,24 +1,9 @@
-"""
-Tests for PlayerLoader class.
-
-Tests for player statistics loading functionality including:
-- Loading batting and pitching stats
-- Player performance over time windows
-- Lineup loading with stats
-- Aggregation functions
-
-Note: PlayerLoader is currently empty/placeholder. These tests are prepared
-for when the loader is implemented.
-"""
-
 import pytest
-import pandas as pd
 from datetime import date
 from data.loaders.player_loader import PlayerLoader
 from tests.conftest import (
     insert_players, insert_batting_stats, insert_pitching_stats,
-    insert_lineup_players, assert_dataframe_schema, 
-    assert_dataframe_not_empty, assert_dataframe_values
+    assert_dataframe_not_empty
 )
 
 
@@ -128,12 +113,12 @@ class TestPlayerLoader:
         assert_dataframe_not_empty(before_second_game)
         assert len(after_second_game) == 2
 
-    @pytest.mark.skip(reason="PlayerLoader not yet implemented")
+    @pytest.mark.skip(reason="player_vs_pitcher_matchup not yet implemented")
     def test_player_vs_pitcher_matchup(self, player_loader, sample_batting_stats, sample_pitching_stats):
         """Test loading historical matchup data between batter and pitcher."""
         pass
 
-    @pytest.mark.skip(reason="PlayerLoader not yet implemented")
+    @pytest.mark.skip(reason="player_splits not yet implemented")
     def test_load_player_splits(self, player_loader, sample_batting_stats):
         """Test loading player performance splits (home/away, vs handedness, etc)."""
         pass

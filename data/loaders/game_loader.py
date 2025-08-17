@@ -73,7 +73,8 @@ class GameLoader(BaseDataLoader):
         """
         
         all_params = [team_abbr, team_abbr] + params + [team_abbr, team_abbr]
-        return self._execute_query(query, all_params)
+        df = self._execute_query(query, all_params)
+        return self._validate_dataframe(df, self.columns)
     
     def load_season_games(self, season: int, team_abbr: str = None) -> DataFrame:
         """
@@ -98,7 +99,8 @@ class GameLoader(BaseDataLoader):
             """
             params = [season]
         
-        return self._execute_query(query, params)
+        df = self._execute_query(query, params)
+        return self._validate_dataframe(df, self.columns)
 
     def load_up_to_game_season(self, date: date, team_abbr: str, dh: int = 0) -> DataFrame:
         """
@@ -126,7 +128,8 @@ class GameLoader(BaseDataLoader):
         """
         
         all_params = [team_abbr] * 3 + [season] + params + [team_abbr] * 2
-        return self._execute_query(query, all_params)
+        df = self._execute_query(query, all_params)
+        return self._validate_dataframe(df, self.columns)
     
     def load_park_factor_season(self, season: int) -> DataFrame:
         """

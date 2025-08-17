@@ -43,8 +43,10 @@ CREATE TABLE IF NOT EXISTS odds (
   home_score    INTEGER,
   winner        TEXT,
   sportsbook    TEXT,
-  away_odds     REAL,
-  home_odds     REAL,
+  away_opening_odds     REAL,
+  home_opening_odds     REAL,
+  away_current_odds     REAL,
+  home_current_odds     REAL,
   season        INTEGER NOT NULL,
   PRIMARY KEY (game_date, away_team, home_team, sportsbook)
 );
@@ -132,7 +134,9 @@ CREATE TABLE IF NOT EXISTS lineups (
 CREATE TABLE IF NOT EXISTS lineup_players (
   game_date     TEXT NOT NULL,
   team_id       INTEGER NOT NULL,
-  team          TEXT,
+  team          TEXT NOT NULL,
+  opposing_team_id INTEGER,
+  opposing_team TEXT,
   dh            INTEGER NOT NULL,
   player_id     TEXT NOT NULL,
   position      TEXT NOT NULL,

@@ -85,7 +85,8 @@ class PlayerLoader(BaseDataLoader):
         ORDER by game_date, dh
         """
         all_params = params + [team_abbr]
-        return self._execute_query(query, all_params)
+        df = self._execute_query(query, all_params)
+        return self._validate_dataframe(df, self.batting_columns)
 
     def load_pitching_stats_for_date_range(self, start: date, end: date, team_id: Optional[str] = None) -> DataFrame:
         team_filter = ""
@@ -118,7 +119,8 @@ class PlayerLoader(BaseDataLoader):
         ORDER by game_date, dh
         """
         all_params = params + [team_abbr]
-        return self._execute_query(query, all_params)
+        df = self._execute_query(query, all_params)
+        return self._validate_dataframe(df, self.pitching_columns)
 
     def load_batter_stats(self, player_id: int, season: Optional[int] = None) -> DataFrame:
         year_filter = ""
@@ -137,7 +139,8 @@ class PlayerLoader(BaseDataLoader):
         ORDER BY game_date, dh
         """
 
-        return self._execute_query(query, params)
+        df = self._execute_query(query, params)
+        return self._validate_dataframe(df, self.batting_columns)
 
     def load_pitcher_stats(self, player_id: int, season: Optional[int] = None) -> DataFrame:
         year_filter = ""
@@ -156,7 +159,8 @@ class PlayerLoader(BaseDataLoader):
         ORDER BY game_date, dh
         """
 
-        return self._execute_query(query, params)
+        df = self._execute_query(query, params)
+        return self._validate_dataframe(df, self.pitching_columns)
     
     def load_fielding_stats(self, season: int) -> DataFrame:
         pass

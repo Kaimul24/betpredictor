@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Test runner script for BetPredictor loaders.
+Test runner script for BetPredictor.
 
 This script provides convenient ways to run different subsets of tests
-and generate reports.
+and generate reports for loaders and features.
 """
 
 import subprocess
@@ -27,12 +27,22 @@ def run_command(cmd, description):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run BetPredictor loader tests")
+    parser = argparse.ArgumentParser(description="Run BetPredictor tests")
     parser.add_argument("--all", action="store_true", help="Run all tests")
+    
+    # Loader tests
+    parser.add_argument("--loaders", action="store_true", help="Run all loader tests")
     parser.add_argument("--game", action="store_true", help="Run GameLoader tests only")
     parser.add_argument("--odds", action="store_true", help="Run OddsLoader tests only")
     parser.add_argument("--player", action="store_true", help="Run PlayerLoader tests only")
     parser.add_argument("--team", action="store_true", help="Run TeamLoader tests only")
+    
+    # Feature tests  
+    parser.add_argument("--features", action="store_true", help="Run all feature tests")
+    parser.add_argument("--batting", action="store_true", help="Run BattingFeatures tests only")
+    parser.add_argument("--context", action="store_true", help="Run GameContextFeatures tests only")
+    parser.add_argument("--pipeline", action="store_true", help="Run FeaturePipeline tests only")
+    
     parser.add_argument("--coverage", action="store_true", help="Generate coverage report")
     parser.add_argument("--parallel", action="store_true", help="Run tests in parallel")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
@@ -45,17 +55,26 @@ def main():
     
     success = True
     
-    if args.all or not any([args.game, args.odds, args.player, args.team]):
+    if args.all or not any([args.loaders, args.features, args.game, args.odds, args.player, args.team, args.batting, args.context, args.pipeline]):
         # Run all tests
-        cmd = base_cmd + ["tests/loaders/"]
+        cmd = base_cmd + ["tests/"]
         if args.parallel:
             cmd.extend(["-n", "auto"])
         if args.coverage:
-            cmd.extend(["--cov=data.loaders", "--cov-report=html", "--cov-report=term"])
+            cmd.extend(["--cov=data", "--cov-report=html", "--cov-report=term"])
         
-        success &= run_command(cmd, "All loader tests")
+        success &= run_command(cmd, "All tests")
     
     else:
+        # Loader tests
+        if args.loaders:
+            cmd = base_cmd + ["tests/loaders/"]
+            if args.parallel:
+                cmd.extend(["-n", "auto"])
+            if args.coverage:
+                cmd.extend(["--cov=data.loaders", "--cov-report=html", "--cov-report=term"])
+            success &= run_command(cmd, "All loader tests")
+        
         if args.game:
             cmd = base_cmd + ["tests/loaders/test_game_loader.py"]
             success &= run_command(cmd, "GameLoader tests")
@@ -71,6 +90,27 @@ def main():
         if args.team:
             cmd = base_cmd + ["tests/loaders/test_team_loader.py"]
             success &= run_command(cmd, "TeamLoader tests")
+        
+        # Feature tests
+        if args.features:
+            cmd = base_cmd + ["tests/features/"]
+            if args.parallel:
+                cmd.extend(["-n", "auto"])
+            if args.coverage:
+                cmd.extend(["--cov=data.features", "--cov-report=html", "--cov-report=term"])
+            success &= run_command(cmd, "All feature tests")
+        
+        if args.batting:
+            cmd = base_cmd + ["tests/features/test_batting_features.py"]
+            success &= run_command(cmd, "BattingFeatures tests")
+        
+        if args.context:
+            cmd = base_cmd + ["tests/features/test_context_features.py"]
+            success &= run_command(cmd, "GameContextFeatures tests")
+        
+        if args.pipeline:
+            cmd = base_cmd + ["tests/features/test_feature_pipeline.py"]
+            success &= run_command(cmd, "FeaturePipeline tests")
     
     print(f"\n{'='*60}")
     if success:

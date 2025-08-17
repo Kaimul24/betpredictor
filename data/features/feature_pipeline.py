@@ -82,7 +82,7 @@ class FeaturePipeline():
 
         schedule_data = schedule_data.reset_index().copy()
 
-        unique_cols = ['team', 'opposing_team', 'starter_normalized', 'opposing_starter_normalized', 'team_score', 'opposing_team_score']
+        unique_cols = ['away_team', 'home_team', 'away_probable_pitcher', 'home_probable_pitcher', 'starter_normalized', 'opposing_starter_normalized', 'away_score', 'home_team_score']
         common_cols = [col for col in schedule_data.columns if col not in unique_cols]
 
         away_df_base = schedule_data[common_cols]

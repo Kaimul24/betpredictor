@@ -1,15 +1,3 @@
-"""
-Tests for GameLoader class.
-
-Tests the schedule/game data loading functionality including:
-- Loading games for date ranges
-- Loading team-specific games up to a date
-- Season game loading
-- Team records and statistics
-- Game streaks
-- Rest days calculation
-"""
-
 import pytest
 import pandas as pd
 from datetime import date
@@ -194,11 +182,10 @@ class TestGameLoader:
         """Test that park factors with NULL values are filtered out."""
         park_factors = [
             (1, 'Fenway Park', 2024, 105),
-            (2, 'Yankee Stadium', 2024, None),  # This should be filtered out
+            (2, 'Yankee Stadium', 2024, None),
             (3, 'Coors Field', 2024, 115),
         ]
         
-        # Insert manually to include NULL value
         query = """
         INSERT INTO park_factors (venue_id, venue_name, season, park_factor) 
         VALUES (?, ?, ?, ?)
@@ -208,7 +195,7 @@ class TestGameLoader:
         df = game_loader.load_park_factor_season(season=2024)
         
         assert_dataframe_not_empty(df)
-        assert len(df) == 2  # Only non-NULL park factors
+        assert len(df) == 2
         assert_dataframe_values(df, 'venue_name', ['Fenway Park', 'Coors Field'])
 
     def test_load_park_factor_season_multiple_seasons(self, game_loader, clean_db):
@@ -221,13 +208,11 @@ class TestGameLoader:
         ]
         insert_park_factors(clean_db, park_factors)
         
-        # Test 2024 season
         df_2024 = game_loader.load_park_factor_season(season=2024)
         assert len(df_2024) == 2
         assert_dataframe_values(df_2024, 'season', [2024, 2024])
         assert_dataframe_values(df_2024, 'park_factor', [105, 98])
         
-        # Test 2023 season
         df_2023 = game_loader.load_park_factor_season(season=2023)
         assert len(df_2023) == 2
         assert_dataframe_values(df_2023, 'season', [2023, 2023])
@@ -245,13 +230,11 @@ class TestGameLoader:
         
         assert_dataframe_schema(df, game_loader.venue_columns)
         
-        # Check data types
         assert pd.api.types.is_integer_dtype(df['venue_id'])
         assert pd.api.types.is_object_dtype(df['venue_name'])
         assert pd.api.types.is_integer_dtype(df['season'])
         assert pd.api.types.is_integer_dtype(df['park_factor'])
         
-        # Check required fields have no null values
         required_fields = ['venue_id', 'venue_name', 'season', 'park_factor']
         for field in required_fields:
             assert not df[field].isnull().any(), f"Field {field} should not have null values"
