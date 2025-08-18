@@ -24,7 +24,7 @@ class BattingFeatures(BaseFeatures):
 
     def __init__(self, season: int, data: DataFrame):
         super().__init__(season, data)
-        self.rolling_windows = [25,14,9,5,3]
+        self.rolling_windows = [25,14,9,5,3,0]
         self.rolling_metrics = ['ops', 'wrc_plus', 'woba', 'babip', 'bb_k', 
                                'barrel_percent', 'hard_hit', 'ev', 'iso', 'gb_fb',
                                'baserunning', 'wraa', 'wpa']
@@ -51,6 +51,7 @@ class BattingFeatures(BaseFeatures):
 
         players = db.execute_read_query(players, (self.season,))
         logger.info(f" Calculating rolling stats for {len(players)} players in {self.season}")
+
         all_players = []
         batch_size = 50
         for i in range(0, len(players), batch_size):
@@ -78,15 +79,15 @@ class BattingFeatures(BaseFeatures):
 
 
     def _process_player_batch(self, player_ids: List[str]) -> DataFrame:
-        """Process a batch of players and insert their rolling stats"""
+        """Process a batch of players and return their rolling stats"""
         db = get_database_manager()
         all_rolling_stats = []
-        
+
         with db.get_reader_connection() as conn:
             for player_id in player_ids:
 
                 player_query = """
-                SELECT player_id, game_date, team, dh, ops, wrc_plus, woba, babip, bb_k,
+                SELECT player_id,    game_date, team, dh, ops, wrc_plus, woba, babip, bb_k,
                        barrel_percent, hard_hit, ev, iso, gb_fb, baserunning, wraa, wpa, pa
                 FROM batting_stats 
                 WHERE player_id = ? AND season = ?
@@ -104,58 +105,50 @@ class BattingFeatures(BaseFeatures):
                     if not player_rolling.empty:
                         all_rolling_stats.append(player_rolling)
         
-
         if all_rolling_stats:
             combined_stats = pd.concat(all_rolling_stats, ignore_index=True)
             return combined_stats
         else:
             return pd.DataFrame()
 
-
     def _calculate_rolling_window_for_player(self, player_data: DataFrame) -> DataFrame:
         """Calculate rolling stats for a single player across all windows"""
+
+        def rolling_vs_expanding(window_):
+            return window_.expanding(min_periods=1) if season_window else window_.rolling(window=window, min_periods=1)
+
         all_results = []
         
         player_data['game_date'] = pd.to_datetime(player_data['game_date'])
         player_data = player_data.sort_values(['game_date', 'dh'])
         
         for window in self.rolling_windows:
-            rolling_data = player_data.copy()
+            season_window = (window == 0)
+
+            data = player_data.copy()
             
             for metric in self.rolling_metrics:
-                if metric in rolling_data.columns:
-
+                if metric in data.columns:  
+                    # PA weighted metrics
                     if metric in ['ops', 'wrc_plus', 'woba', 'babip', 'bb_k', 'ev', 'iso']:
 
-                        weighted_sum = (rolling_data[metric] * rolling_data["pa"]).rolling(
-                            window=window, min_periods=1
-                        ).sum()
+                        stat = rolling_vs_expanding(data[metric] * data['pa']).sum()
                         
-                        total_pa = rolling_data["pa"].rolling(
-                            window=window, min_periods=1
-                        ).sum()
+                        total_pa = rolling_vs_expanding(data['pa']).sum()
                         
-                        rolling_values = weighted_sum / total_pa
+                        rolling_values = stat / total_pa
                     else:
-
-                        rolling_values = rolling_data[metric].rolling(
-                            window=window, min_periods=1
-                        ).mean()
+                        # Simple averages
+                        rolling_values = rolling_vs_expanding(data[metric]).mean()
                     
-                    rolling_data[f"{metric}_rolling"] = rolling_values.shift(1)
+                    data[f"{metric}_rolling"] = rolling_values.shift(1)
             
-            rolling_data['window_size'] = window
-            rolling_data['games_in_window'] = rolling_data['pa'].rolling(
-                window=window, min_periods=1
-            ).count().shift(1)
-
-            rolling_data['total_pa_in_window'] = rolling_data['pa'].rolling(
-                window=window, min_periods=1
-            ).sum().shift(1)
-
-            rolling_data['season'] = self.season
+            data['window_size'] = window
+            data['games_in_window'] = rolling_vs_expanding(data['pa']).count().shift(1)
+            data['total_pa_in_window'] = rolling_vs_expanding(data['pa']).sum().shift(1)
+            data['season'] = self.season
             
-            all_results.append(rolling_data)
+            all_results.append(data)
         
         if all_results:
             return pd.concat(all_results, ignore_index=True)

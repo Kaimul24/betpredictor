@@ -259,7 +259,7 @@ class TestFeaturePipeline:
         with patch.object(feature_pipeline, '_load_batting_data') as mock_batting:
             batting_features_data = []
             
-            for window in [3, 7, 14, 25]:
+            for window in [3, 5, 9, 14, 25, 0]:
                 for game_date in ['2024-04-01', '2024-04-02', '2024-04-03']:
                     for player_id in ['player1', 'player2', 'player3', 'player4']:
                         batting_features_data.append({
@@ -287,7 +287,7 @@ class TestFeaturePipeline:
                 assert_dataframe_not_empty(team_features)
                 
 
-                rolling_cols = [col for col in team_features.columns if col.endswith(('_w3', '_w7', '_w14', '_w25'))]
+                rolling_cols = [col for col in team_features.columns if col.endswith(('_w3', '_w5', '_w9', '_w14', '_w25', '_w0'))]
                 assert len(rolling_cols) > 0, "Should have rolling window features"
 
     def test_add_opponent_features(self, feature_pipeline):

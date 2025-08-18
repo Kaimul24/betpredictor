@@ -8,10 +8,8 @@ from pandas.core.api import DataFrame as DataFrame
 import logging, sys, argparse
 import numpy as np
 from typing import List
-
 logger = None
 args = None
-
 from src.config import PROJECT_ROOT
 
 from data.features.game_features.context import GameContextFeatures
@@ -38,6 +36,7 @@ def create_args():
     parser.add_argument("--force_recreate", action="store_true", help="Recreate batting rolling features, even if cached file exists")
     parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
+    parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
     args = parser.parse_args()
 
 def setup_logging():
@@ -58,8 +57,18 @@ def setup_logging():
     sh.setFormatter(fmt)
     logger.addHandler(sh)
     
+
     if hasattr(args, 'log') and args.log:
         log_file = args.log_file if hasattr(args, 'log_file') and args.log_file else LOG_FILE
+        
+        if hasattr(args, 'clear_log') and args.clear_log:
+            try:
+                with open(log_file, 'w') as f:
+                    pass
+                logger.info(f"Cleared log file: {log_file}")
+            except Exception as e:
+                logger.info(f"Warning: Could not clear log file {log_file}: {e}")
+        
         fh = logging.FileHandler(log_file, encoding="utf-8")
         fh.setLevel(logging.DEBUG)
         fh.setFormatter(fmt)
@@ -546,7 +555,7 @@ class FeaturePipeline():
 
         
     
-    def start_pipeline(self, force_recreate: bool = False):
+    def start_pipeline(self, force_recreate: bool = False, clear_log: bool = False):
         # Set up args if not already done (for script compatibility)
         global args
         if args is None:
@@ -555,8 +564,10 @@ class FeaturePipeline():
             parser.add_argument("--force_recreate", action="store_true", help="Recreate batting rolling features, even if cached file exists")
             parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
             parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
+            parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
             args = parser.parse_args([])  # Parse empty args for programmatic use
             args.force_recreate = force_recreate
+            args.clear_log = clear_log
 
         self.logger.info("="*60)
         self.logger.info(f" Starting feature pipeline...")
@@ -597,16 +608,14 @@ class FeaturePipeline():
         self.logger.info(f" Final merged dataset shape: {final_features.shape}")
 
         self.logger.debug("="*60 + "\n")
-        self.logger.debug(" Final features DataFrame")
-        self.logger.debug(final_features.to_string())
+        self.logger.debug(" Final features DataFrame tail")
+        self.logger.debug(final_features.tail(10).to_string())
         self.logger.debug("="*60 + "\n")
 
         return final_features
         
 def main():
     create_args()
-    global logger
-    logger = setup_logging()
     
     feat_pipe = FeaturePipeline(2021)
     features = feat_pipe.start_pipeline()

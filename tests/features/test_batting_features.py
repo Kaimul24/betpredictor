@@ -6,7 +6,8 @@ Tests the batting stats rolling features calculation including:
 - Data leakage prevention by ensuring only historical data is used
 - Weighted averages for plate appearance dependent metrics
 - Simple averages for rate metrics
-- Multiple rolling windows (3, 7, 14, 25 games)
+- Multiple rolling windows (3, 5, 9, 14, 25 games) plus season window (0)
+- Season window using expanding calculations for all historical data
 - Player batch processing
 - Caching functionality
 """
@@ -170,7 +171,7 @@ class TestBattingFeatures:
         bf = BattingFeatures(season=2024, data=data)
         
         assert bf.season == 2024
-        assert bf.rolling_windows == [25, 14, 9, 5, 3]
+        assert bf.rolling_windows == [25, 14, 9, 5, 3, 0]
         assert len(bf.rolling_metrics) == 13
         assert 'ops' in bf.rolling_metrics
         assert 'wrc_plus' in bf.rolling_metrics
@@ -269,8 +270,57 @@ class TestBattingFeatures:
             assert abs(last_game['barrel_percent_rolling'] - expected_barrel_simple) < 0.001, \
                 "Barrel percent should use simple average"
 
+    def test_season_window_calculation(self, batting_features, temporal_batting_data):
+        """
+        Test that season window (window=0) uses expanding window with all historical data.
+        Season stats should include all games from season start up to (but not including) current game.
+        """
+        data = self._load_batting_data(2024)
+        player1_data = data[data['player_id'] == 'player1'].copy()
+        player1_data['game_date'] = pd.to_datetime(player1_data['game_date'])
+        player1_data = player1_data.sort_values(['game_date', 'dh'])
+        
+        for metric in batting_features.rolling_metrics:
+            if metric not in player1_data.columns:
+                player1_data[metric] = np.random.uniform(0.1, 1.0, len(player1_data))
+        
+        rolling_stats = batting_features._calculate_rolling_window_for_player(player1_data)
+        
+        season_stats = rolling_stats[rolling_stats['window_size'] == 0].copy()
+        season_stats = season_stats.sort_values(['game_date', 'dh'])
+        
+        first_game = season_stats.iloc[0]
+        assert pd.isna(first_game['ops_rolling']), "First game should have no season rolling stats"
+        
+        if len(season_stats) >= 2:
+            second_game = season_stats.iloc[1]
+            first_game_ops = player1_data.iloc[0]['ops']
+            assert abs(second_game['ops_rolling'] - first_game_ops) < 0.001, \
+                "Second game season rolling should equal first game's stats"
+        
+        if len(season_stats) >= 5:
+            fifth_game = season_stats.iloc[4]
+            
+            historical_games = player1_data.iloc[0:4]
+            expected_ops = (
+                (historical_games['ops'] * historical_games['pa']).sum() / 
+                historical_games['pa'].sum()
+            )
+            
+            assert abs(fifth_game['ops_rolling'] - expected_ops) < 0.001, \
+                f"Fifth game season OPS should be weighted average of all previous games. " \
+                f"Expected: {expected_ops}, Got: {fifth_game['ops_rolling']}"
+        
+        if len(season_stats) >= 3:
+            for i in range(1, min(len(season_stats), 5)):
+                game = season_stats.iloc[i]
+                expected_games = i
+                assert abs(game['games_in_window'] - expected_games) < 0.1, \
+                    f"Season window game {i+1} should have {expected_games} games in window, " \
+                    f"got {game['games_in_window']}"
+
     def test_rolling_window_multiple_windows(self, batting_features, temporal_batting_data):
-        """Test that all rolling windows (25, 14, 9, 5, 3) are calculated."""
+        """Test that all rolling windows (25, 14, 9, 5, 3, 0) are calculated."""
         data = self._load_batting_data(2024)
         player1_data = data[data['player_id'] == 'player1'].copy()
         player1_data['game_date'] = pd.to_datetime(player1_data['game_date'])
@@ -282,7 +332,7 @@ class TestBattingFeatures:
         rolling_stats = batting_features._calculate_rolling_window_for_player(player1_data)
         
         unique_windows = rolling_stats['window_size'].unique()
-        expected_windows = [25, 14, 9, 5, 3]
+        expected_windows = [25, 14, 9, 5, 3, 0]
         assert set(unique_windows) == set(expected_windows), \
             f"Expected windows {expected_windows}, got {unique_windows}"
         
@@ -420,3 +470,49 @@ class TestBattingFeatures:
             if not pd.isna(expected_games):
                 assert abs(row['games_in_window'] - expected_games) < 0.1 or pd.isna(row['games_in_window']), \
                     f"Games in window should be {expected_games}, got {row['games_in_window']}"
+        
+        season_stats = rolling_stats[rolling_stats['window_size'] == 0].copy()
+        season_stats = season_stats.sort_values(['game_date', 'dh'])
+        season_stats = season_stats.reset_index()
+        
+        for i, row in season_stats.iterrows():
+            expected_games = i if i > 0 else np.nan
+            
+            if not pd.isna(expected_games):
+                assert abs(row['games_in_window'] - expected_games) < 0.1 or pd.isna(row['games_in_window']), \
+                    f"Season window games in window should be {expected_games}, got {row['games_in_window']}"
+
+    def test_season_vs_rolling_window_behavior(self, batting_features, temporal_batting_data):
+        """
+        Test that season window (0) behaves differently from rolling windows.
+        Season window should expand while rolling windows should maintain fixed size.
+        """
+        data = self._load_batting_data(2024)
+        player1_data = data[data['player_id'] == 'player1'].copy()
+        player1_data['game_date'] = pd.to_datetime(player1_data['game_date'])
+        player1_data = player1_data.sort_values(['game_date', 'dh'])
+        
+        for metric in batting_features.rolling_metrics:
+            if metric not in player1_data.columns:
+                player1_data[metric] = np.random.uniform(0.1, 1.0, len(player1_data))
+        
+        rolling_stats = batting_features._calculate_rolling_window_for_player(player1_data)
+        
+        if len(player1_data) >= 7:
+            game_7_stats = rolling_stats.reset_index()
+            game_7_stats = game_7_stats.groupby('window_size').nth(6)
+            
+            if 0 in game_7_stats.index:
+                season_games = game_7_stats.loc[0, 'games_in_window']
+                assert abs(season_games - 6) < 0.1, \
+                    f"Season window should have 6 games for 7th game, got {season_games}"
+            
+            if 3 in game_7_stats.index:
+                rolling_3_games = game_7_stats.loc[3, 'games_in_window'] 
+                assert abs(rolling_3_games - 3) < 0.1, \
+                    f"3-game rolling window should have 3 games for 7th game, got {rolling_3_games}"
+            
+            if 5 in game_7_stats.index:
+                rolling_5_games = game_7_stats.loc[5, 'games_in_window']
+                assert abs(rolling_5_games - 5) < 0.1, \
+                    f"5-game rolling window should have 5 games for 7th game, got {rolling_5_games}"
