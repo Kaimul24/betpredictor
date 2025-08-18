@@ -41,6 +41,7 @@ def main():
     parser.add_argument("--features", action="store_true", help="Run all feature tests")
     parser.add_argument("--batting", action="store_true", help="Run BattingFeatures tests only")
     parser.add_argument("--context", action="store_true", help="Run GameContextFeatures tests only")
+    parser.add_argument("--team-features", action="store_true", help="Run TeamFeatures tests only")
     parser.add_argument("--pipeline", action="store_true", help="Run FeaturePipeline tests only")
     
     parser.add_argument("--coverage", action="store_true", help="Generate coverage report")
@@ -55,7 +56,7 @@ def main():
     
     success = True
     
-    if args.all or not any([args.loaders, args.features, args.game, args.odds, args.player, args.team, args.batting, args.context, args.pipeline]):
+    if args.all or not any([args.loaders, args.features, args.game, args.odds, args.player, args.team, args.batting, args.context, args.team_features, args.pipeline]):
         # Run all tests
         cmd = base_cmd + ["tests/"]
         if args.parallel:
@@ -107,6 +108,10 @@ def main():
         if args.context:
             cmd = base_cmd + ["tests/features/test_context_features.py"]
             success &= run_command(cmd, "GameContextFeatures tests")
+        
+        if args.team_features:
+            cmd = base_cmd + ["tests/features/test_team_features.py"]
+            success &= run_command(cmd, "TeamFeatures tests")
         
         if args.pipeline:
             cmd = base_cmd + ["tests/features/test_feature_pipeline.py"]

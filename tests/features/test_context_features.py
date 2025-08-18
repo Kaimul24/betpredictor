@@ -31,10 +31,10 @@ class TestGameContextFeatures:
         games = [
             ('game1', '2024-04-01', '2024-04-01T19:05:00', 2024, 'NYY', 'BOS', 
              'Final', 5, 3, 'NYY', 'BOS', 0),
-            # Game with different weather
+            
             ('game2', '2024-04-02', '2024-04-02T13:10:00', 2024, 'TB', 'NYY', 
              'Final', 2, 7, 'NYY', 'TB', 0),
-            # Game with missing weather data
+            
             ('game3', '2024-04-03', '2024-04-03T19:35:00', 2024, 'LAD', 'SF', 
              'Final', 4, 1, 'LAD', 'SF', 0),
         ]

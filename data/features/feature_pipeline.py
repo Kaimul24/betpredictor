@@ -15,7 +15,6 @@ args = None
 from src.config import PROJECT_ROOT
 
 from data.features.game_features.context import GameContextFeatures
-from data.features.game_features.matchup import MatchupFeatures
 from data.features.game_features.odds import Odds
 from data.features.player_features.batting import BattingFeatures
 from data.features.player_features.fielding import FieldingFeatures
@@ -74,6 +73,7 @@ class FeaturePipeline():
     def __init__(self, season: int):
         self.season = season
         self.cache = {}
+        self.logger = setup_logging()
 
     def _load_schedule_data(self) -> DataFrame:
         game_loader = GameLoader()
@@ -88,6 +88,8 @@ class FeaturePipeline():
     def _load_batting_data(self) -> DataFrame:
         loader = PlayerLoader()
         batting_data = loader.load_for_season_batter(self.season)
+        if batting_data.empty:
+            raise ValueError(f"Batting data in {self.season} is empty")
         return batting_data
     
     def _load_lineups_data(self) -> DataFrame:
@@ -97,7 +99,7 @@ class FeaturePipeline():
     
     def _transform_schedule(self, schedule_data: DataFrame) -> DataFrame:
         """Splits each game in the schedule into 2 rows, each representing one team's perspective of the game"""
-        logger.info(f" Transforming schedule for {self.season}")
+        self.logger.info(f" Transforming schedule for {self.season}")
 
         schedule_data = schedule_data.reset_index().copy()
 
@@ -205,13 +207,13 @@ class FeaturePipeline():
         lineups_data['game_date'] = pd.to_datetime(lineups_data['game_date'])
         batting_features = BattingFeatures(self.season, raw_batter_data)
         
-        logger.info(f" Calculating batting rolling stats for {self.season}")
+        self.logger.info(f" Calculating batting rolling stats for {self.season}")
         batting_features = batting_features.calculate_all_player_rolling_stats(force_recreate)
 
-        logger.info(f" Merging schedule, lineups, and batting rolling stats for {self.season}")
+        self.logger.info(f" Merging schedule, lineups, and batting rolling stats for {self.season}")
         team_features = self._merge_schedule_with_batting_features(schedule_df, lineups_data, batting_features)
 
-        logger.info(f" Adding opposing team batting stats to each row for {self.season}")
+        self.logger.info(f" Adding opposing team batting stats to each row for {self.season}")
         team_and_opponent_feats = self._add_opponent_features(team_features)
         team_and_opponent_feats = team_and_opponent_feats.sort_index(level=['game_date', 'dh', 'team'])
         team_and_opponent_feats = team_and_opponent_feats.reset_index()
@@ -266,13 +268,13 @@ class FeaturePipeline():
             )
 
             unmatched_games = unmatched_games[unmatched_games['_merge'] == 'left_only'].drop(columns=['_merge'])
-            logger.info(f" Unmatched games: {len(unmatched_games)}")
+            self.logger.info(f" Unmatched games: {len(unmatched_games)}")
 
             return unmatched_games
         
         def check_column_mismatches(merged_df: DataFrame, merge_type: str = ""):
             """Check for mismatches between _sch and _odds columns and log/save details"""
-            logger.debug(" Checking for column missmatches...")
+            self.logger.debug(" Checking for column missmatches...")
             for col in merged_df.columns:
                 if col.endswith('_sch'):
                     base_name = col[:-4] 
@@ -282,24 +284,24 @@ class FeaturePipeline():
                         mismatch = merged_df[col] != merged_df[odds_col]
 
                         if mismatch.any():
-                            logger.warning(f" WARNING{merge_type}: {base_name} has {mismatch.sum()} mismatches")
+                            self.logger.warning(f" WARNING{merge_type}: {base_name} has {mismatch.sum()} mismatches")
                            
                             mismatched_rows = merged_df[mismatch]
                             mismatch_file = f"{base_name}_mismatches{merge_type.lower().replace(' ', '_')}.txt"
 
-                            logger.debug(f" Mismatches for column: {base_name}{merge_type}\n")
-                            logger.debug("="*50 + "\n")
+                            self.logger.debug(f" Mismatches for column: {base_name}{merge_type}\n")
+                            self.logger.debug("="*50 + "\n")
 
                             for _, row in mismatched_rows.iterrows():
                                 sch_val = row[col]
                                 odds_val = row[odds_col]
                                 game_info = f"{row.get('game_date', 'N/A')} {row.get('dh', 'N/A')} {row.get('away_team', 'N/A')} @ {row.get('home_team', 'N/A')}"
-                                logger.debug(f"Game: {game_info}\n")
-                                logger.debug(f"  Schedule value: {sch_val}\n")
-                                logger.debug(f"  Odds value: {odds_val}\n")
-                                logger.debug("-" * 30 + "\n")
+                                self.logger.debug(f"Game: {game_info}\n")
+                                self.logger.debug(f"  Schedule value: {sch_val}\n")
+                                self.logger.debug(f"  Odds value: {odds_val}\n")
+                                self.logger.debug("-" * 30 + "\n")
 
-                            logger.info(f" Detailed mismatches saved to {mismatch_file}")
+                            self.logger.info(f" Detailed mismatches saved to {mismatch_file}")
         
         keys_ = ['game_date', 'game_datetime', 'away_team', 'home_team']
 
@@ -319,10 +321,10 @@ class FeaturePipeline():
                                 merged_games['home_current_odds'].isna()
                             ]
         
-        logger.info(f" After basic merge: {len(merged_games)} rows")
-        logger.info(f" Unique games in schedule: {schedule_data[['game_date', 'dh', 'away_team', 'home_team']].drop_duplicates().shape[0]}")
-        logger.info(f" Unique games in odds: {odds_data[['game_date', 'game_datetime', 'away_team', 'home_team']].drop_duplicates().shape[0]}")
-        logger.info(f" Games without odds: {len(games_without_odds)}")
+        self.logger.info(f" After basic merge: {len(merged_games)} rows")
+        self.logger.info(f" Unique games in schedule: {schedule_data[['game_date', 'dh', 'away_team', 'home_team']].drop_duplicates().shape[0]}")
+        self.logger.info(f" Unique games in odds: {odds_data[['game_date', 'game_datetime', 'away_team', 'home_team']].drop_duplicates().shape[0]}")
+        self.logger.info(f" Games without odds: {len(games_without_odds)}")
 
         check_column_mismatches(merged_games, " (Initial Merge)")
 
@@ -359,7 +361,7 @@ class FeaturePipeline():
                     keys=['game_date', 'away_team', 'home_team']
                 )
 
-                logger.info(f" Remaining unmatched games: {len(remaining_unmatched_games)}")
+                self.logger.info(f" Remaining unmatched games: {len(remaining_unmatched_games)}")
                 
                 all_odds_data = pd.concat([merged_games, updated_odds_with_dh], ignore_index=True)
                 all_odds_data = all_odds_data.drop_duplicates(
@@ -385,21 +387,21 @@ class FeaturePipeline():
                 final_merged = final_merged.set_index(['game_date', 'dh', 'game_datetime', 'away_team', 'home_team'])
 
                 
-                logger.info(f" Merged games: {len(final_merged)}")
+                self.logger.info(f" Merged games: {len(final_merged)}")
                 
                 original_odds_count = len(odds_data)
                 all_odds_count = len(all_odds_data)
-                logger.info(f" Original odds: {original_odds_count}, All merged odds (including reconciled): {all_odds_count}")
+                self.logger.info(f" Original odds: {original_odds_count}, All merged odds (including reconciled): {all_odds_count}")
                 
                 if all_odds_count > original_odds_count:
-                    logger.warning(f" Merged games ({all_odds_count}) exceed total available odds ({original_odds_count})!")
+                    self.logger.warning(f" Merged games ({all_odds_count}) exceed total available odds ({original_odds_count})!")
                 else:
-                    logger.info(f" Merge validation passed: {all_odds_count} merged <= {original_odds_count} total odds")
+                    self.logger.info(f" Merge validation passed: {all_odds_count} merged <= {original_odds_count} total odds")
 
                 # self._print_matching_summary(schedule_data, odds_data, final_merged, remaining_unmatched_games)
                 merged_games = final_merged
             else:
-                logger.warning("handle_unmatched_games returned no matches")
+                self.logger.warning("handle_unmatched_games returned no matches")
 
         id_cols = ["game_date", "dh", "game_datetime", 'away_team', 'home_team']
 
@@ -436,38 +438,38 @@ class FeaturePipeline():
             final_result = metadata_df.join(odds_pivoted, how='left')
         else:
             final_result = metadata_df
-            logger.debug("="*50 + "\n")
-            logger.debug(" Resulting DataFrame after matching schedule")       
-            logger.debug(final_result.to_string())
-            logger.debug("="*50 + "\n")
+            self.logger.debug("="*50 + "\n")
+            self.logger.debug(" Resulting DataFrame after matching schedule")       
+            self.logger.debug(final_result.to_string())
+            self.logger.debug("="*50 + "\n")
 
         return final_result
 
     def _log_matching_summary(self, schedule_data: DataFrame, odds_data: DataFrame, 
                                final_merged: DataFrame, remaining_unmatched: DataFrame):
         """Print a comprehensive summary of the schedule-to-odds matching process"""
-        logger.debug("\n" + "="*60)
-        logger.debug(" SCHEDULE-TO-ODDS MATCHING SUMMARY")
-        logger.debug("="*60)
+        self.logger.debug("\n" + "="*60)
+        self.logger.debug(" SCHEDULE-TO-ODDS MATCHING SUMMARY")
+        self.logger.debug("="*60)
         
         schedule_games = schedule_data[['game_date', 'away_team', 'home_team']].drop_duplicates()
         odds_games = odds_data[['game_date', 'away_team', 'home_team']].drop_duplicates()
         merged_games = final_merged.reset_index()[['game_date', 'away_team', 'home_team']].drop_duplicates()
         
-        logger.debug(f" Total unique games in schedule: {len(schedule_games)}")
-        logger.debug(f" Total unique games in odds: {len(odds_games)}")
-        logger.debug(f" Successfully matched unique games: {len(merged_games)}")
-        logger.debug(f" Remaining unmatched odds entries: {len(remaining_unmatched)}")
+        self.logger.debug(f" Total unique games in schedule: {len(schedule_games)}")
+        self.logger.debug(f" Total unique games in odds: {len(odds_games)}")
+        self.logger.debug(f" Successfully matched unique games: {len(merged_games)}")
+        self.logger.debug(f" Remaining unmatched odds entries: {len(remaining_unmatched)}")
         
         match_rate = (len(merged_games) / len(odds_games)) * 100 if len(odds_games) > 0 else 0
-        logger.debug(f" Match rate: {match_rate:.1f}%")
+        self.logger.debug(f" Match rate: {match_rate:.1f}%")
         
         if len(remaining_unmatched) > 0:
-            logger.debug(f"\nSample unmatched games (first 5):")
+            self.logger.debug(f"\nSample unmatched games (first 5):")
             sample_cols = ['game_date', 'game_datetime', 'away_team', 'home_team']
-            logger.debug(remaining_unmatched[sample_cols].head().to_string(index=False))
+            self.logger.debug(remaining_unmatched[sample_cols].head().to_string(index=False))
         
-        logger.debug("="*60 + "\n")
+        self.logger.debug("="*60 + "\n")
 
 
     def _handle_unmatched_games(self, schedule: DataFrame, unmatched_games: DataFrame) -> DataFrame:
@@ -479,7 +481,7 @@ class FeaturePipeline():
         if unmatched_games.empty:
             return DataFrame()
         
-        logger.info(" Reconciling unmatched games with datetime matching by time distance")
+        self.logger.info(" Reconciling unmatched games with datetime matching by time distance")
         schedule = schedule.reset_index().copy()
         
         schedule['game_datetime'] = pd.to_datetime(schedule['game_datetime'])
@@ -496,7 +498,7 @@ class FeaturePipeline():
             ].copy()
             
             if len(schedule_games) == 0:
-                logger.warning(f" No schedule match for {date} {away} @ {home}")
+                self.logger.warning(f" No schedule match for {date} {away} @ {home}")
                 continue
             elif len(schedule_games) == 1:
                 for _, odds_row in group.iterrows():
@@ -523,7 +525,7 @@ class FeaturePipeline():
                     merged_row['dh'] = closest_game['dh']
                     reconciled_games.append(merged_row)
                     
-                    logger.debug(f"Matched {odds_row['sportsbook']} odds for {date} {away}@{home} "
+                    self.logger.debug(f"Matched {odds_row['sportsbook']} odds for {date} {away}@{home} "
                                f"(odds time: {odds_time}) to Game {int(closest_game['dh'])} "
                                f"(schedule time: {closest_game['game_datetime']})")
         
@@ -532,11 +534,11 @@ class FeaturePipeline():
 
             result_df = result_df.drop(columns=['game_datetime'], errors='ignore')
             
-            logger.info(f" Game reconciliation completed: {len(result_df)} odds matched")
+            self.logger.info(f" Game reconciliation completed: {len(result_df)} odds matched")
             
             unique_matches = result_df.groupby(['game_date', 'away_team', 'home_team', 'sportsbook', 'dh']).size()
             if (unique_matches > 1).any():
-                logger.warning("Duplicate matches detected in reconciliation!")
+                self.logger.warning("Duplicate matches detected in reconciliation!")
             
             return result_df
         else:
@@ -544,12 +546,21 @@ class FeaturePipeline():
 
         
     
-    def start_pipeline(self):
-        create_args()
+    def start_pipeline(self, force_recreate: bool = False):
+        # Set up args if not already done (for script compatibility)
+        global args
+        if args is None:
+            import argparse
+            parser = argparse.ArgumentParser(description="Feature engineering runner")
+            parser.add_argument("--force_recreate", action="store_true", help="Recreate batting rolling features, even if cached file exists")
+            parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
+            parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
+            args = parser.parse_args([])  # Parse empty args for programmatic use
+            args.force_recreate = force_recreate
 
-        logger.info("="*60)
-        logger.info(f" Starting feature pipeline...")
-        logger.info("="*60 + "\n")
+        self.logger.info("="*60)
+        self.logger.info(f" Starting feature pipeline...")
+        self.logger.info("="*60 + "\n")
         schedule_data = self._load_schedule_data()
 
         odds_data = self._load_odds_data()
@@ -583,12 +594,12 @@ class FeaturePipeline():
         final_features = final_features.drop(columns=[col for col in final_features.columns if col.endswith('_sch_bat') or col in ['wind', 'condition']])
         final_features = final_features.set_index(['game_date', 'dh', 'team'])
         
-        logger.info(f" Final merged dataset shape: {final_features.shape}")
+        self.logger.info(f" Final merged dataset shape: {final_features.shape}")
 
-        logger.debug("="*60 + "\n")
-        logger.debug(" Final features DataFrame")
-        logger.debug(final_features.to_string())
-        logger.debug("="*60 + "\n")
+        self.logger.debug("="*60 + "\n")
+        self.logger.debug(" Final features DataFrame")
+        self.logger.debug(final_features.to_string())
+        self.logger.debug("="*60 + "\n")
 
         return final_features
         

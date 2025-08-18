@@ -96,7 +96,6 @@ def insert_schedule_games(dbm, games: List[Tuple]) -> None:
     
     dbm.execute_many_write_queries(query, games)
 
-
 def insert_odds_data(dbm, odds: List[Tuple]) -> None:
     """
     Insert odds data for testing.

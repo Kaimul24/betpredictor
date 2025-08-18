@@ -28,15 +28,6 @@ class BattingFeatures(BaseFeatures):
         self.rolling_metrics = ['ops', 'wrc_plus', 'woba', 'babip', 'bb_k', 
                                'barrel_percent', 'hard_hit', 'ev', 'iso', 'gb_fb',
                                'baserunning', 'wraa', 'wpa']
-
-    def load_data(self) -> DataFrame:
-        loader = PlayerLoader()
-        batting_data = loader.load_for_season_batter(self.season)
-
-        if batting_data.empty:
-            raise ValueError(f"Batting data is empty for season: {self.season}")
-        
-        return batting_data
     
     def calculate_all_player_rolling_stats(self, force_calculate: bool = False) -> DataFrame:
         """Calculate and store rolling stats for all players and store in database"""
