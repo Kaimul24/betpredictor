@@ -22,22 +22,26 @@ from data.database import get_database_manager
 
 class BattingFeatures(BaseFeatures):
 
-    def __init__(self, season: int, data: DataFrame):
+    def __init__(self, season: int, data: DataFrame, force_recreate: bool = False):
         super().__init__(season, data)
+        self.force_recreate = force_recreate
         self.rolling_windows = [25,14,9,5,3,0]
         self.rolling_metrics = ['ops', 'wrc_plus', 'woba', 'babip', 'bb_k', 
                                'barrel_percent', 'hard_hit', 'ev', 'iso', 'gb_fb',
                                'baserunning', 'wraa', 'wpa']
+        
+    def load_features(self):
+        return self.calculate_all_player_rolling_stats()
     
-    def calculate_all_player_rolling_stats(self, force_calculate: bool = False) -> DataFrame:
+    def calculate_all_player_rolling_stats(self) -> DataFrame:
         """Calculate and store rolling stats for all players and store in database"""
         cache_path = Path(FEATURES_CACHE_PATH / BATTING_CACHE_PATH.format(self.season))
 
-        if cache_path.exists()and not force_calculate:
+        if cache_path.exists()and not self.force_recreate:
             logger.info(f" Found cached batter rolling stats for {self.season}")
             batting_features = pd.read_parquet(cache_path)
             return batting_features
-        elif force_calculate:
+        elif self.force_recreate:
             logger.info(f" Recaluclating batter rolling stats...")
             
         logger.info(f" No cached batter rolling stats found for {self.season}")

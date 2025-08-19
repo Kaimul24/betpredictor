@@ -16,6 +16,33 @@ class TeamFeatures(BaseFeatures):
 
         if 'team' not in self.data.index.names:
             raise RuntimeError("_transform_schedule() in feature_pipeline.py is meant to be called before any method in TeamFeatures is used.")
+        
+    def load_features(self) -> DataFrame:
+        data = self.data.copy()
+        
+        win_pct = self.calc_win_pct()
+        h2h = self.calc_h2h_pct()
+        
+        result = pd.merge(
+            win_pct,
+            h2h,
+            left_index=True,
+            right_index=True,
+            how='inner' 
+        )
+
+        assert len(result) == len(win_pct) and len(result) == len(h2h)
+        
+        final_df = pd.merge(
+            result,
+            data[['game_id']],
+            left_index=True,
+            right_index=True,
+            how="inner"
+        )
+
+        assert len(final_df) == len(result)
+        return final_df
 
     def calc_win_pct(self) -> DataFrame:
         """Calculates the winning percentage of each team for each game in a season."""
@@ -58,11 +85,13 @@ def main():
     transformed_data = feat_pipe._transform_schedule(data)
 
     team_feats = TeamFeatures(2021, transformed_data)
-    win_pct = team_feats.calc_win_pct()
-    print(win_pct.tail())
+    team_feats = team_feats.load_features()
+    print(team_feats)
+    # win_pct = team_feats.calc_win_pct()
+    # print(win_pct.tail())
 
-    h2h_pct = team_feats.calc_h2h_pct()
-    print(h2h_pct.tail(8))
+    # h2h_pct = team_feats.calc_h2h_pct()
+    # print(h2h_pct.tail(8))
 
 if __name__ == "__main__":
     main()  

@@ -13,6 +13,9 @@ class Odds(BaseFeatures):
 
     def __init__(self, data: DataFrame, season: int) -> None:
         super().__init__(season, data)
+
+    def load_features(self):
+        pass
         
 def main():
     odds_loader = OddsLoader()

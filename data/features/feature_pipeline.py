@@ -214,10 +214,10 @@ class FeaturePipeline():
         raw_batter_data = self._load_batting_data()
         lineups_data = self._load_lineups_data()
         lineups_data['game_date'] = pd.to_datetime(lineups_data['game_date'])
-        batting_features = BattingFeatures(self.season, raw_batter_data)
+        batting_features = BattingFeatures(self.season, raw_batter_data, force_recreate)
         
         self.logger.info(f" Calculating batting rolling stats for {self.season}")
-        batting_features = batting_features.calculate_all_player_rolling_stats(force_recreate)
+        batting_features = batting_features.load_features()
 
         self.logger.info(f" Merging schedule, lineups, and batting rolling stats for {self.season}")
         team_features = self._merge_schedule_with_batting_features(schedule_df, lineups_data, batting_features)
@@ -565,7 +565,7 @@ class FeaturePipeline():
             parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
             parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
             parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
-            args = parser.parse_args([])  # Parse empty args for programmatic use
+            args = parser.parse_args([])
             args.force_recreate = force_recreate
             args.clear_log = clear_log
 
@@ -579,8 +579,11 @@ class FeaturePipeline():
 
         transformed_schedule = self._transform_schedule(odds_sch_matched)
         batting_features = self._get_batting_features(transformed_schedule, args.force_recreate)
+
         context_features = GameContextFeatures(schedule_data, self.season).load_features()
         context_features = context_features.drop(columns=['away_team', 'home_team'])
+
+        team_features = TeamFeatures(self.season, transformed_schedule).load_features().reset_index()
 
         transformed_schedule_reset = transformed_schedule.reset_index()
         batting_features_reset = batting_features.reset_index()
@@ -593,14 +596,26 @@ class FeaturePipeline():
             validate='1:1' 
         )
 
+
+
         final_features = pd.merge(
             sch_batting_features,
             context_features,
-            on=['game_id', 'dh', 'game_date', 'game_datetime'],
+            on=['game_id', 'game_date', 'dh', 'game_datetime'],
             how='inner',
             validate='m:1',
             suffixes=('_sch_bat', '')
         )
+        
+        final_features = pd.merge(
+            final_features,
+            team_features,
+            on=['game_id', 'game_date', 'dh', 'game_datetime', 'team'],
+            how='inner',
+            validate='1:1',
+        )
+
+        
 
         final_features = final_features.drop(columns=[col for col in final_features.columns if col.endswith('_sch_bat') or col in ['wind', 'condition']])
         final_features = final_features.set_index(['game_date', 'dh', 'team'])

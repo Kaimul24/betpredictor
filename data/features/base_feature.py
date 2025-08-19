@@ -12,5 +12,9 @@ class BaseFeatures(ABC):
         self.season = season
         self.data = data
 
+    @abstractmethod
+    def load_features(self) -> DataFrame:
+        pass
+
 
         
