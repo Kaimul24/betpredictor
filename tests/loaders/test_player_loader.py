@@ -20,10 +20,10 @@ class TestPlayerLoader:
         """Insert sample player data for testing."""
         players = [
             # (player_id, name, pos, current_team)
-            ('player1', 'Mike Trout', 'OF', 'LAA'),
-            ('player2', 'Shohei Ohtani', 'DH', 'LAA'), 
-            ('player3', 'Mookie Betts', 'OF', 'LAD'),
-            ('player4', 'Rafael Devers', '3B', 'SFG'),
+            (1, 'Mike Trout', 'OF', 'LAA'),
+            (2, 'Shohei Ohtani', 'DH', 'LAA'), 
+            (3, 'Mookie Betts', 'OF', 'LAD'),
+            (4, 'Rafael Devers', '3B', 'SFG'),
         ]
         insert_players(clean_db, players)
         return players
@@ -33,12 +33,12 @@ class TestPlayerLoader:
         """Insert sample batting stats for testing."""
         stats = [
             # (player_id, game_date, team, dh, ab, pa, ops, wrc_plus, season)
-            ('player1', '2024-04-01', 'LAA', 0, 4, 5, 0.950, 150, 2024),
-            ('player1', '2024-04-02', 'LAA', 0, 3, 4, 0.880, 140, 2024),
-            ('player2', '2024-04-01', 'LAA', 0, 4, 4, 1.100, 180, 2024),
-            ('player3', '2024-04-01', 'LAD', 0, 5, 5, 0.920, 135, 2024),
-            ('player4', '2024-04-02', 'SFG', 1, 4, 5, 0.820, 115, 2024),
-            ('player4', '2024-04-02', 'SFG', 2, 4, 5, 0.820, 115, 2024) 
+            (1, '2024-04-01', 'LAA', 0, 4, 5, 0.950, 150, 2024),
+            (1, '2024-04-02', 'LAA', 0, 3, 4, 0.880, 140, 2024),
+            (2, '2024-04-01', 'LAA', 0, 4, 4, 1.100, 180, 2024),
+            (3, '2024-04-01', 'LAD', 0, 5, 5, 0.920, 135, 2024),
+            (4, '2024-04-02', 'SFG', 1, 4, 5, 0.820, 115, 2024),
+            (4, '2024-04-02', 'SFG', 2, 4, 5, 0.820, 115, 2024) 
         ]
         insert_batting_stats(clean_db, stats)
         return stats
@@ -48,12 +48,12 @@ class TestPlayerLoader:
         """Insert sample pitching stats for testing."""
         stats = [
             # (player_id, game_date, team, dh, games, gs, era, babip, ip, runs, k_percent,
-            #  bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, ifbb, 
+            #  bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, iffb, 
             #  wpa, gmli, fa_percent, fc_percent, si_percent, fa_velo, fc_velo, si_velo, season)
-            ('player4', '2024-04-01', 'TEX', 0, 1, 1, 2.50, 0.285, 6.0, 2, 32.5, 
+            (4, '2024-04-01', 'TEX', 0, 1, 1, 2.50, 0.285, 6.0, 2, 32.5, 
              8.5, 6.2, 42.8, 89.5, 12.5, 3.20, 2.85, 105, 2, 0.15, 0.52, 
              55.2, 18.3, 12.1, 94.2, 88.5, 91.8, 2024),
-            ('player4', '2024-04-05', 'TEX', 0, 1, 1, 2.20, 0.295, 7.0, 1, 35.0,
+            (4, '2024-04-05', 'TEX', 0, 1, 1, 2.20, 0.295, 7.0, 1, 35.0,
              7.2, 5.8, 38.9, 90.2, 10.8, 2.95, 2.65, 110, 1, 0.22, 0.58,
              58.1, 16.7, 14.2, 94.8, 89.1, 92.3, 2024),
         ]
@@ -89,7 +89,7 @@ class TestPlayerLoader:
     def test_load_batter_stats_basic(self, player_loader, sample_batting_stats):
         """Test loading basic batting stats for a player."""
 
-        df = player_loader.load_batter_stats(player_id='player1', season=2024)
+        df = player_loader.load_batter_stats(player_id=1, season=2024)
         assert_dataframe_not_empty(df)
         assert 'wrc_plus' in df.columns
         assert len(df) == 2 
@@ -97,26 +97,24 @@ class TestPlayerLoader:
     def test_load_pitcher_stats_basic(self, player_loader, sample_pitching_stats):
         """Test loading basic pitching stats for a player."""
 
-        df = player_loader.load_pitcher_stats(player_id='player4', season=2024)
+        df = player_loader.load_pitcher_stats(player_id=4, season=2024)
         assert_dataframe_not_empty(df)
         assert 'era' in df.columns
         assert len(df) == 2
 
     def test_load_pitcher_stats_columns(self, player_loader, sample_pitching_stats):
         """Test that pitching stats dataframe has all expected columns."""
-        df = player_loader.load_pitcher_stats(player_id='player4', season=2024)
-        
+        df = player_loader.load_pitcher_stats(player_id=4, season=2024)
+    
         expected_columns = [
-            'player_id', 'game_date', 'team', 'dh', 'games', 'gs', 'era', 'babip', 
-            'ip', 'runs', 'k_percent', 'bb_percent', 'barrel_percent', 'hard_hit', 
-            'ev', 'hr_fb', 'siera', 'fip', 'stuff', 'ifbb', 'wpa', 'gmli', 
+            'player_id', 'game_date', 'team', 'dh', 'games', 'gs', 'era', 'babip',
+            'ip', 'runs', 'k_percent', 'bb_percent', 'barrel_percent', 'hard_hit',
+            'ev', 'hr_fb', 'siera', 'fip', 'stuff', 'iffb', 'wpa', 'gmli',
             'fa_percent', 'fc_percent', 'si_percent', 'fa_velo', 'fc_velo', 'si_velo', 'season'
         ]
-        
+    
         for col in expected_columns:
-            assert col in df.columns, f"Missing column: {col}"
-        
-        # Test specific values to ensure data is loaded correctly
+            assert col in df.columns, f"Missing column: {col}"        # Test specific values to ensure data is loaded correctly
         first_row = df.iloc[0]
         assert first_row['era'] == 2.50
         assert first_row['k_percent'] == 32.5
@@ -131,9 +129,9 @@ class TestPlayerLoader:
         
         # Verify all expected columns are present
         expected_columns = [
-            'player_id', 'game_date', 'team', 'dh', 'games', 'gs', 'era', 'babip', 
-            'ip', 'runs', 'k_percent', 'bb_percent', 'barrel_percent', 'hard_hit', 
-            'ev', 'hr_fb', 'siera', 'fip', 'stuff', 'ifbb', 'wpa', 'gmli', 
+            'player_id', 'game_date', 'team', 'dh', 'games', 'gs', 'era', 'babip',
+            'ip', 'runs', 'k_percent', 'bb_percent', 'barrel_percent', 'hard_hit',
+            'ev', 'hr_fb', 'siera', 'fip', 'stuff', 'iffb', 'wpa', 'gmli',
             'fa_percent', 'fc_percent', 'si_percent', 'fa_velo', 'fc_velo', 'si_velo', 'season'
         ]
         

@@ -6,16 +6,17 @@ from data.loaders.base_loader import BaseDataLoader
 class PlayerLoader(BaseDataLoader):
     def __init__(self):
         super().__init__()
-        self.batting_columns = ['player_id', 'game_date', 'team', 'batorder',
+        self.batting_columns = ['player_id', 'mlb_id', 'game_date', 'team', 'batorder',
                                 'pos', 'dh', 'ab', 'pa', 'ops', 'babip', 'bb_k',
                                 'wrc_plus', 'woba', 'barrel_percent', 'hard_hit',
                                 'ev', 'iso', 'gb_fb', 'baserunning', 'wraa', 'wpa',
                                 'season']
         
-        self.pitching_columns = ['player_id', 'game_date', 'team', 'dh', 'games',
-                                 'gs', 'era', 'babip', 'ip', 'runs', 'k_percent',
+        self.pitching_columns = ['player_id', 'mlb_id', 'name', 'normalized_player_name', 
+                                 'game_date', 'team', 'dh', 'games','gs', 'era',
+                                'babip', 'ip', 'tbf', 'bip', 'runs', 'k_percent',
                                  'bb_percent', 'barrel_percent', 'hard_hit', 'ev',
-                                 'hr_fb', 'siera', 'fip', 'stuff', 'ifbb', 'wpa',
+                                 'hr_fb', 'siera', 'fip', 'stuff', 'iffb', 'wpa',
                                  'gmli',  'fa_percent', 'fc_percent', 'si_percent',
                                  'fa_velo', 'fc_velo', 'si_velo' ,'season'
                                  ]

@@ -46,6 +46,7 @@ class TeamLoader(BaseDataLoader):
             team, 
             player_name,
             normalized_player_name,
+            player_id,
             position,
             status
         FROM rosters
@@ -55,10 +56,10 @@ class TeamLoader(BaseDataLoader):
 
         df = self._execute_query(query, params)
         
-        roster_columns = ['game_date', 'season', 'team', 'player_name', 'normalized_player_name', 'position', 'status']
+        roster_columns = ['game_date', 'season', 'team', 'player_name', 'normalized_player_name', 'player_id', 'position', 'status']
         return self._validate_dataframe(df, roster_columns)
 
-    def load_lineup(self, season: int, team: Optional[str] = None, date: Optional[date] = None) -> DataFrame:
+    def load_lineup_players(self, season: int, team: Optional[str] = None, date: Optional[date] = None) -> DataFrame:
         """Load the starting lineups for season or optionally for a single date across all teams"""
         date_filter = ""
         team_filter = ""
@@ -93,7 +94,40 @@ class TeamLoader(BaseDataLoader):
         
         lineup_columns = ['game_date', 'team', 'opposing_team', 'dh', 'player_id', 'position', 'batting_order', 'season']
         return self._validate_dataframe(df, lineup_columns)
-        
+    
+    def load_pitching_matchups(self, season: int, team: Optional[str] = None, date: Optional[date] = None) -> DataFrame:
+        """Load the pitching matchups for each game in a season"""
+        date_filter = ""
+        team_filter = ""
+        params = [season]
+
+        if team:
+            team_filter = "AND team = ?"
+            params.append(team)
+
+        if date:
+            if season != date.year:
+                raise ValueError(f"Season and date do not match. Season{season}, date{date}")
+            date_filter = "AND game_date = ?"
+            params.append(date.strftime('%Y-%m-%d'))
+
+        query = f"""
+        SELECT 
+            game_date,
+            dh,
+            team,
+            opposing_team,
+            team_starter_id,
+            opposing_starter_id,
+            season
+        FROM lineups
+        WHERE season = ? {team_filter} {date_filter}
+        ORDER BY game_date, dh
+        """
+
+        df = self._execute_query(query, params)
+        columns = ['game_date', 'dh', 'team', 'opposing_team', 'team_starter_id', 'opposing_starter_id', 'season']
+        return self._validate_dataframe(df, columns)
     
     # def rest_days(self, date: date, team_abbr: str) -> int:
     #     """

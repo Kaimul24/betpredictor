@@ -34,7 +34,7 @@ class BattingFeatures(BaseFeatures):
         return self.calculate_all_player_rolling_stats()
     
     def calculate_all_player_rolling_stats(self) -> DataFrame:
-        """Calculate and store rolling stats for all players and store in database"""
+        """Calculate rolling stats for all batters"""
         cache_path = Path(FEATURES_CACHE_PATH / BATTING_CACHE_PATH.format(self.season))
 
         if cache_path.exists()and not self.force_recreate:
@@ -45,22 +45,14 @@ class BattingFeatures(BaseFeatures):
             logger.info(f" Recaluclating batter rolling stats...")
             
         logger.info(f" No cached batter rolling stats found for {self.season}")
-        db = get_database_manager()
-
-        players = """
-        SELECT DISTINCT player_id
-        FROM batting_stats
-        WHERE season = ?
-        """
-
-        players = db.execute_read_query(players, (self.season,))
+        players = self.data['player_id'].unique().copy() 
         logger.info(f" Calculating rolling stats for {len(players)} players in {self.season}")
 
         all_players = []
         batch_size = 50
         for i in range(0, len(players), batch_size):
             batch = players[i:i+batch_size]
-            batch_result = self._process_player_batch([p['player_id'] for p in batch])
+            batch_result = self._process_player_batch([p for p in batch])
             if not batch_result.empty:
                 all_players.append(batch_result)
             logger.info(f" Processed batch {i//batch_size + 1}/{(len(players) + batch_size - 1)//batch_size}")
@@ -84,30 +76,21 @@ class BattingFeatures(BaseFeatures):
 
     def _process_player_batch(self, player_ids: List[str]) -> DataFrame:
         """Process a batch of players and return their rolling stats"""
-        db = get_database_manager()
         all_rolling_stats = []
 
-        with db.get_reader_connection() as conn:
-            for player_id in player_ids:
-
-                player_query = """
-                SELECT player_id,    game_date, team, dh, ops, wrc_plus, woba, babip, bb_k,
-                       barrel_percent, hard_hit, ev, iso, gb_fb, baserunning, wraa, wpa, pa
-                FROM batting_stats 
-                WHERE player_id = ? AND season = ?
-                ORDER BY game_date, dh
-                """
+        for player_id in player_ids:
+            
+            player_data = self.data[self.data['player_id'] == player_id].copy()
+            
+            if not player_data.empty:
                 
-                player_data = pd.read_sql_query(
-                    player_query, 
-                    conn,
-                    params=[player_id, self.season]
-                )
+                required_cols = ['player_id', 'game_date', 'team', 'dh', 'ops', 'wrc_plus', 'woba', 'babip', 'bb_k',
+                               'barrel_percent', 'hard_hit', 'ev', 'iso', 'gb_fb', 'baserunning', 'wraa', 'wpa', 'pa']
+                player_data = player_data[required_cols].sort_values(['game_date', 'dh'])
                 
-                if not player_data.empty:
-                    player_rolling = self._calculate_rolling_window_for_player(player_data)
-                    if not player_rolling.empty:
-                        all_rolling_stats.append(player_rolling)
+                player_rolling = self._calculate_rolling_window_for_player(player_data)
+                if not player_rolling.empty:
+                    all_rolling_stats.append(player_rolling)
         
         if all_rolling_stats:
             combined_stats = pd.concat(all_rolling_stats, ignore_index=True)

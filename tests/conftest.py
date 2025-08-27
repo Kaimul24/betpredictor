@@ -131,8 +131,6 @@ def insert_players(dbm, players: List[Tuple]) -> None:
     VALUES (?, ?, ?, ?)
     """
     
-   
-    
     dbm.execute_many_write_queries(query, players)
 
 
@@ -161,13 +159,13 @@ def insert_pitching_stats(dbm, stats: List[Tuple]) -> None:
         dbm: Database manager instance
         stats: List of tuples with pitching data
                (player_id, game_date, team, dh, games, gs, era, babip, ip, runs, k_percent,
-                bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, ifbb, 
+                bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, iffb, 
                 wpa, gmli, fa_percent, fc_percent, si_percent, fa_velo, fc_velo, si_velo, season)
     """
     query = """
     INSERT INTO pitching_stats (
         player_id, game_date, team, dh, games, gs, era, babip, ip, runs, k_percent,
-        bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, ifbb,
+        bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, iffb,
         wpa, gmli, fa_percent, fc_percent, si_percent, fa_velo, fc_velo, si_velo, season
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
@@ -238,21 +236,21 @@ def insert_rosters(dbm, roster: List[Tuple]) -> None:
     
     Args:
         dbm: Database manager instance
-        roster: List of tuples with roster date (game_date, team, player_name, position, status)
+        roster: List of tuples with roster date (game_date, season, team, player_name, player_id, position, status)
                 The normalized_player_name will be automatically generated from player_name
     """
     from src.utils import normalize_names
     
     query = """
-    INSERT into rosters (game_date, season, team, player_name, normalized_player_name, position, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT into rosters (game_date, season, team, player_name, player_id, normalized_player_name, position, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """
     
     roster_with_normalized = []
     for entry in roster:
-        game_date, season, team, player_name, position, status = entry
+        game_date, season, team, player_name, player_id, position, status = entry
         normalized_name = normalize_names(player_name)
-        roster_with_normalized.append((game_date, season, team, player_name, normalized_name, position, status))
+        roster_with_normalized.append((game_date, season, team, player_name, player_id, normalized_name, position, status))
 
     dbm.execute_many_write_queries(query, roster_with_normalized)
 

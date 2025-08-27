@@ -3,7 +3,7 @@ from datetime import date
 from data.loaders.team_loader import TeamLoader
 from tests.conftest import (
     insert_schedule_games, insert_batting_stats, insert_rosters, insert_lineup_players,
-    assert_dataframe_schema, assert_dataframe_not_empty, assert_dataframe_values
+    insert_lineups, assert_dataframe_schema, assert_dataframe_not_empty, assert_dataframe_values
 )
 
 
@@ -45,6 +45,17 @@ class TestTeamLoader:
     
     @pytest.fixture
     def sample_lineup(self, clean_db):
+        # First insert lineup data (team-level info)
+        lineup_data = [
+            # (game_date, team_id, team, dh, opposing_team_id, opposing_team, team_starter_id, season)
+            ('2024-04-01', 30, 'SFG', 0, 12, 'LAA', 'starter1', 2024),
+            ('2024-04-01', 12, 'LAA', 0, 30, 'SFG', 'starter2', 2024),
+            ('2024-04-02', 30, 'SFG', 0, 12, 'LAA', 'starter3', 2024),
+            ('2024-04-02', 12, 'LAA', 0, 30, 'SFG', 'starter4', 2024),
+        ]
+        insert_lineups(clean_db, lineup_data)
+        
+        # Then insert lineup player data
         lineup = [
             # (game_date, team_id, team, opposing_team_id, opposing_team, dh, player_id, position, batting_order, season)
             ('2024-04-01', 30, 'SFG', 12, 'LAA', 0, 'player1', 'DH', 1, '2024'),
@@ -65,67 +76,61 @@ class TestTeamLoader:
             ('2024-04-02', 12, 'LAA', 30, 'SFG', 0, 'player8', 'CF', 4,'2024'),
         ]
         insert_lineup_players(clean_db, lineup)
-        return lineup
+        return lineup_data
     
     @pytest.fixture
     def sample_roster(self, clean_db):
         roster = [
-            # (game_date, season, team, player_name, position, status)
-            ('2024-04-01', 2024, 'SFG', 'Jung Hoo Lee', 'CF', 'Active'),
-            ('2024-04-01', 2024, 'SFG', 'Heliot Ramos', 'LF', 'Active'),
-            ('2024-04-01', 2024, 'SFG', 'Rafael Devers', 'DH', 'Active'),
-            ('2024-04-01', 2024, 'SFG', 'Willy Adames', 'SS', 'Active'),
-            ('2024-04-01', 2024, 'SFG', 'Matt Chapman', '3B', 'Active'),
-            ('2024-04-01', 2024, 'LAA', 'Zack Neto', 'SS', 'Active'),
-            ('2024-04-01', 2024, 'LAA', 'Nolan Schanuel', '1B', 'Active'),
-            ('2024-04-01', 2024, 'LAA', 'Mike Trout', 'DH', 'Active'),
-            ('2024-04-01', 2024, 'LAA', 'Taylor Ward', 'LF', 'Active'),
-            ('2024-04-01', 2024, 'LAA', 'Jo Adell', 'CF', 'Active'),
-            ('2024-04-02', 2024, 'SFG', 'Jung Hoo Lee', 'CF', 'Active'),
-            ('2024-04-02', 2024, 'SFG', 'Heliot Ramos', 'LF', 'Active'),
-            ('2024-04-02', 2024, 'SFG', 'Rafael Devers', 'DH', 'Active'),
-            ('2024-04-02', 2024, 'SFG', 'Willy Adames', 'SS', 'Active'),
-            ('2024-04-02', 2024, 'SFG', 'Matt Chapman', '3B', 'Active'),
-            ('2024-04-02', 2024, 'LAA', 'Zack Neto', 'SS', 'Active'),
-            ('2024-04-02', 2024, 'LAA', 'Nolan Schanuel', '1B', 'Active'),
-            ('2024-04-02', 2024, 'LAA', 'Mike Trout', 'DH', 'Active'),
-            ('2024-04-02', 2024, 'LAA', 'Taylor Ward', 'LF', 'Active'),
-            ('2024-04-02', 2024, 'LAA', 'Jo Adell', 'CF', 'Active')
+            # (game_date, season, team, player_name, player_id, position, status)
+            ('2024-04-01', 2024, 'SFG', 'Jung Hoo Lee', 1001, 'CF', 'Active'),
+            ('2024-04-01', 2024, 'SFG', 'Heliot Ramos', 1002, 'LF', 'Active'),
+            ('2024-04-01', 2024, 'SFG', 'Rafael Devers', 1003, 'DH', 'Active'),
+            ('2024-04-01', 2024, 'SFG', 'Willy Adames', 1004, 'SS', 'Active'),
+            ('2024-04-01', 2024, 'SFG', 'Matt Chapman', 1005, '3B', 'Active'),
+            ('2024-04-01', 2024, 'LAA', 'Zack Neto', 2001, 'SS', 'Active'),
+            ('2024-04-01', 2024, 'LAA', 'Nolan Schanuel', 2002, '1B', 'Active'),
+            ('2024-04-01', 2024, 'LAA', 'Mike Trout', 2003, 'DH', 'Active'),
+            ('2024-04-01', 2024, 'LAA', 'Taylor Ward', 2004, 'LF', 'Active'),
+            ('2024-04-01', 2024, 'LAA', 'Jo Adell', 2005, 'CF', 'Active'),
+            ('2024-04-02', 2024, 'SFG', 'Jung Hoo Lee', 1001, 'CF', 'Active'),
+            ('2024-04-02', 2024, 'SFG', 'Heliot Ramos', 1002, 'LF', 'Active'),
+            ('2024-04-02', 2024, 'SFG', 'Rafael Devers', 1003, 'DH', 'Active'),
+            ('2024-04-02', 2024, 'SFG', 'Willy Adames', 1004, 'SS', 'Active'),
+            ('2024-04-02', 2024, 'SFG', 'Matt Chapman', 1005, '3B', 'Active'),
+            ('2024-04-02', 2024, 'LAA', 'Zack Neto', 2001, 'SS', 'Active'),
+            ('2024-04-02', 2024, 'LAA', 'Nolan Schanuel', 2002, '1B', 'Active'),
+            ('2024-04-02', 2024, 'LAA', 'Mike Trout', 2003, 'DH', 'Active'),
+            ('2024-04-02', 2024, 'LAA', 'Taylor Ward', 2004, 'LF', 'Active'),
+            ('2024-04-02', 2024, 'LAA', 'Jo Adell', 2005, 'CF', 'Active')
         ]
         insert_rosters(clean_db, roster)
         return roster
     
-    def test_load_lineup_basic(self, team_loader, sample_lineup):
-        """Test loading lineup information for a season"""
-        df = team_loader.load_lineup(season = 2024)
-        assert len(df) == 16
+    def test_load_pitching_matchups_basic(self, team_loader, sample_lineup):
+        """Test loading pitching matchups for a season"""
+        df = team_loader.load_pitching_matchups(season = 2024)
+        assert len(df) == 4
 
-    def test_load_lineup_team_basic(self, team_loader, sample_lineup):
-        """Test loading lineup information for a team"""
-        df = team_loader.load_lineup(
-            team = 'SFG', season = 2024
-        )
+    def test_load_pitching_matchups_team_basic(self, team_loader, sample_lineup):
+        """Test loading pitching matchups for a team"""
+        df = team_loader.load_pitching_matchups(season = 2024)
 
         assert_dataframe_not_empty(df)
-        assert 'batting_order' in df.columns
-        assert len(df) == 8
+        assert 'team_starter_id' in df.columns
+        assert len(df) == 4
 
-    def test_load_lineup_invalid_team_season(self, team_loader, sample_lineup):
-        """Test invalid team lineup"""
-        df = team_loader.load_lineup(team = 'SFG', season = 2020)
-        assert len(df) == 0
-
-        df = team_loader.load_lineup(team = 'NAN', season = 2024)
+    def test_load_pitching_matchups_invalid_season(self, team_loader, sample_lineup):
+        """Test invalid season for pitching matchups"""
+        df = team_loader.load_pitching_matchups(season = 2020)
         assert len(df) == 0
         
-    def test_load_lineup_date(self, team_loader, sample_lineup):
-        """Test loading lineup information with date"""
-        df = team_loader.load_lineup(
-            team = 'SFG', season = 2024, date=date(2024, 4, 1)
-        )
+    def test_load_pitching_matchups_data_validation(self, team_loader, sample_lineup):
+        """Test pitching matchups data validation"""
+        df = team_loader.load_pitching_matchups(season = 2024)
 
         assert_dataframe_not_empty(df)
-        assert 'batting_order' in df.columns
+        assert 'team_starter_id' in df.columns
+        assert 'opposing_starter_id' in df.columns
         assert len(df) == 4
 
     def test_load_roster_basic(self, team_loader, sample_roster):

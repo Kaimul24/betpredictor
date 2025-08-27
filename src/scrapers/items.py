@@ -7,6 +7,7 @@ import scrapy
 
 class BatterStat(scrapy.Item):
     player_id = scrapy.Field()
+    mlb_id = scrapy.Field()
     name = scrapy.Field()
     normalized_player_name = scrapy.Field()
     team = scrapy.Field()
@@ -34,6 +35,7 @@ class BatterStat(scrapy.Item):
 
 class PitcherStat(scrapy.Item):
     player_id = scrapy.Field()
+    mlb_id = scrapy.Field()
     name = scrapy.Field()
     normalized_player_name = scrapy.Field()
     team = scrapy.Field()
@@ -42,6 +44,8 @@ class PitcherStat(scrapy.Item):
     gs = scrapy.Field()
     era = scrapy.Field()
     ip = scrapy.Field()
+    tbf = scrapy.Field()
+    bip = scrapy.Field()
     runs = scrapy.Field()
     babip = scrapy.Field()
     k_percent = scrapy.Field()
@@ -53,7 +57,7 @@ class PitcherStat(scrapy.Item):
     siera = scrapy.Field()
     fip = scrapy.Field()
     stuff = scrapy.Field()
-    ifbb = scrapy.Field()
+    iffb = scrapy.Field()
     wpa = scrapy.Field()
     gmli = scrapy.Field()
     fa_percent = scrapy.Field()

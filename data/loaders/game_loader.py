@@ -16,8 +16,9 @@ class GameLoader(BaseDataLoader):
         self.columns = ['game_id', 'game_date', 'game_datetime', 'day_night_game', 'season','away_team', 
                         'home_team', 'dh', 'venue_name', 'venue_id', 'venue_elevation', 'venue_timezone',
                         'venue_gametime_offset', 'status', 'away_probable_pitcher','home_probable_pitcher', 
-                        'away_starter_normalized', 'home_starter_normalized', 'wind', 'condition', 
-                        'temp',  'away_score', 'home_score', 'winning_team', 'losing_team']
+                        'away_starter_normalized', 'home_starter_normalized', 'away_pitcher_id', 
+                        'home_pitcher_id', 'wind', 'condition', 'temp',  'away_score', 'home_score', 
+                        'winning_team', 'losing_team']
         
         self.venue_columns = ['venue_id', 'venue_name', 'season', 'park_factor']
         

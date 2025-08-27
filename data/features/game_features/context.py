@@ -10,7 +10,7 @@ from sklearn.preprocessing import OneHotEncoder
 
 class GameContextFeatures(BaseFeatures):
 
-    def __init__(self, data: DataFrame, season: int) -> None:
+    def __init__(self, season: int, data: DataFrame) -> None:
         super().__init__(season, data)
 
         self.park_factor_data = GameLoader().load_park_factor_season(season)

@@ -99,6 +99,7 @@ TEAM_ABBR_MAP = {
     'New York Yankees': 'NYY',
     'Oakland Athletics': 'ATH',
     'Athletics': 'ATH', # MAY NEED TO CHANGE
+    'OAK': 'ATH',
     'Philadelphia Phillies': 'PHI',
     'Pittsburgh Pirates': 'PIT',
     'San Diego Padres': 'SDP',

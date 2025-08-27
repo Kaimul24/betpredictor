@@ -103,7 +103,7 @@ class FeaturePipeline():
     
     def _load_lineups_data(self) -> DataFrame:
         loader = TeamLoader()
-        lineups_data = loader.load_lineup(self.season)
+        lineups_data = loader.load_lineup_players(self.season)
         return lineups_data
     
     def _transform_schedule(self, schedule_data: DataFrame) -> DataFrame:
@@ -151,7 +151,7 @@ class FeaturePipeline():
     
     def _merge_schedule_with_batting_features(self, schedule_df: DataFrame, lineups_data: DataFrame, batting_features: DataFrame) -> DataFrame:
         """
-        Transforms schedule, lineups, and rolling batting features into one DataFrame.
+        Merges schedule, lineups, and rolling batting features into one DataFrame.
         """
         games = (
             schedule_df.reset_index()[["game_id", "game_date", "dh", "team", "opposing_team"]]
@@ -580,7 +580,7 @@ class FeaturePipeline():
         transformed_schedule = self._transform_schedule(odds_sch_matched)
         batting_features = self._get_batting_features(transformed_schedule, args.force_recreate)
 
-        context_features = GameContextFeatures(schedule_data, self.season).load_features()
+        context_features = GameContextFeatures(self.season, schedule_data).load_features()
         context_features = context_features.drop(columns=['away_team', 'home_team'])
 
         team_features = TeamFeatures(self.season, transformed_schedule).load_features().reset_index()
@@ -638,5 +638,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
     

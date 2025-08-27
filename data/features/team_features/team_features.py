@@ -9,7 +9,7 @@ from pandas.core.api import DataFrame as DataFrame
 from typing import Optional
 import pandas as pd
 
-class TeamFeatures(BaseFeatures):
+class TeamFeatures(BaseFeatures): # TODO add run diff (rolling + season)
 
     def __init__(self, season: int, data: DataFrame):
         super().__init__(season, data)

@@ -30,25 +30,29 @@ class SqlitePipeline:
             max_connections=5
         )
 
-        if spider.name == 'fg':
+        if spider.name == 'lineups':
             execute_query("PRAGMA foreign_keys = OFF", readonly=False)
             tables_to_drop = [
                 'lineup_players', 
-                'lineups', 
-                'batting_stats', 
-                'pitching_stats',
-                'players'
+                'lineups'
             ]
             for table in tables_to_drop:
                 execute_query(f"DROP TABLE IF EXISTS {table}", readonly=False)
                 
             execute_query("PRAGMA foreign_keys = ON", readonly=False)
-            
-        if spider.name == 'odds':
 
-            tables_to_drop = ['odds']
+        if spider.name == 'stats':
+            tables_to_drop = [
+                'batting_stats', 
+                'pitching_stats',
+                'players'
+            ]
+
             for table in tables_to_drop:
                 execute_query(f"DROP TABLE IF EXISTS {table}", readonly=False)
+
+        if spider.name == 'odds':
+            execute_query("DROP TABLE IF EXISTS odds", readonly=False)
 
         if spider.name == 'fielding':
             execute_query("DROP TABLE IF EXISTS fielding", readonly=False)
@@ -116,8 +120,8 @@ class SqlitePipeline:
             pos = p.get("pos", 'P')
             normalized_name = normalize_names(p['name'])
             execute_query(
-                "INSERT OR REPLACE INTO players(player_id, name, normalized_player_name, pos, current_team, last_updated) VALUES(?,?,?,?,?,?)",
-                (p['player_id'], p['name'], normalized_name, pos, p['team'], p['scraped_at']),
+                "INSERT OR REPLACE INTO players(player_id, mlb_id, name, normalized_player_name, pos, current_team, last_updated) VALUES(?,?,?,?,?,?,?)",
+                (p['player_id'], p['mlb_id'], p['name'], normalized_name, pos, p['team'], p['scraped_at']),
                 readonly=False
             )
 
@@ -125,11 +129,11 @@ class SqlitePipeline:
                 
                 execute_query("""
                     INSERT OR REPLACE INTO batting_stats
-                    (player_id, game_date, team, batorder, pos, dh, ab, pa, ops, babip, bb_k,
+                    (player_id, mlb_id, name, normalized_player_name, game_date, team, batorder, pos, dh, ab, pa, ops, babip, bb_k,
                      wrc_plus, woba, barrel_percent, hard_hit, ev, iso, gb_fb, baserunning, 
                      wraa, wpa, season, scraped_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (p['player_id'], p['date'], p['team'], p['batorder'], p['pos'], p['dh'], p['ab'], p['pa'],
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (p['player_id'], p['mlb_id'], p['name'], p['normalized_player_name'], p['date'], p['team'], p['batorder'], p['pos'], p['dh'], p['ab'], p['pa'],
                      p['ops'], p['babip'], p['bb_k'], p['wrc_plus'], p['woba'], p['barrel_percent'], p['hard_hit'], p['ev'],
                      p['iso'], p['gb_fb'], p['baserunning'], p['wraa'], p['wpa'], p['season'], p['scraped_at']),
                     readonly=False
@@ -139,14 +143,14 @@ class SqlitePipeline:
                 
                 execute_query("""
                     INSERT OR REPLACE INTO pitching_stats
-                    (player_id, game_date, team, dh, games, gs, era, babip, ip, runs, k_percent, 
-                     bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, 
-                     ifbb, wpa, gmli, fa_percent, fc_percent, si_percent, fa_velo, fc_velo,
+                    (player_id, mlb_id, name, normalized_player_name, game_date, team, dh, games, gs, era, babip, ip,
+                     tbf, bip, runs, k_percent,  bb_percent, barrel_percent, hard_hit, ev, hr_fb, siera, fip, stuff, 
+                     iffb, wpa, gmli, fa_percent, fc_percent, si_percent, fa_velo, fc_velo,
                      si_velo, season, scraped_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (p['player_id'], p['date'], p['team'], p['dh'], p['games'], p['gs'], p['era'], p['babip'], p['ip'], 
-                     p['runs'], p['k_percent'], p['bb_percent'], p['barrel_percent'], p['hard_hit'], p['ev'], p['hr_fb'], 
-                     p['siera'], p['fip'], p['stuff'], p['ifbb'], p['wpa'], p['gmli'], p['fa_percent'], p['fc_percent'], 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (p['player_id'], p['mlb_id'], p['name'], p['normalized_player_name'], p['date'], p['team'], p['dh'], p['games'], p['gs'], p['era'], p['babip'], p['ip'], 
+                     p['tbf'], p['bip'], p['runs'], p['k_percent'], p['bb_percent'], p['barrel_percent'], p['hard_hit'], p['ev'], p['hr_fb'], 
+                     p['siera'], p['fip'], p['stuff'], p['iffb'], p['wpa'], p['gmli'], p['fa_percent'], p['fc_percent'], 
                      p['si_percent'], p['fa_velo'], p['fc_velo'], p['si_velo'], p['season'], p['scraped_at']),
                     readonly=False
                 )
