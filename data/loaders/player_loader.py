@@ -7,7 +7,7 @@ class PlayerLoader(BaseDataLoader):
     def __init__(self):
         super().__init__()
         self.batting_columns = ['player_id', 'mlb_id', 'game_date', 'team', 'batorder',
-                                'pos', 'dh', 'ab', 'pa', 'ops', 'babip', 'bb_k',
+                                'pos', 'dh', 'ab', 'pa', 'bip', 'ops', 'babip', 'bb_k',
                                 'wrc_plus', 'woba', 'barrel_percent', 'hard_hit',
                                 'ev', 'iso', 'gb_fb', 'baserunning', 'wraa', 'wpa',
                                 'season']
@@ -22,7 +22,7 @@ class PlayerLoader(BaseDataLoader):
                                  ]
         
         self.fielding_columns = ['name', 'normalized_player_name', 'season', 'month',
-                                 'frv', 'total_innings', 'innings_c', 'innings_1B', 
+                                 'frv', 'total_innings', 'innings_C', 'innings_1B', 
                                  'innings_2B', 'innings_3B', 'innings_SS', 'innings_LF',
                                  'innings_CF', 'innings_RF',
                                  ]

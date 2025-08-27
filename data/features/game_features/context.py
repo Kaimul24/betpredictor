@@ -3,10 +3,16 @@ Handles weather, venue/park factors, game time metrics.
 """
 
 import pandas as pd
-from data.features.base_feature import BaseFeatures
-from data.loaders.game_loader import GameLoader
+import logging
 from pandas.core.api import DataFrame as DataFrame
 from sklearn.preprocessing import OneHotEncoder
+from datetime import timedelta
+
+from data.features.base_feature import BaseFeatures
+from data.loaders.game_loader import GameLoader
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class GameContextFeatures(BaseFeatures):
 

@@ -54,6 +54,7 @@ class TeamFeatures(BaseFeatures): # TODO add run diff (rolling + season)
         previous_games = g.cumcount()
         previous_wins = g['is_winner'].cumsum().shift(1)
         win_pct = previous_wins / previous_games.replace(0, pd.NA)
+        win_pct = win_pct.astype('Float64').fillna(0.0)
 
         return DataFrame(win_pct, columns=['win_pct'])
 

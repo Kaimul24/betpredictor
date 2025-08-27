@@ -16,6 +16,7 @@ class BatterStat(scrapy.Item):
     dh = scrapy.Field()
     ab = scrapy.Field()
     pa = scrapy.Field()
+    bip = scrapy.Field()
     ops = scrapy.Field()
     babip = scrapy.Field()
     bb_k = scrapy.Field()

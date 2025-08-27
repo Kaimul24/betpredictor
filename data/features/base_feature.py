@@ -12,12 +12,13 @@ import numpy as np
 # TODO: ADD ABSTRACT METHODS
 class BaseFeatures(ABC):
 
-    def __init__(self, season: int, data: DataFrame):
+    def __init__(self, season: int, data: DataFrame, force_recreate: bool = False):
         self.season = season
         self.data = data
+        self.force_recreate = force_recreate
 
     @abstractmethod
-    def load_features() -> DataFrame:
+    def load_features(self) -> DataFrame:
         pass
 
     @staticmethod

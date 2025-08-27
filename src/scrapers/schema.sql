@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS batting_stats (
   dh              INTEGER,
   ab              INTEGER,
   pa              INTEGER,
+  bip             INTEGER,
   ops             REAL,
   babip           REAL,
   bb_k            REAL,

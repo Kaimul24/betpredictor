@@ -106,6 +106,11 @@ class FeaturePipeline():
         lineups_data = loader.load_lineup_players(self.season)
         return lineups_data
     
+    def _load_pitching_data(self) -> DataFrame:
+        loader = PlayerLoader()
+        pitching_data = loader.load_for_season_pitcher(self.season)
+        return pitching_data
+    
     def _transform_schedule(self, schedule_data: DataFrame) -> DataFrame:
         """Splits each game in the schedule into 2 rows, each representing one team's perspective of the game"""
         self.logger.info(f" Transforming schedule for {self.season}")
@@ -165,6 +170,9 @@ class FeaturePipeline():
             validate="1:m"
         )
 
+        batting_features['player_id'] = batting_features['player_id'].astype('int64')
+        lineups_for_games['player_id'] = lineups_for_games['player_id'].astype('int64')
+
         lineups_with_stats = lineups_for_games.merge(
             batting_features,
             on=["game_date", "dh", "player_id"],
@@ -175,39 +183,19 @@ class FeaturePipeline():
 
         lineups_with_stats = lineups_with_stats.drop(columns=["team_bf"], errors="ignore")
 
-        agg_cols = {
-            "ops_rolling": ["mean"],
-            "wrc_plus_rolling": ["mean"],
-            "woba_rolling": ["mean"],
-            "babip_rolling": ["mean"],
-            "bb_k_rolling": ["mean"],
-            "barrel_percent_rolling": ["mean"],
-            "hard_hit_rolling": ["mean"],
-            "ev_rolling": ["mean"],
-            "iso_rolling": ["mean"],
-            "gb_fb_rolling": ["mean"],
-            "baserunning_rolling": ["mean"],
-            "wraa_rolling": ["mean"],
-            "wpa_rolling": ["mean"]
-        }
+        value_cols = [c for c in lineups_with_stats.columns 
+              if any(s in c for s in ['_season', '_ewm_h3', '_ewm_h10', '_ewm_h25'])
+              ]
+
+        assert len(value_cols) == 52
 
         team_features = (
             lineups_with_stats
-            .groupby(["game_id", "game_date", "team", "opposing_team", "dh", "window_size"])
-            .agg(agg_cols)
+            .groupby(["game_id", "game_date", "team", "opposing_team", "dh"], observed=True)[value_cols]
+            .mean()
         )
-
-        team_features.columns = [col[0] for col in team_features.columns]
-        team_features = (
-            team_features.reset_index().pivot(index=["game_id", 'game_date', 'team', 'opposing_team', 'dh'], columns='window_size')
-        )
-
-        team_features.columns = [
-            f"{c0}_w{c1}" for (c0, c1) in team_features.columns.to_flat_index()
-        ]
 
         return team_features
-
     
     def _get_batting_features(self, schedule_df: DataFrame, force_recreate: bool = False) -> DataFrame:
         """Get batting features for all games efficiently"""
@@ -252,15 +240,6 @@ class FeaturePipeline():
         opp_aligned.columns = [f"opposing_{c}" for c in feature_cols]
 
         return pd.concat([df, opp_aligned], axis=1)    
-
-    def _load_pitching_features(self) -> DataFrame:
-        pitching_features = PitchingFeatures(self.season).load_data()
-        return pitching_features
-    
-    def _load_fielding_features(self) -> DataFrame:
-        fielding_features = FieldingFeatures(self.season).load_data()
-        return fielding_features
-    
 
     def _match_schedule_to_odds(self, schedule_data: DataFrame, odds_data: DataFrame) -> DataFrame:
         """
@@ -561,7 +540,7 @@ class FeaturePipeline():
         if args is None:
             import argparse
             parser = argparse.ArgumentParser(description="Feature engineering runner")
-            parser.add_argument("--force_recreate", action="store_true", help="Recreate batting rolling features, even if cached file exists")
+            parser.add_argument("--force-recreate", action="store_true", help="Recreate batting rolling features, even if cached file exists")
             parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
             parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
             parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
@@ -574,6 +553,13 @@ class FeaturePipeline():
         self.logger.info("="*60 + "\n")
         schedule_data = self._load_schedule_data()
 
+        far_future_games =schedule_data[(schedule_data['game_datetime'].astype('datetime64[ns]') - schedule_data['game_date'].astype('datetime64[ns]')) > pd.Timedelta("2 Days")]
+
+        self.logger.info(f" Far rescheduled games\n{far_future_games}")
+        self.logger.info(f" Dropping rescheduled games that are far past original game_date")
+
+        schedule_data = schedule_data.drop(far_future_games.index)
+
         odds_data = self._load_odds_data()
         odds_sch_matched = self._match_schedule_to_odds(schedule_data, odds_data)
 
@@ -584,6 +570,9 @@ class FeaturePipeline():
         context_features = context_features.drop(columns=['away_team', 'home_team'])
 
         team_features = TeamFeatures(self.season, transformed_schedule).load_features().reset_index()
+
+        raw_pitching_data = self._load_pitching_data()
+        pitching_features = PitchingFeatures(self.season, raw_pitching_data).load_features().reset_index()
 
         transformed_schedule_reset = transformed_schedule.reset_index()
         batting_features_reset = batting_features.reset_index()
@@ -597,8 +586,7 @@ class FeaturePipeline():
         )
 
 
-
-        final_features = pd.merge(
+        sch_bat_ctx = pd.merge(
             sch_batting_features,
             context_features,
             on=['game_id', 'game_date', 'dh', 'game_datetime'],
@@ -607,24 +595,40 @@ class FeaturePipeline():
             suffixes=('_sch_bat', '')
         )
         
-        final_features = pd.merge(
-            final_features,
+        sch_bat_ctx_team = pd.merge(
+            sch_bat_ctx,
             team_features,
             on=['game_id', 'game_date', 'dh', 'game_datetime', 'team'],
             how='inner',
             validate='1:1',
         )
 
-        
+        final_features = pd.merge(
+            sch_bat_ctx_team,
+            pitching_features,
+            on=['game_date', 'dh', 'team', 'opposing_team', 'season'],
+            how='inner',
+            validate='1:1',
+            suffixes=('_to_drop', '_to_drop')
+        )
 
-        final_features = final_features.drop(columns=[col for col in final_features.columns if col.endswith('_sch_bat') or col in ['wind', 'condition']])
-        final_features = final_features.set_index(['game_date', 'dh', 'team'])
+        missing_rows = pd.merge(sch_bat_ctx_team, final_features, how='outer', indicator=True)
+        missing_games = missing_rows[missing_rows['_merge'] == 'left_only'].drop(columns='_merge')
+        self.logger.debug(f" MISSING GAMES:\n{missing_games}")
+
+
+        final_features = final_features.drop(columns=[col for col in final_features.columns if col.endswith('_sch_bat') or
+                                                    col in ['wind', 'condition'] or 
+                                                    col.endswith('_to_drop')])
+        
+        final_features = final_features.set_index(['game_date', 'dh', 'team', 'opposing_team'])
         
         self.logger.info(f" Final merged dataset shape: {final_features.shape}")
+        self.logger.debug(f" Final features columns: {final_features.columns.to_list()}")
 
         self.logger.debug("="*60 + "\n")
         self.logger.debug(" Final features DataFrame tail")
-        self.logger.debug(final_features.tail(10).to_string())
+        self.logger.debug(final_features.to_string())
         self.logger.debug("="*60 + "\n")
 
         return final_features

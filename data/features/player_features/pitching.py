@@ -5,26 +5,48 @@ Also handles bullpen status
 
 import pandas as pd
 import numpy as np
-import logging
+import logging, os
 from data.features.base_feature import BaseFeatures
 from pandas.core.api import DataFrame as DataFrame
 from typing import Tuple
+from src.config import FEATURES_CACHE_PATH
 
 from data.loaders.team_loader import TeamLoader
-from data.loaders.player_loader import PlayerLoader
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from dotenv import load_dotenv
+from pathlib import Path
+
+load_dotenv()
+PITCHING_CACHE_PATH = os.getenv("rolling_pitching_features_cache")
+
 class PitchingFeatures(BaseFeatures):
 
-    def __init__(self, season: int, data: DataFrame) -> None:
-        super().__init__(season, data)
+    def __init__(self, season: int, data: DataFrame, force_recreate: bool = False) -> None:
+        super().__init__(season, data, force_recreate)
         self.pitching_matchups = TeamLoader().load_pitching_matchups(self.season)
 
     def load_features(self) -> DataFrame:
-        # final df: team, game_date, dh, starting_pitcher_stats, 
-        # bullpen_stats (only aggregated on game_date due to lack of dh field in roster)
+        "Loads all pitching features"
+        cache_path = Path(FEATURES_CACHE_PATH / PITCHING_CACHE_PATH.format(self.season))
+        
+        if cache_path.exists() and not self.force_recreate:
+            logger.info(f" Found cached pitching rolling stats for {self.season}")
+            batting_features = pd.read_parquet(cache_path)
+            return batting_features
+        
+        elif self.force_recreate:
+            if cache_path.exists():
+                try:
+                    logger.info( f"Removing old pitcher rolling stats...")
+                    os.remove(cache_path)
+                except OSError as e:
+                    logger.error(f"Error deleting file '{cache_path}': {e}")
+            else:
+                logger.info(f" No cached pitching stats for {self.season}")
+        logger.info(f" Caluclating pitcher rolling stats...")
         logger.info(" Loading roster...")
         roster_data = TeamLoader().load_roster(self.season)
         pitching_matchups = self.pitching_matchups.copy()
@@ -136,6 +158,9 @@ class PitchingFeatures(BaseFeatures):
                       'normalized_player_name_team_starter', 'name_opposing_starter', 
                       'normalized_player_name_opposing_starter']
         
+        for col in ['last_app_date_team_starter', 'last_app_date_opposing_starter']:
+            all_matchups_with_stats[col] = all_matchups_with_stats[col].fillna(pd.to_datetime(f"{self.season}-01-01"))
+        
         remaining_cols = [col for col in all_matchups_with_stats.columns if col not in first_cols]
 
         all_matchups_with_stats = all_matchups_with_stats[first_cols + remaining_cols]
@@ -145,10 +170,19 @@ class PitchingFeatures(BaseFeatures):
         with open("pitching_features.txt", "w") as f:
             f.write(all_matchups_with_stats.to_string())
 
-        dh_games = all_matchups_with_stats[~(all_matchups_with_stats['dh'] == 0)]
 
-        with open("dh_feats.txt", "w") as f:
-            f.write(dh_games.to_string())
+        try:
+            all_matchups_with_stats.to_parquet(cache_path, index=True)
+            logger.info(f" Successfully cached batting rolling stats to {cache_path}")
+        except Exception as e:
+            logger.error(f"Failed to cache batting rolling stats: {e}")
+
+        return all_matchups_with_stats
+
+        # dh_games = all_matchups_with_stats[~(all_matchups_with_stats['dh'] == 0)]
+
+        # with open("dh_feats.txt", "w") as f:
+        #     f.write(dh_games.to_string())
 
     def _fill_bullpen_with_priors(self, df: DataFrame, priors):
         df = df.copy()

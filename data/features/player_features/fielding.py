@@ -9,14 +9,13 @@ from data.loaders.player_loader import PlayerLoader
 
 class FieldingFeatures(BaseFeatures):
 
-    def __init__(self, season: int):
-        super().__init__(season)
+    def __init__(self, season: int, data: DataFrame):
+        super().__init__(season, data)
 
-    def load_data(self) -> DataFrame:
-        loader = PlayerLoader()
-        df = loader.load_fielding_stats(self.season)
+    def load_features(self) -> DataFrame:
+        pass
 
-        if df.empty:
-            print("DF is empty")
-        
-        return df
+if __name__ == "__main__":
+    loader = PlayerLoader()
+    fielding_stats = loader.load_fielding_stats(2021)
+    print(fielding_stats)

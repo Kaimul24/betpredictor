@@ -132,6 +132,9 @@ class fgSpider(scrapy.Spider):
                 item['ab'] = game['AB']
                 item['pa'] = game['PA']
 
+                bip = game.get("bipCount", 0)
+                item['bip'] = bip
+
                 ops = game.get("OPS", 0.0)
                 item['ops'] = ops
 
