@@ -6,12 +6,12 @@ Also handles bullpen status
 import pandas as pd
 import numpy as np
 import logging, os
-from data.features.base_feature import BaseFeatures
+from src.data.features.base_feature import BaseFeatures
 from pandas.core.api import DataFrame as DataFrame
 from typing import Tuple
 from src.config import FEATURES_CACHE_PATH
 
-from data.loaders.team_loader import TeamLoader
+from src.data.loaders.team_loader import TeamLoader
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,7 +46,8 @@ class PitchingFeatures(BaseFeatures):
                     logger.error(f"Error deleting file '{cache_path}': {e}")
             else:
                 logger.info(f" No cached pitching stats for {self.season}")
-        logger.info(f" Caluclating pitcher rolling stats...")
+
+        logger.info(f" Calculating pitcher rolling stats...")
         logger.info(" Loading roster...")
         roster_data = TeamLoader().load_roster(self.season)
         pitching_matchups = self.pitching_matchups.copy()
@@ -499,7 +500,7 @@ class PitchingFeatures(BaseFeatures):
     
 
 def main():
-    from data.loaders.player_loader import PlayerLoader
+    from src.data.loaders.player_loader import PlayerLoader
     loader = PlayerLoader()
     pitching_data = loader.load_for_season_pitcher(2021)
 

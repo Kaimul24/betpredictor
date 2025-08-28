@@ -2,7 +2,7 @@
 Odds loader
 '''
 
-from data.loaders.base_loader import BaseDataLoader
+from src.data.loaders.base_loader import BaseDataLoader
 import pandas as pd
 from datetime import date
 from typing import Optional

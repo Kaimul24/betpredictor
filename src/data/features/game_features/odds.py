@@ -2,8 +2,8 @@
 Handles construction of odds features and converting to implied probabilities.
 """
 
-from data.loaders.odds_loader import OddsLoader
-from data.features.base_feature import BaseFeatures
+from src.data.loaders.odds_loader import OddsLoader
+from src.data.features.base_feature import BaseFeatures
 from pandas.core.api import DataFrame as DataFrame
 from typing import Optional
 import pandas as pd

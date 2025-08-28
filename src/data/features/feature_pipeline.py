@@ -11,23 +11,23 @@ from typing import List
 
 from src.config import PROJECT_ROOT
 
-from data.features.game_features.context import GameContextFeatures
-from data.features.game_features.odds import Odds
-from data.features.player_features.batting import BattingFeatures
-from data.features.player_features.fielding import FieldingFeatures
-from data.features.player_features.pitching import PitchingFeatures
-from data.features.player_features.war import WAR
-from data.features.team_features.team_features import TeamFeatures
+from src.data.features.game_features.context import GameContextFeatures
+from src.data.features.game_features.odds import Odds
+from src.data.features.player_features.batting import BattingFeatures
+from src.data.features.player_features.fielding import FieldingFeatures
+from src.data.features.player_features.pitching import PitchingFeatures
+from src.data.features.player_features.war import WAR
+from src.data.features.team_features.team_features import TeamFeatures
 
-from data.loaders.game_loader import GameLoader
-from data.loaders.odds_loader import OddsLoader
-from data.loaders.player_loader import PlayerLoader
-from data.loaders.team_loader import TeamLoader
+from src.data.loaders.game_loader import GameLoader
+from src.data.loaders.odds_loader import OddsLoader
+from src.data.loaders.player_loader import PlayerLoader
+from src.data.loaders.team_loader import TeamLoader
 
 logger = None
 args = None
 
-LOG_DIR = PROJECT_ROOT / "data" / "logs"
+LOG_DIR = PROJECT_ROOT / "src" / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "feature_pipeline.log"
 
@@ -109,7 +109,6 @@ class FeaturePipeline():
             is_winner=np.where(schedule_data['winning_team'] == schedule_data['away_team'], 1, 0)
         )
 
-
         home_df = home_df_base.assign(
             is_home = True,
             team=schedule_data['home_team'],
@@ -137,7 +136,11 @@ class FeaturePipeline():
         fld_df.sort_values(['player_id', 'month'], inplace=True)
 
         bat_df['month'] = bat_df['game_date'].dt.month
-
+        
+        bat_df['month'] = bat_df['month'].map({
+            3: 4,
+            10: 9
+        }).fillna(bat_df['month'])
 
         merged_df = pd.merge(
             bat_df,
@@ -183,8 +186,7 @@ class FeaturePipeline():
 
         value_cols = [c for c in lineups_with_stats.columns 
               if any(s in c for s in ['_season', '_ewm_h3', '_ewm_h10', '_ewm_h25']) or
-              c == 'frv_per_9'
-              ]
+              c == 'team_frv_per_9']
 
         assert len(value_cols) == 53
 
@@ -194,35 +196,44 @@ class FeaturePipeline():
             .mean()
         )
 
-
-
         return team_features
     
     def _get_batting_features(self, schedule_df: DataFrame, force_recreate: bool = False) -> DataFrame:
         """Get batting features for all games efficiently"""
         raw_batter_data = self._load_batting_data()
+        raw_batter_data = raw_batter_data[~((raw_batter_data['pos'].str.startswith('P')) & (raw_batter_data['player_id'] != 19755))] # Shohei
+
         lineups_data = self._load_lineups_data()
         lineups_data['game_date'] = pd.to_datetime(lineups_data['game_date'])
+        lineups_data = lineups_data[~lineups_data['position'].str.startswith('P')]
+
         batting_features = BattingFeatures(self.season, raw_batter_data, force_recreate)
         
         self.logger.info(f" Calculating batting rolling stats for {self.season}")
         batting_features = batting_features.load_features()
-        
+
         raw_fielding_data = self._load_fielding_data()
         fielding_feats = FieldingFeatures(self.season, raw_fielding_data).load_features()
 
         self.logger.info(f" Merging batting rolling and fielding stats for {self.season}")
         bat_fld_feats = self._merge_batting_fielding_features(batting_features, fielding_feats)
 
-        self.logger.info(f" Merging schedule, lineups, and batting rolling stats for {self.season}")
+        base_stat_cols = ['ops', 'wrc_plus', 'woba', 'babip', 'bb_k', 'barrel_pct', 'hard_hit', 
+                          'ev', 'iso', 'gb_fb', 'baserunning', 'wraa', 'wpa', 'frv_per_9']
+        
+        rolling_stat_cols = [col for col in bat_fld_feats.columns if any(base_name in col for base_name in base_stat_cols)]
+        rename_cols = {col: f"team_{col}" for col in rolling_stat_cols}
+        bat_fld_feats = bat_fld_feats.rename(columns=rename_cols)
+
+        bat_fld_feats['team_frv_per_9'] = bat_fld_feats['team_frv_per_9'].fillna(0.0)
+
+        self.logger.info(f" Merging schedule, lineups, and batting/fielding rolling stats for {self.season}")
         team_features = self._merge_schedule_with_batting_features(schedule_df, lineups_data, bat_fld_feats)
 
         self.logger.info(f" Adding opposing team batting stats to each row for {self.season}")
         team_and_opponent_feats = self._add_opponent_features(team_features)
         team_and_opponent_feats = team_and_opponent_feats.sort_index(level=['game_date', 'dh', 'team'])
         team_and_opponent_feats = team_and_opponent_feats.reset_index()
-
-        self.logger.info(f" TEAM + OPP FEATS: {team_and_opponent_feats.columns.to_list()}")
 
         return team_and_opponent_feats
 
@@ -370,7 +381,7 @@ class FeaturePipeline():
                     all_odds_data,
                     how='left',
                     on=['game_date', 'away_team', 'home_team', 'dh'],
-                    suffixes=('', '_odds')
+                    suffixes=('', '_to_drop')
                 )
 
                 final_merged = final_merged.drop_duplicates(
@@ -378,11 +389,12 @@ class FeaturePipeline():
                 )
                 
                 cols_to_drop = [col for col in final_merged.columns 
-                               if col.endswith('_odds') and not col in ['away_opening_odds', 'home_opening_odds', 'away_current_odds', 'home_current_odds']]
+                               if col.endswith('_to_drop') or 
+                               col in ['away_starter', 'home_starter', 'winner'] and 
+                               not col in ['away_opening_odds', 'home_opening_odds', 'away_current_odds', 'home_current_odds']]
                 
                 final_merged = final_merged.drop(columns=cols_to_drop)
                 final_merged = final_merged.set_index(['game_date', 'dh', 'game_datetime', 'away_team', 'home_team'])
-
                 
                 self.logger.info(f" Merged games: {len(final_merged)}")
                 
@@ -633,10 +645,21 @@ class FeaturePipeline():
         self.logger.info(f" Final merged dataset shape: {final_features.shape}")
         self.logger.debug(f" Final features columns: {final_features.columns.to_list()}")
 
+        # exclude_cols = [col for col in final_features.columns if 'odds' in col]
+
+        # valid_cols = final_features.columns.difference(exclude_cols)
+
+        # nan_rows = final_features[final_features[valid_cols].isna().any(axis=1)][valid_cols]
+
+        # with open("nan_rows.txt", "w") as f:
+        #     f.write(nan_rows.to_string())
+
         self.logger.debug("="*60 + "\n")
         self.logger.debug(" Final features DataFrame tail")
-        self.logger.debug(final_features.to_string())
+        self.logger.debug(final_features.tail(10).to_string())
         self.logger.debug("="*60 + "\n")
+
+        
 
         return final_features
     

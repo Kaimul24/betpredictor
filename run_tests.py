@@ -49,7 +49,7 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     
     args = parser.parse_args()
-    base_cmd = ["python", "-m", "pytest"]
+    base_cmd = [sys.executable, "-m", "pytest"]
     
     if args.verbose:
         base_cmd.append("-v")

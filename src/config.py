@@ -3,9 +3,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
-DATABASE_PATH = PROJECT_ROOT / 'data' / 'mlb_stats.sqlite'
+DATABASE_PATH = PROJECT_ROOT / 'src' / 'data' / 'mlb_stats.sqlite'
 SCHEMA_PATH = PROJECT_ROOT / 'src' / 'scrapers' / 'schema.sql'
-FEATURES_CACHE_PATH = PROJECT_ROOT / 'data' / 'features' 
+FEATURES_CACHE_PATH = PROJECT_ROOT / 'src' / 'data' / 'features' 
 
 TEAM_TO_TEAM_ID_STATSAPI_MAP = {
     'LAA': 108,

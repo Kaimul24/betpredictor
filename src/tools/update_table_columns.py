@@ -42,7 +42,7 @@ from typing import Dict, List, Set
 from collections import defaultdict
 
 from src.config import DATABASE_PATH, SCHEMA_PATH
-from data.database import get_database_manager
+from src.data.database import get_database_manager
 
 # Set up logging
 logging.basicConfig(

@@ -1,6 +1,6 @@
 import pytest
 from datetime import date
-from data.loaders.team_loader import TeamLoader
+from src.data.loaders.team_loader import TeamLoader
 from tests.conftest import (
     insert_schedule_games, insert_batting_stats, insert_rosters, insert_lineup_players,
     insert_lineups, assert_dataframe_schema, assert_dataframe_not_empty, assert_dataframe_values

@@ -19,7 +19,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from data.features.player_features.batting import BattingFeatures
+from src.data.features.player_features.batting import BattingFeatures
 from tests.conftest import (
     insert_batting_stats, insert_players, assert_dataframe_schema,
     assert_dataframe_not_empty
@@ -37,7 +37,7 @@ class TestBattingFeatures:
 
     def _load_batting_data(self, season=2024):
         """Helper method to load batting data from database for testing."""
-        from data.database import get_database_manager
+        from src.data.database import get_database_manager
         db = get_database_manager()
         
         query = """
@@ -56,9 +56,9 @@ class TestBattingFeatures:
     def sample_players(self, clean_db):
         """Sample player data for testing."""
         players = [
-            ('player1', 'John Doe', 'OF', 'NYY'),
-            ('player2', 'Jane Smith', 'IF', 'BOS'), 
-            ('player3', 'Bob Johnson', 'C', 'TB')
+            ('1', 'John Doe', 'OF', 'NYY'),
+            ('2', 'Jane Smith', 'IF', 'BOS'), 
+            ('3', 'Bob Johnson', 'C', 'TB')
         ]
         insert_players(clean_db, players)
         return players
@@ -80,7 +80,7 @@ class TestBattingFeatures:
             pa_value = 4 + (i % 2)  # Alternating between 4 and 5 PA
             
             stats.append((
-                'player1', 
+                '1', 
                 game_date.strftime('%Y-%m-%d'),
                 'NYY',
                 0,  # dh
@@ -99,7 +99,7 @@ class TestBattingFeatures:
             pa_value = 3 + (i % 3)  # PA between 3-5
             
             stats.append((
-                'player2',
+                '2',
                 game_date.strftime('%Y-%m-%d'),
                 'BOS', 
                 0,  # dh
@@ -113,7 +113,7 @@ class TestBattingFeatures:
         for i in range(5):
             game_date = base_date + timedelta(days=i*2)
             stats.append((
-                'player3',
+                '3',
                 game_date.strftime('%Y-%m-%d'),
                 'TB',
                 0,  # dh  
@@ -138,7 +138,7 @@ class TestBattingFeatures:
         # Player 1: Regular game + doubleheader
         for dh in [0, 1]:  # Game 1 and Game 2 of doubleheader
             stats.append((
-                'player1',
+                '1',
                 base_date.strftime('%Y-%m-%d'),
                 'NYY',
                 dh,
@@ -151,7 +151,7 @@ class TestBattingFeatures:
         
         next_date = base_date + timedelta(days=1)
         stats.append((
-            'player1',
+            '1',
             next_date.strftime('%Y-%m-%d'),
             'NYY',
             0,
@@ -365,7 +365,7 @@ class TestBattingFeatures:
         """Test batch processing of multiple players."""
         player_ids = ['player1', 'player2']
         
-        from data.database import get_database_manager
+        from src.data.database import get_database_manager
         db = get_database_manager()
         
         for metric in ['woba', 'babip', 'bb_k', 'barrel_percent', 'hard_hit', 'ev', 'iso', 'gb_fb', 'baserunning', 'wraa', 'wpa']:
@@ -399,7 +399,7 @@ class TestBattingFeatures:
     def test_caching_functionality(self, batting_features, temporal_batting_data, tmp_path):
         """Test that rolling stats are properly cached and retrieved."""
         
-        from data.database import get_database_manager
+        from src.data.database import get_database_manager
         db = get_database_manager()
         
         for metric in ['woba', 'babip', 'bb_k', 'barrel_percent', 'hard_hit', 'ev', 'iso', 'gb_fb', 'baserunning', 'wraa', 'wpa']:

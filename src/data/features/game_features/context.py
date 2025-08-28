@@ -8,8 +8,8 @@ from pandas.core.api import DataFrame as DataFrame
 from sklearn.preprocessing import OneHotEncoder
 from datetime import timedelta
 
-from data.features.base_feature import BaseFeatures
-from data.loaders.game_loader import GameLoader
+from src.data.features.base_feature import BaseFeatures
+from src.data.loaders.game_loader import GameLoader
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -55,9 +55,12 @@ class GameContextFeatures(BaseFeatures):
         wind_cols = self._encode_wind()
         condition_cols = self._encode_condition()
         temp = self.data['temp']
-        return pd.concat([temp.reset_index(drop=True),
+
+        df = pd.concat([temp.reset_index(drop=True),
                             condition_cols.reset_index(drop=True),
                             wind_cols.reset_index(drop=True)], axis=1)
+
+        return df
 
     def _encode_wind(self) -> DataFrame:
         """Encodes the wind column."""
@@ -142,7 +145,7 @@ class GameContextFeatures(BaseFeatures):
         return encoded_condition
 
 def main():
-    from data.loaders.game_loader import GameLoader
+    from src.data.loaders.game_loader import GameLoader
     game_loader = GameLoader()
     game_data = game_loader.load_for_season(2021)
     context_features = GameContextFeatures(game_data, 2021).load_features()

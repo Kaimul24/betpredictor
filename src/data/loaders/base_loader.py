@@ -3,7 +3,7 @@ from datetime import date, datetime
 from pandas.core.api import DataFrame as DataFrame
 import pandas as pd
 import logging
-from data.database import get_database_manager
+from src.data.database import get_database_manager
 
 
 class BaseDataLoader(ABC):

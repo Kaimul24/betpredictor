@@ -15,7 +15,7 @@ import pandas as pd
 import numpy as np
 from datetime import date, datetime
 
-from data.features.game_features.context import GameContextFeatures
+from src.data.features.game_features.context import GameContextFeatures
 from tests.conftest import (
     insert_schedule_games, insert_park_factors, assert_dataframe_schema,
     assert_dataframe_not_empty
@@ -40,7 +40,7 @@ class TestGameContextFeatures:
         ]
         insert_schedule_games(clean_db, games)
         
-        from data.database import get_database_manager
+        from src.data.database import get_database_manager
         db = get_database_manager()
         
         updates = [
@@ -74,7 +74,7 @@ class TestGameContextFeatures:
     @pytest.fixture
     def context_features(self, clean_db, sample_schedule_data, sample_park_factors):
         """Create GameContextFeatures instance with sample data."""
-        from data.loaders.game_loader import GameLoader
+        from src.data.loaders.game_loader import GameLoader
         loader = GameLoader()
         schedule_data = loader.load_for_season(2024)
         
@@ -248,7 +248,7 @@ class TestGameContextFeatures:
                  'Final', 5, 3, 'NYY', 'BOS', 0)]
         insert_schedule_games(clean_db, games)
         
-        from data.loaders.game_loader import GameLoader
+        from src.data.loaders.game_loader import GameLoader
         loader = GameLoader()
         schedule_data = loader.load_for_season(2024)
         

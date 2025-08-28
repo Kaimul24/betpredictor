@@ -57,12 +57,6 @@ class oddsSpider(scrapy.Spider):
                 )
 
     def parse(self, response, date, year):
-        # raw_html = response.css('script#__NEXT_DATA__::text').get()
-
-        # if raw_html is None:
-        #     raise ValueError("No __NEXT_DATA__ script tag found on page; check url")
-        
-        # payload = json.loads(raw_html)
         raw_json = response.css('script#__NEXT_DATA__::text').get()
         payload = json.loads(raw_json)
         x = payload['props']['pageProps']['oddsTables']

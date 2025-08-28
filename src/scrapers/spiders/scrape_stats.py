@@ -47,24 +47,23 @@ class fgSpider(scrapy.Spider):
         await page.close()
 
         for year in DATES.keys():
-            if int(year) == 2021:
-                pit_url = PITCHERS_URL.format(year, year)
-                yield scrapy.Request(
-                    pit_url,
-                    cookies=self.cookies,
-                    headers=self.json_headers,
-                    callback=self.get_player_ids,
-                    cb_kwargs={"year": year, "stats_type": "pitching"},
-                )
+            pit_url = PITCHERS_URL.format(year, year)
+            yield scrapy.Request(
+                pit_url,
+                cookies=self.cookies,
+                headers=self.json_headers,
+                callback=self.get_player_ids,
+                cb_kwargs={"year": year, "stats_type": "pitching"},
+            )
 
-                bat_url = BATTERS_URL.format(year, year)
-                yield scrapy.Request(
-                    bat_url,
-                    cookies=self.cookies,
-                    headers=self.json_headers,
-                    callback=self.get_player_ids,
-                    cb_kwargs={"year": year, "stats_type": "batting"},
-                )
+            bat_url = BATTERS_URL.format(year, year)
+            yield scrapy.Request(
+                bat_url,
+                cookies=self.cookies,
+                headers=self.json_headers,
+                callback=self.get_player_ids,
+                cb_kwargs={"year": year, "stats_type": "batting"},
+            )
 
     def get_player_ids(self, response, year, stats_type):
         payload = json.loads(response.text)
@@ -80,11 +79,10 @@ class fgSpider(scrapy.Spider):
             player_id = player['playerid']
             mlb_id = player['xMLBAMID']
             
-            # Use appropriate position based on stats type
             if stats_type == "pitching":
-                pos = "P"  # Force pitching position for pitchers API
+                pos = "P" 
             else:
-                pos = "all"  # Use "all" for batting stats
+                pos = "all" 
                 
             url = GAME_LOG_URL.format(player_id, pos, year)
 
@@ -112,12 +110,6 @@ class fgSpider(scrapy.Spider):
         for game in stats[1:]:
             keys = list(game.keys())
             type = keys[7]
-            events = game['Events']
-            game_flag = game['G']
-            # if events == 0:
-            #     print(f"EVENTS is 0 for {id}")
-            #     print(f"{game['PlayerName']}, {game['gamedate']}")
-            #     print(f"{game.keys()}\n")
 
             if type == 'G':
                 item = BatterStat()
@@ -232,7 +224,7 @@ class fgSpider(scrapy.Spider):
                 fip = game.get("FIP", 0.0)
                 item['fip'] = fip
 
-                stuff = game.get("sp_stuff", 100) ### CHANGE TO sp_stuff
+                stuff = game.get("sp_stuff", 100)
                 item['stuff'] = stuff
                 
                 iffb = game.get("IFFB", 0)

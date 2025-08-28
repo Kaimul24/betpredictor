@@ -14,7 +14,7 @@ from typing import List, Tuple, Any
 import pytest
 import pandas as pd
 
-from data import database
+from src.data import database
 
 
 @pytest.fixture(scope="session")
@@ -141,12 +141,12 @@ def insert_batting_stats(dbm, stats: List[Tuple]) -> None:
     Args:
         dbm: Database manager instance
         stats: List of tuples with batting data
-               (player_id, game_date, team, dh, ab, pa, ops, wrc_plus, season)
+               (player_id, game_date, team, dh, ab, pa, bip, ops, wrc_plus, season)
     """
     query = """
     INSERT INTO batting_stats (
-        player_id, game_date, team, dh, ab, pa, ops, wrc_plus, season
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        player_id, game_date, team, dh, ab, pa, bip, ops, wrc_plus, season
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     dbm.execute_many_write_queries(query, stats)
 
@@ -214,19 +214,26 @@ def insert_fielding_stats(dbm, stats: List[Tuple]) -> None:
         dbm: Database manager instance
         stats: List of tuples with fielding data (name, season, month, frv, total_innings)
                 The normalized_player_name will be automatically generated from name
+                The player_id will be set to 1 for simplicity in tests
     """
     from src.utils import normalize_names
     
     query = """
-    INSERT INTO fielding (name, normalized_player_name, season, month, frv, total_innings) 
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO fielding (name, normalized_player_name, player_id, season, month, frv, total_innings) 
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     """
     
     fielding_with_normalized = []
+    # Convert month names to integers for database compatibility
+    month_map = {'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5, 'June': 6,
+                 'July': 7, 'August': 8, 'September': 9, 'October': 10, 'November': 11, 'December': 12}
+    
     for stat in stats:
         name, season, month, frv, total_innings = stat
         normalized_name = normalize_names(name)
-        fielding_with_normalized.append((name, normalized_name, season, month, frv, total_innings))
+        month_int = month_map.get(month, month)  # Convert month name to int, or keep as is if already int
+        player_id = 1  # Using a dummy player_id for test simplicity
+        fielding_with_normalized.append((name, normalized_name, player_id, season, month_int, frv, total_innings))
     
     dbm.execute_many_write_queries(query, fielding_with_normalized)
 

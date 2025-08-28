@@ -148,6 +148,7 @@ venv.bak/
 *.json
 *.csv
 Notes.md
+data_preprocessing_analysis.md
 
 # temp test scripts
 testDB.py

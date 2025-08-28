@@ -53,15 +53,14 @@ class fgSpider(scrapy.Spider):
 
         for team_id in range(1, 31):
             for year in DATES.keys():
-                if int(year) == 2021:
-                    url = TEAM_URL.format(team_id, year)
-                    yield scrapy.Request(
-                        url,
-                        cookies=self.cookies,
-                        headers=self.json_headers,
-                        callback=self.parse_roster,
-                        cb_kwargs={"year": year},
-                    )
+                url = TEAM_URL.format(team_id, year)
+                yield scrapy.Request(
+                    url,
+                    cookies=self.cookies,
+                    headers=self.json_headers,
+                    callback=self.parse_roster,
+                    cb_kwargs={"year": year},
+                )
             
 
     def parse_roster(self, response, year):
@@ -89,7 +88,7 @@ class fgSpider(scrapy.Spider):
 
                 if gs == 1:
                     home_starter_id = p['playerId']
-                    if year == '2021' and batting_order == 0:
+                    if year == '2021' or batting_order == 0:
                         batting_order = None
 
                 key = (id, year)

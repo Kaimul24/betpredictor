@@ -2,7 +2,7 @@
 Game and schedule data loader
 '''
 
-from data.loaders.base_loader import BaseDataLoader
+from src.data.loaders.base_loader import BaseDataLoader
 from datetime import date
 from typing import Union
 from itertools import islice

@@ -16,7 +16,7 @@ import numpy as np
 from datetime import date, timedelta
 from unittest.mock import patch
 
-from data.features.feature_pipeline import FeaturePipeline
+from src.data.features.feature_pipeline import FeaturePipeline
 from tests.conftest import (
     insert_schedule_games, insert_odds_data, insert_batting_stats, 
     insert_players, insert_lineups, insert_lineup_players,
@@ -50,7 +50,7 @@ class TestFeaturePipeline:
         
         insert_schedule_games(clean_db, games)
         
-        from data.database import get_database_manager
+        from src.data.database import get_database_manager
         db = get_database_manager()
         
         starters = [
@@ -245,7 +245,7 @@ class TestFeaturePipeline:
         Test temporal validation in batting features merging.
         Ensures only historical batting data is used for each game.
         """
-        from data.database import get_database_manager
+        from src.data.database import get_database_manager
         db = get_database_manager()
         
         for metric in ['woba', 'babip', 'bb_k', 'barrel_percent', 'hard_hit', 'ev', 'iso', 'gb_fb', 'baserunning', 'wraa', 'wpa']:

@@ -3,8 +3,8 @@ Constructs features from team metrics game streaks/trends,
 past strength of schedule, run diferential, home/away win percentage,
 one run game win percentage, bullpen statuss
 """
-from data.loaders.game_loader import GameLoader
-from data.features.base_feature import BaseFeatures
+from src.data.loaders.game_loader import GameLoader
+from src.data.features.base_feature import BaseFeatures
 from pandas.core.api import DataFrame as DataFrame
 from typing import Optional
 import pandas as pd
@@ -76,11 +76,11 @@ class TeamFeatures(BaseFeatures): # TODO add run diff (rolling + season)
     
 
 def main():
-    from data.loaders.game_loader import GameLoader
+    from src.data.loaders.game_loader import GameLoader
     game_loader = GameLoader()
     data = game_loader.load_for_season(2021)
 
-    from data.features.feature_pipeline import FeaturePipeline
+    from src.data.features.feature_pipeline import FeaturePipeline
     feat_pipe = FeaturePipeline(2021)
 
     transformed_data = feat_pipe._transform_schedule(data)

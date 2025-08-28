@@ -9,7 +9,7 @@ from itemadapter import ItemAdapter
 import json
 from pathlib import Path
 from scrapers.items import BatterStat, PitcherStat, OddsItem, LineupItem, LineupPlayerItem, FRVItem, ParkFactorItem
-from data.database import get_database_manager, execute_query
+from src.data.database import get_database_manager, execute_query
 from src.utils import normalize_names
 from src.tools.update_table_columns import auto_update_schema_for_tool
 

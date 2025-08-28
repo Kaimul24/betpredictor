@@ -1,6 +1,6 @@
 import pytest
 from datetime import date
-from data.loaders.player_loader import PlayerLoader
+from src.data.loaders.player_loader import PlayerLoader
 from tests.conftest import (
     insert_players, insert_batting_stats, insert_pitching_stats,
     insert_fielding_stats, assert_dataframe_not_empty
@@ -32,13 +32,13 @@ class TestPlayerLoader:
     def sample_batting_stats(self, clean_db, sample_players):
         """Insert sample batting stats for testing."""
         stats = [
-            # (player_id, game_date, team, dh, ab, pa, ops, wrc_plus, season)
-            (1, '2024-04-01', 'LAA', 0, 4, 5, 0.950, 150, 2024),
-            (1, '2024-04-02', 'LAA', 0, 3, 4, 0.880, 140, 2024),
-            (2, '2024-04-01', 'LAA', 0, 4, 4, 1.100, 180, 2024),
-            (3, '2024-04-01', 'LAD', 0, 5, 5, 0.920, 135, 2024),
-            (4, '2024-04-02', 'SFG', 1, 4, 5, 0.820, 115, 2024),
-            (4, '2024-04-02', 'SFG', 2, 4, 5, 0.820, 115, 2024) 
+            # (player_id, game_date, team, dh, ab, pa, bip, ops, wrc_plus, season)
+            (1, '2024-04-01', 'LAA', 0, 4, 5, 3, 0.950, 150, 2024),
+            (1, '2024-04-02', 'LAA', 0, 3, 4, 2, 0.880, 140, 2024),
+            (2, '2024-04-01', 'LAA', 0, 4, 4, 3, 1.100, 180, 2024),
+            (3, '2024-04-01', 'LAD', 0, 5, 5, 4, 0.920, 135, 2024),
+            (4, '2024-04-02', 'SFG', 1, 4, 5, 3, 0.820, 115, 2024),
+            (4, '2024-04-02', 'SFG', 2, 4, 5, 3, 0.820, 115, 2024) 
         ]
         insert_batting_stats(clean_db, stats)
         return stats
@@ -230,8 +230,8 @@ class TestPlayerLoader:
        
         mike_trout_data = df[df['name'] == 'Mike Trout'].reset_index(drop=True)
         assert len(mike_trout_data) == 2
-        assert mike_trout_data.iloc[0]['month'] == 'April'
-        assert mike_trout_data.iloc[1]['month'] == 'May'
+        assert mike_trout_data.iloc[0]['month'] == 4  # April = 4
+        assert mike_trout_data.iloc[1]['month'] == 5  # May = 5
 
     @pytest.mark.skip(reason="player_vs_pitcher_matchup not yet implemented")
     def test_player_vs_pitcher_matchup(self, player_loader, sample_batting_stats, sample_pitching_stats):

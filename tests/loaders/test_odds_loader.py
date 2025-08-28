@@ -12,7 +12,7 @@ Tests the odds data loading functionality including:
 import pytest
 import pandas as pd
 from datetime import date
-from data.loaders.odds_loader import OddsLoader
+from src.data.loaders.odds_loader import OddsLoader
 from tests.conftest import (
     insert_odds_data, assert_dataframe_schema, 
     assert_dataframe_not_empty, assert_dataframe_values

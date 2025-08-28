@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Optional, Dict
 from pandas.core.api import DataFrame as DataFrame
-from data.loaders.base_loader import BaseDataLoader
+from src.data.loaders.base_loader import BaseDataLoader
 
 class PlayerLoader(BaseDataLoader):
     def __init__(self):

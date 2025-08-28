@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 
 
-from data.features.team_features.team_features import TeamFeatures
+from src.data.features.team_features.team_features import TeamFeatures
 from tests.conftest import (
     assert_dataframe_schema, assert_dataframe_not_empty
 )
