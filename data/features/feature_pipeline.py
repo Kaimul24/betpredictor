@@ -8,8 +8,7 @@ from pandas.core.api import DataFrame as DataFrame
 import logging, sys, argparse
 import numpy as np
 from typing import List
-logger = None
-args = None
+
 from src.config import PROJECT_ROOT
 
 from data.features.game_features.context import GameContextFeatures
@@ -25,6 +24,9 @@ from data.loaders.odds_loader import OddsLoader
 from data.loaders.player_loader import PlayerLoader
 from data.loaders.team_loader import TeamLoader
 
+logger = None
+args = None
+
 LOG_DIR = PROJECT_ROOT / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "feature_pipeline.log"
@@ -33,7 +35,7 @@ def create_args():
     """Parse command line arguments"""
     global args
     parser = argparse.ArgumentParser(description="Feature engineering runner")
-    parser.add_argument("--force_recreate", action="store_true", help="Recreate batting rolling features, even if cached file exists")
+    parser.add_argument("--force-recreate", action="store_true", help="Recreate batting rolling features, even if cached file exists")
     parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
@@ -83,33 +85,6 @@ class FeaturePipeline():
         self.season = season
         self.cache = {}
         self.logger = setup_logging()
-
-    def _load_schedule_data(self) -> DataFrame:
-        game_loader = GameLoader()
-        schedule_data = game_loader.load_for_season(self.season)
-        return schedule_data
-    
-    def _load_odds_data(self) -> DataFrame:
-        odds_loader = OddsLoader()
-        odds_data = odds_loader.load_for_season(self.season)
-        return odds_data
-    
-    def _load_batting_data(self) -> DataFrame:
-        loader = PlayerLoader()
-        batting_data = loader.load_for_season_batter(self.season)
-        if batting_data.empty:
-            raise ValueError(f"Batting data in {self.season} is empty")
-        return batting_data
-    
-    def _load_lineups_data(self) -> DataFrame:
-        loader = TeamLoader()
-        lineups_data = loader.load_lineup_players(self.season)
-        return lineups_data
-    
-    def _load_pitching_data(self) -> DataFrame:
-        loader = PlayerLoader()
-        pitching_data = loader.load_for_season_pitcher(self.season)
-        return pitching_data
     
     def _transform_schedule(self, schedule_data: DataFrame) -> DataFrame:
         """Splits each game in the schedule into 2 rows, each representing one team's perspective of the game"""
@@ -154,6 +129,29 @@ class FeaturePipeline():
 
         return result
     
+    def _merge_batting_fielding_features(self, batting_stats: DataFrame, fielding_stats: DataFrame) -> DataFrame:
+        bat_df = batting_stats.copy()
+        fld_df = fielding_stats.copy()
+
+        bat_df.sort_values(['mlb_id', 'game_date', 'dh'], inplace=True)
+        fld_df.sort_values(['player_id', 'month'], inplace=True)
+
+        bat_df['month'] = bat_df['game_date'].dt.month
+
+
+        merged_df = pd.merge(
+            bat_df,
+            fld_df,
+            left_on=['mlb_id', 'month'],
+            right_on=['player_id', 'month'],
+            how='left',
+            suffixes=("", "_fld")
+        )
+
+        merged_df = merged_df.drop(columns=[col for col in merged_df.columns if col.endswith('_fld')])
+
+        return merged_df
+    
     def _merge_schedule_with_batting_features(self, schedule_df: DataFrame, lineups_data: DataFrame, batting_features: DataFrame) -> DataFrame:
         """
         Merges schedule, lineups, and rolling batting features into one DataFrame.
@@ -184,16 +182,19 @@ class FeaturePipeline():
         lineups_with_stats = lineups_with_stats.drop(columns=["team_bf"], errors="ignore")
 
         value_cols = [c for c in lineups_with_stats.columns 
-              if any(s in c for s in ['_season', '_ewm_h3', '_ewm_h10', '_ewm_h25'])
+              if any(s in c for s in ['_season', '_ewm_h3', '_ewm_h10', '_ewm_h25']) or
+              c == 'frv_per_9'
               ]
 
-        assert len(value_cols) == 52
+        assert len(value_cols) == 53
 
         team_features = (
             lineups_with_stats
             .groupby(["game_id", "game_date", "team", "opposing_team", "dh"], observed=True)[value_cols]
             .mean()
         )
+
+
 
         return team_features
     
@@ -206,14 +207,22 @@ class FeaturePipeline():
         
         self.logger.info(f" Calculating batting rolling stats for {self.season}")
         batting_features = batting_features.load_features()
+        
+        raw_fielding_data = self._load_fielding_data()
+        fielding_feats = FieldingFeatures(self.season, raw_fielding_data).load_features()
+
+        self.logger.info(f" Merging batting rolling and fielding stats for {self.season}")
+        bat_fld_feats = self._merge_batting_fielding_features(batting_features, fielding_feats)
 
         self.logger.info(f" Merging schedule, lineups, and batting rolling stats for {self.season}")
-        team_features = self._merge_schedule_with_batting_features(schedule_df, lineups_data, batting_features)
+        team_features = self._merge_schedule_with_batting_features(schedule_df, lineups_data, bat_fld_feats)
 
         self.logger.info(f" Adding opposing team batting stats to each row for {self.season}")
         team_and_opponent_feats = self._add_opponent_features(team_features)
         team_and_opponent_feats = team_and_opponent_feats.sort_index(level=['game_date', 'dh', 'team'])
         team_and_opponent_feats = team_and_opponent_feats.reset_index()
+
+        self.logger.info(f" TEAM + OPP FEATS: {team_and_opponent_feats.columns.to_list()}")
 
         return team_and_opponent_feats
 
@@ -535,10 +544,8 @@ class FeaturePipeline():
         
     
     def start_pipeline(self, force_recreate: bool = False, clear_log: bool = False):
-        # Set up args if not already done (for script compatibility)
         global args
         if args is None:
-            import argparse
             parser = argparse.ArgumentParser(description="Feature engineering runner")
             parser.add_argument("--force-recreate", action="store_true", help="Recreate batting rolling features, even if cached file exists")
             parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
@@ -632,11 +639,54 @@ class FeaturePipeline():
         self.logger.debug("="*60 + "\n")
 
         return final_features
+    
+    def _load_schedule_data(self) -> DataFrame:
+        game_loader = GameLoader()
+        schedule_data = game_loader.load_for_season(self.season)
+        return schedule_data
+    
+    def _load_odds_data(self) -> DataFrame:
+        odds_loader = OddsLoader()
+        odds_data = odds_loader.load_for_season(self.season)
+        return odds_data
+    
+    def _load_batting_data(self) -> DataFrame:
+        loader = PlayerLoader()
+        batting_data = loader.load_for_season_batter(self.season)
+        if batting_data.empty:
+            raise ValueError(f"Batting data in {self.season} is empty")
+        return batting_data
+    
+    def _load_lineups_data(self) -> DataFrame:
+        loader = TeamLoader()
+        lineups_data = loader.load_lineup_players(self.season)
+        return lineups_data
+    
+    def _load_pitching_data(self) -> DataFrame:
+        loader = PlayerLoader()
+        pitching_data = loader.load_for_season_pitcher(self.season)
+        return pitching_data
+    
+    def _load_fielding_data(self) -> DataFrame:
+        loader = PlayerLoader()
+        fielding_data = loader.load_fielding_stats(self.season)
+        return fielding_data
         
 def main():
     create_args()
     
     feat_pipe = FeaturePipeline(2021)
+
+    # fld_data = feat_pipe._load_fielding_data()
+    # bat_data = feat_pipe._load_batting_data()
+
+    # bat_feats = BattingFeatures(2021, bat_data)
+    # batting_features = bat_feats.load_features()
+
+    # fld_feats = FieldingFeatures(2021, fld_data).load_features()
+    # bat_fld_merged = feat_pipe._merge_batting_fielding_features(batting_features, fld_feats)
+
+
     features = feat_pipe.start_pipeline()
 
 

@@ -18,14 +18,12 @@ class PlayerLoader(BaseDataLoader):
                                  'bb_percent', 'barrel_percent', 'hard_hit', 'ev',
                                  'hr_fb', 'siera', 'fip', 'stuff', 'iffb', 'wpa',
                                  'gmli',  'fa_percent', 'fc_percent', 'si_percent',
-                                 'fa_velo', 'fc_velo', 'si_velo' ,'season'
-                                 ]
+                                 'fa_velo', 'fc_velo', 'si_velo', 'season']
         
-        self.fielding_columns = ['name', 'normalized_player_name', 'season', 'month',
+        self.fielding_columns = ['name', 'normalized_player_name', 'player_id', 'season', 'month',
                                  'frv', 'total_innings', 'innings_C', 'innings_1B', 
                                  'innings_2B', 'innings_3B', 'innings_SS', 'innings_LF',
-                                 'innings_CF', 'innings_RF',
-                                 ]
+                                 'innings_CF', 'innings_RF']
 
     def load_for_date_range(self, start: date, end: date) -> DataFrame:
         raise NotImplementedError("Use load_<batting/pitching_stats>_for_date_range instead.")

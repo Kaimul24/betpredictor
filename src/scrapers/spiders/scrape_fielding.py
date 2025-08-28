@@ -65,19 +65,20 @@ class fieldingSpider(scrapy.Spider):
             
             item['name'] = name
             item['normalized_player_name'] = normalize_names(name)
+            item['player_id'] = row['id']
             item['season'] = year
             item['month'] = row['api_game_date_month_mm']
             item['frv'] = round(float(row['total_runs']), 2)
 
-            item['total_innings'] = int(row['outs_total']) / 3
-            item['innings_C'] = int(row['outs_2']) / 3
-            item['innings_1B'] = int(row['outs_3']) / 3
-            item['innings_2B'] = int(row['outs_4']) / 3
-            item['innings_3B'] = int(row['outs_5']) / 3
-            item['innings_SS'] = int(row['outs_6']) / 3
-            item['innings_LF'] = int(row['outs_7']) / 3
-            item['innings_CF'] = int(row['outs_8']) / 3
-            item['innings_RF'] = int(row['outs_9']) / 3
+            item['total_innings'] = float(row['outs_total']) / 3
+            item['innings_C'] = float(row['outs_2']) / 3
+            item['innings_1B'] = float(row['outs_3']) / 3
+            item['innings_2B'] = float(row['outs_4']) / 3
+            item['innings_3B'] = float(row['outs_5']) / 3
+            item['innings_SS'] = float(row['outs_6']) / 3
+            item['innings_LF'] = float(row['outs_7']) / 3
+            item['innings_CF'] = float(row['outs_8']) / 3
+            item['innings_RF'] = float(row['outs_9']) / 3
             yield item
 
     

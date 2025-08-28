@@ -118,6 +118,7 @@ class LineupPlayerItem(scrapy.Item):
 class FRVItem(scrapy.Item):
     name = scrapy.Field()
     normalized_player_name = scrapy.Field()
+    player_id = scrapy.Field()
     season = scrapy.Field()
     month = scrapy.Field()
     frv = scrapy.Field()

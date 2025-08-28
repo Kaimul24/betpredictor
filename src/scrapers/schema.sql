@@ -243,6 +243,7 @@ CREATE INDEX IF NOT EXISTS idx_lineup_players_year
 CREATE TABLE IF NOT EXISTS fielding (
   name            TEXT NOT NULL,
   normalized_player_name TEXT,
+  player_id       INTEGER NOT NULL,
   season          INTEGER NOT NULL,
   month           INTEGER,
   frv             REAL,
