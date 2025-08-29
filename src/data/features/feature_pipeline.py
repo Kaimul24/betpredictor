@@ -591,7 +591,7 @@ class FeaturePipeline():
         team_features = TeamFeatures(self.season, transformed_schedule).load_features().reset_index()
 
         raw_pitching_data = self._load_pitching_data()
-        pitching_features = PitchingFeatures(self.season, raw_pitching_data).load_features().reset_index()
+        pitching_features = PitchingFeatures(self.season, raw_pitching_data, args.force_recreate).load_features().reset_index()
 
         transformed_schedule_reset = transformed_schedule.reset_index()
         batting_features_reset = batting_features.reset_index()
@@ -640,26 +640,25 @@ class FeaturePipeline():
                                                     col in ['wind', 'condition'] or 
                                                     col.endswith('_to_drop')])
         
-        final_features = final_features.set_index(['game_date', 'dh', 'team', 'opposing_team'])
+        final_features = final_features.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team'])
         
         self.logger.info(f" Final merged dataset shape: {final_features.shape}")
+        self.logger.debug(f" Final dataframe datatypes:\n{final_features.dtypes.to_dict()}")
         self.logger.debug(f" Final features columns: {final_features.columns.to_list()}")
 
-        # exclude_cols = [col for col in final_features.columns if 'odds' in col]
+        exclude_cols = [col for col in final_features.columns if 'odds' in col]
 
-        # valid_cols = final_features.columns.difference(exclude_cols)
+        valid_cols = final_features.columns.difference(exclude_cols)
 
-        # nan_rows = final_features[final_features[valid_cols].isna().any(axis=1)][valid_cols]
+        nan_rows = final_features[final_features[valid_cols].isna().any(axis=1)][valid_cols]
 
-        # with open("nan_rows.txt", "w") as f:
-        #     f.write(nan_rows.to_string())
+        with open("nan_rows.txt", "w") as f:
+            f.write(nan_rows.to_string())
 
         self.logger.debug("="*60 + "\n")
         self.logger.debug(" Final features DataFrame tail")
-        self.logger.debug(final_features.tail(10).to_string())
+        self.logger.debug(final_features.to_string())
         self.logger.debug("="*60 + "\n")
-
-        
 
         return final_features
     
@@ -698,7 +697,7 @@ class FeaturePipeline():
 def main():
     create_args()
     
-    feat_pipe = FeaturePipeline(2021)
+    feat_pipe = FeaturePipeline(2022)
 
     # fld_data = feat_pipe._load_fielding_data()
     # bat_data = feat_pipe._load_batting_data()

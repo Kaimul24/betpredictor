@@ -52,7 +52,25 @@ class PitchingFeatures(BaseFeatures):
         roster_data = TeamLoader().load_roster(self.season)
         pitching_matchups = self.pitching_matchups.copy()
         pitching_rosters = roster_data[(roster_data['position'] == 'P') | (roster_data['position'] == 'TWP')]
+
+        pitching_matchups['team_starter_id'] = pitching_matchups['team_starter_id'].astype('Int64')
+        pitching_matchups['opposing_starter_id'] = pitching_matchups['opposing_starter_id'].astype('Int64')
+
+        na_mask = pitching_matchups['team_starter_id'].isna()
+        if na_mask.any():
+            logger.info(f"Found {na_mask.sum()} missing team_starter_id values, filling from opposing team records...")
+            
+            lookup_df = pitching_matchups[~na_mask].copy()
+            lookup_dict = lookup_df.set_index(['game_date', 'dh', 'opposing_team'])['opposing_starter_id'].to_dict()
+            
+            for idx in pitching_matchups[na_mask].index:
+                row = pitching_matchups.loc[idx]
+                lookup_key = (row['game_date'], row['dh'], row['team'])
+                if lookup_key in lookup_dict:
+                    pitching_matchups.loc[idx, 'team_starter_id'] = lookup_dict[lookup_key]
         
+        self.pitching_matchups = pitching_matchups
+
         pitching_stats = self._classify_pitcher_type()
         pitching_stats = self._is_opener(pitching_stats)
         pitching_stats['player_id'] = pitching_stats['player_id'].astype("Int64")
@@ -62,11 +80,8 @@ class PitchingFeatures(BaseFeatures):
         logger.info(f" Reliever NaN rows (_rolling_pitching_stats): {reliver_rolling_stats.isna().any(axis=1).sum()}")
         logger.info(f" Starter NaN rows (_rolling_pitching_stats): {starters_rolling_stats.isna().any(axis=1).sum()}")
 
-        pitching_matchups['team_starter_id'] = pitching_matchups['team_starter_id'].astype('Int64')
-        pitching_matchups['opposing_starter_id'] = pitching_matchups['opposing_starter_id'].astype('Int64')
-
         team_starter_stats = pd.merge(
-            pitching_matchups,
+            self.pitching_matchups,
             starters_rolling_stats,
             left_on=['game_date', 'dh', 'team_starter_id'],
             right_on=['game_date', 'dh', 'player_id'],
@@ -77,6 +92,7 @@ class PitchingFeatures(BaseFeatures):
         cols = ['mlb_id', 'season']
         team_starter_stats.drop(columns=[col for col in team_starter_stats if col.endswith('_s') or col in cols], inplace=True)
         
+
         all_matchups_with_stats = pd.merge(
             team_starter_stats,
             starters_rolling_stats,
@@ -85,9 +101,9 @@ class PitchingFeatures(BaseFeatures):
             how='left',
             suffixes=('_team_starter', '_opposing_starter')
         )
+    
 
         all_matchups_with_stats.drop(columns=['team_opposing_starter'], inplace= True)
-
         all_matchups_with_stats.rename(columns={'team_team_starter': 'team'}, inplace=True)
         
         reliver_rolling_stats = reliver_rolling_stats.rename(columns={'player_id': 'fg_id', 'mlb_id': 'player_id'})
@@ -151,26 +167,25 @@ class PitchingFeatures(BaseFeatures):
 
         all_matchups_with_stats = self._fill_bullpen_with_priors(all_matchups_with_stats, rl_priors)
 
+        for col in ['last_app_date_team_starter', 'last_app_date_opposing_starter']:
+            all_matchups_with_stats[col] = all_matchups_with_stats[col].fillna(pd.to_datetime(f"{self.season}-01-01"))
+            
         logger.debug(f"Pitching Rosters with stats: {len(all_matchups_with_stats)}")
-        logger.info(f"Rosters with stats rows with NAN: {all_matchups_with_stats.isna().any(axis=1).sum()}")
-        logger.debug(f"all_matchups_with_stats_cols: {all_matchups_with_stats.columns.to_list()}\n")
+        logger.info(f" Rosters with stats rows with NAN\n{all_matchups_with_stats[all_matchups_with_stats.isna().any(axis=1)]}")
+        logger.debug(f" all_matchups_with_stats_cols\n{all_matchups_with_stats.columns.to_list()}\n")
 
         first_cols = ['game_date', 'dh', 'season', 'team', 'opposing_team', 'name_team_starter', 
                       'normalized_player_name_team_starter', 'name_opposing_starter', 
                       'normalized_player_name_opposing_starter']
         
-        for col in ['last_app_date_team_starter', 'last_app_date_opposing_starter']:
-            all_matchups_with_stats[col] = all_matchups_with_stats[col].fillna(pd.to_datetime(f"{self.season}-01-01"))
-        
         remaining_cols = [col for col in all_matchups_with_stats.columns if col not in first_cols]
 
         all_matchups_with_stats = all_matchups_with_stats[first_cols + remaining_cols]
 
-        logger.info(f"Final Pitcher Features\n{all_matchups_with_stats.head(5)}")
+        logger.info(f" Final Pitcher Features\n{all_matchups_with_stats.head(5)}")
 
         with open("pitching_features.txt", "w") as f:
             f.write(all_matchups_with_stats.to_string())
-
 
         try:
             all_matchups_with_stats.to_parquet(cache_path, index=True)
@@ -179,11 +194,6 @@ class PitchingFeatures(BaseFeatures):
             logger.error(f"Failed to cache batting rolling stats: {e}")
 
         return all_matchups_with_stats
-
-        # dh_games = all_matchups_with_stats[~(all_matchups_with_stats['dh'] == 0)]
-
-        # with open("dh_feats.txt", "w") as f:
-        #     f.write(dh_games.to_string())
 
     def _fill_bullpen_with_priors(self, df: DataFrame, priors):
         df = df.copy()
@@ -210,6 +220,7 @@ class PitchingFeatures(BaseFeatures):
             how='left', 
             indicator=True
         )
+
         missing_entries = missing_entries[missing_entries['_merge'] == 'left_only'].drop(columns=['_merge'])
         
         if len(missing_entries) > 0:
@@ -305,20 +316,28 @@ class PitchingFeatures(BaseFeatures):
         if 'is_starter' not in pitcher_data.columns:
             raise RuntimeError("This method is meant to be called after the method _is_starter() is called.")
 
-        starter_stats = pitcher_data.loc[pitcher_data['is_starter'] == 1].copy()
+        starter_stats = pitcher_data.copy()
         
         g = starter_stats.groupby('player_id', observed=True)
         games = g['games'].sum(min_count=1)
         games_started = g['gs'].sum(min_count=1)
 
         ratio = games_started.div(games).replace([np.inf, -np.inf], np.nan)
-        opener_flag = (ratio.lt(0.35)).astype('Int64').fillna(0)
+        opener_flag = (ratio.lt(0.25)).astype('Int64').fillna(0)
 
+        opener_mapping = opener_flag.rename('is_opener_flag').reset_index()
+        
         pitcher_data = pitcher_data.merge(
-            opener_flag.rename('is_opener').reset_index(), on='player_id', how='left'
+            opener_mapping, on='player_id', how='left'
         )
 
-        pitcher_data['is_opener'] = pitcher_data['is_opener'].fillna(0).astype(int)
+        pitcher_data['is_opener'] = np.where(
+            pitcher_data['is_starter'] == 1,
+            pitcher_data['is_opener_flag'].fillna(0),
+            0
+        ).astype(int)
+
+        pitcher_data.drop(columns=['is_opener_flag'], inplace=True)
 
         return pitcher_data
     
@@ -458,6 +477,7 @@ class PitchingFeatures(BaseFeatures):
         df = starters.copy()
         df = df.sort_values(['player_id', 'game_date'])
         df['gs'] = 1
+
         for col in ['fa_percent', 'fc_percent', 'si_percent']:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
         
@@ -494,7 +514,7 @@ class PitchingFeatures(BaseFeatures):
         df["velo_diff"] = df["velo_diff"].fillna(0)
 
         df.drop(columns=['fa_velo', 'fa_percent', 'fc_velo', 
-                         'fc_percent', 'si_velo', 'si_percent'], inplace=True)
+                         'fc_percent', 'si_velo', 'si_percent' , 'gs'], inplace=True)
         return df
 
     
