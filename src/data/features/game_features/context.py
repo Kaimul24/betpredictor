@@ -47,7 +47,7 @@ class GameContextFeatures(BaseFeatures):
     def _day_night_game(self) -> DataFrame:
         """Binary encoding of the day_night column. 1 is day, 0 is night."""
         day_night_col = self.data[['day_night_game']].copy()
-        day_night_game = (day_night_col == "day").astype(int)
+        day_night_game = (day_night_col == "day").astype(bool)
         return day_night_game
     
     def _create_weather_features(self) -> DataFrame:
@@ -94,7 +94,7 @@ class GameContextFeatures(BaseFeatures):
             categories=[categories],
             handle_unknown='ignore',
             sparse_output=False,
-            dtype=int,
+            dtype=bool,
         )
 
         encoded = encoder.fit_transform(wind_encoded[['wind_direction']])
@@ -104,7 +104,7 @@ class GameContextFeatures(BaseFeatures):
         encoded_df['wind_magnitude'] = wind_encoded['wind_magnitude']
 
         assert encoded_df['wind_magnitude'].dtype.name.startswith('int'), f"Expected int dtype, got {encoded_df['wind_magnitude'].dtype}"
-        assert all(encoded_df[f"wind_direction_{cat.replace(' ', '_')}"].dtype == 'int64' for cat in categories), "All wind direction columns should be int64"
+        assert all(encoded_df[f"wind_direction_{cat.replace(' ', '_')}"].dtype == 'bool' for cat in categories), "All wind direction columns should be bool"
         
         return encoded_df
 
@@ -135,13 +135,13 @@ class GameContextFeatures(BaseFeatures):
             categories=[categories],
             handle_unknown='ignore',
             sparse_output=False,
-            dtype=int,
+            dtype=bool,
         )
 
         encoded = encoder.fit_transform(X)
         col_names = [f"condition_{cat.replace(' ', '_')}" for cat in categories]
         encoded_condition = pd.DataFrame(encoded, columns=col_names, index=self.data.index)
-        assert all(encoded_condition[f"condition_{cat.replace(' ', '_')}"].dtype == 'int64' for cat in categories), "All wind direction columns should be int64"
+        assert all(encoded_condition[f"condition_{cat.replace(' ', '_')}"].dtype == 'bool' for cat in categories), "All wind direction columns should be bool"
         return encoded_condition
 
 def main():

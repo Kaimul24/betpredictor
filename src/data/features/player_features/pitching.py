@@ -306,7 +306,7 @@ class PitchingFeatures(BaseFeatures):
         merged_df = merged_df.drop(columns=['season_stats'])
 
         cond = merged_df['team_starter_id'].eq(merged_df['player_id']).fillna(False)
-        merged_df['is_starter'] = cond.astype('int8')
+        merged_df['is_starter'] = cond.astype(bool)
 
         return merged_df
         
@@ -332,10 +332,10 @@ class PitchingFeatures(BaseFeatures):
         )
 
         pitcher_data['is_opener'] = np.where(
-            pitcher_data['is_starter'] == 1,
-            pitcher_data['is_opener_flag'].fillna(0),
-            0
-        ).astype(int)
+            pitcher_data['is_starter'] == True,
+            pitcher_data['is_opener_flag'].fillna(False),
+            False
+        ).astype(bool)
 
         pitcher_data.drop(columns=['is_opener_flag'], inplace=True)
 
@@ -344,16 +344,11 @@ class PitchingFeatures(BaseFeatures):
     def _rolling_pitching_stats(self, pitcher_data: DataFrame) -> Tuple[DataFrame, DataFrame]:
         """Orchestrates computation of rolling stats for starters and relievers"""  
 
-        relievers = pitcher_data[pitcher_data['is_starter'] == 0].copy()
-        starters = pitcher_data[pitcher_data['is_starter'] == 1].copy()
+        relievers = pitcher_data[pitcher_data['is_starter'] == False].copy()
+        starters = pitcher_data[pitcher_data['is_starter'] == True].copy()
 
         rl_df, rl_priors = self._compute_rolling_bullpen_stats(relievers)
         st_df, st_priors = self._compute_rolling_starter_stats(starters)
-
-        with open("na_st_df.txt", "w") as f:
-            pids = st_df[st_df.isna().any(axis=1)]['player_id'].unique()
-            pids = [int(pid) for pid in pids]
-            f.write(str(list(pids)))
         
         st_df_velo = self._compute_starter_velo_trends(st_df)
 

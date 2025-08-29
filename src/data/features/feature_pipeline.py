@@ -592,6 +592,17 @@ class FeaturePipeline():
 
         raw_pitching_data = self._load_pitching_data()
         pitching_features = PitchingFeatures(self.season, raw_pitching_data, args.force_recreate).load_features().reset_index()
+        pitching_features = pitching_features.set_index(['game_date', 'dh', 'team', 'opposing_team'])
+
+        self.logger.info(f" Adding opposing team bullpen pitching stats to each row for {self.season}")
+
+        pitching_features_opp_bp = self._add_opponent_features(pitching_features, feature_cols=[col for col in pitching_features.columns if 'pen' in col])
+        pitching_features_opp_bp = pitching_features_opp_bp.sort_index(level=['game_date', 'dh', 'team'])
+        pitching_features_opp_bp = pitching_features_opp_bp.reset_index()
+
+        team_pen_cols = [col for col in pitching_features_opp_bp.columns if 'pen_' in col and not col.startswith('opposing')]
+        pitching_features_opp_bp.rename(columns={col: f"team_{col}" for col in team_pen_cols}, inplace=True)
+
 
         transformed_schedule_reset = transformed_schedule.reset_index()
         batting_features_reset = batting_features.reset_index()
@@ -603,7 +614,6 @@ class FeaturePipeline():
             how='inner',
             validate='1:1' 
         )
-
 
         sch_bat_ctx = pd.merge(
             sch_batting_features,
@@ -624,7 +634,7 @@ class FeaturePipeline():
 
         final_features = pd.merge(
             sch_bat_ctx_team,
-            pitching_features,
+            pitching_features_opp_bp,
             on=['game_date', 'dh', 'team', 'opposing_team', 'season'],
             how='inner',
             validate='1:1',
@@ -651,9 +661,6 @@ class FeaturePipeline():
         valid_cols = final_features.columns.difference(exclude_cols)
 
         nan_rows = final_features[final_features[valid_cols].isna().any(axis=1)][valid_cols]
-
-        with open("nan_rows.txt", "w") as f:
-            f.write(nan_rows.to_string())
 
         self.logger.debug("="*60 + "\n")
         self.logger.debug(" Final features DataFrame tail")
