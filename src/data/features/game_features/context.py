@@ -6,7 +6,6 @@ import pandas as pd
 import logging
 from pandas.core.api import DataFrame as DataFrame
 from sklearn.preprocessing import OneHotEncoder
-from datetime import timedelta
 
 from src.data.features.base_feature import BaseFeatures
 from src.data.loaders.game_loader import GameLoader
@@ -34,7 +33,8 @@ class GameContextFeatures(BaseFeatures):
         day_night_col = self._day_night_game()
 
         venue_to_park_factor = self.park_factor_data.set_index('venue_id')['park_factor'].copy()
-        self.data['park_factor'] = self.data['venue_id'].map(venue_to_park_factor)
+        self.data['park_factor'] = self.data['venue_id'].map(venue_to_park_factor, na_action='ignore')
+        self.data['park_factor'] = self.data['park_factor'].fillna(100)
 
         essential_cols = ['game_id', 'game_date', 'game_datetime', 'away_team', 'home_team', 'dh', 'venue_name', 'venue_id', 'park_factor', 'venue_elevation']
         context_data = self.data[essential_cols].copy()

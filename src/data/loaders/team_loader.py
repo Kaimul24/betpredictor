@@ -14,13 +14,13 @@ class TeamLoader(BaseDataLoader):
         self.game_loader = GameLoader()
 
     def load_up_to_game(self, date: date, team_abbr: str, dh: int = 0) -> pd.DataFrame:
-        return super().load_up_to_game(date, team_abbr, dh)
+        raise NotImplementedError
     
     def load_for_date_range(self, start: date, end: date) -> pd.DataFrame:
-        return super().load_for_date_range(start, end)
+        raise NotImplementedError
     
     def load_for_season(self, season: int) -> DataFrame:
-        return super().load_for_season(season)
+        raise NotImplementedError
     
     def load_roster(self, season: int, team: Optional[str] = None, date: Optional[date] = None) -> DataFrame:
         """Load the rosters for each date in a season. Optional filters by date and team"""

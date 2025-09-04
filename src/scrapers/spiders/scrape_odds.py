@@ -84,16 +84,22 @@ class oddsSpider(scrapy.Spider):
             home_team_mapped = ODDS_TEAM_ABBR_MAP.get(home_team, home_team)
             
             away_starter_dict = game_data['awayStarter']
+
             if away_starter_dict == None and game_data['gameId'] == 354113:
                 away_starter = 'Michael Lorenzen'
-            else:
+            elif away_starter_dict != None:
                 away_starter = ' '.join(islice(away_starter_dict.values(), 2))
+            else:
+                away_starter = None
 
             home_starter_dict = game_data['homeStarter']
+            
             if home_starter_dict == None and game_data['gameId'] == 354113:
                 home_starter = 'JP Sears'
-            else:
+            elif home_starter_dict != None:
                 home_starter = ' '.join(islice(home_starter_dict.values(), 2))
+            else:
+                home_starter = None
 
             away_score = game_data['awayTeamScore']
             home_score = game_data['homeTeamScore']

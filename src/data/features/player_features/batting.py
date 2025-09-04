@@ -44,7 +44,7 @@ class BattingFeatures(BaseFeatures):
             logger.info(f" Calculating batter rolling stats...")
 
         df = self.data.copy()
-        df.sort_values(['player_id', 'game_date', 'dh'])
+        df.sort_values(['player_id', 'game_date', 'dh'], inplace=True)
 
         prior_specs = {
             "prior_woba":            ("woba",           "pa"),
@@ -81,7 +81,7 @@ class BattingFeatures(BaseFeatures):
         }
 
         result, priors = BaseFeatures.compute_rolling_stats(
-            player_data=df,
+            data=df,
             prior_specs=prior_specs,
             shrinkage_weights_cols=shrinkage_weights_cols,
             ewm_cols=ewm_cols,

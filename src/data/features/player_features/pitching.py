@@ -34,8 +34,8 @@ class PitchingFeatures(BaseFeatures):
         
         if cache_path.exists() and not self.force_recreate:
             logger.info(f" Found cached pitching rolling stats for {self.season}")
-            batting_features = pd.read_parquet(cache_path)
-            return batting_features
+            pitching_features = pd.read_parquet(cache_path)
+            return pitching_features
         
         elif self.force_recreate:
             if cache_path.exists():
@@ -189,9 +189,9 @@ class PitchingFeatures(BaseFeatures):
 
         try:
             all_matchups_with_stats.to_parquet(cache_path, index=True)
-            logger.info(f" Successfully cached batting rolling stats to {cache_path}")
+            logger.info(f" Successfully cached pitching rolling stats to {cache_path}")
         except Exception as e:
-            logger.error(f"Failed to cache batting rolling stats: {e}")
+            logger.error(f"Failed to cache pitching rolling stats: {e}")
 
         return all_matchups_with_stats
 
@@ -400,7 +400,7 @@ class PitchingFeatures(BaseFeatures):
                 'is_starter', 'is_opener']
 
         result, reliever_priors = BaseFeatures.compute_rolling_stats(
-            player_data=rel,
+            data=rel,
             prior_specs=prior_specs,
             shrinkage_weights_cols=shrinkage_weights_cols,
             ewm_cols=specs,
@@ -453,7 +453,7 @@ class PitchingFeatures(BaseFeatures):
                 'fc_velo', 'si_velo']
 
         result, starter_priors = BaseFeatures.compute_rolling_stats(
-            player_data=start,
+            data=start,
             prior_specs=prior_specs,
             shrinkage_weights_cols=shrinkage_weights_cols,
             ewm_cols=specs,

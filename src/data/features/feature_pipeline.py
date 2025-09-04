@@ -627,7 +627,7 @@ class FeaturePipeline():
         sch_bat_ctx_team = pd.merge(
             sch_bat_ctx,
             team_features,
-            on=['game_id', 'game_date', 'dh', 'game_datetime', 'team'],
+            on=['game_id', 'game_date', 'dh', 'game_datetime', 'team', 'opposing_team'],
             how='inner',
             validate='1:1',
         )
@@ -651,7 +651,9 @@ class FeaturePipeline():
                                                     col.endswith('_to_drop')])
         
         final_features = final_features.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team'])
-        
+
+        assert final_features.index.get_level_values('game_date').is_monotonic_increasing, "final_features game_date not globally sorted"
+
         self.logger.info(f" Final merged dataset shape: {final_features.shape}")
         self.logger.debug(f" Final dataframe datatypes:\n{final_features.dtypes.to_dict()}")
         self.logger.debug(f" Final features columns: {final_features.columns.to_list()}")
@@ -661,6 +663,9 @@ class FeaturePipeline():
         valid_cols = final_features.columns.difference(exclude_cols)
 
         nan_rows = final_features[final_features[valid_cols].isna().any(axis=1)][valid_cols]
+
+        with open('nan_rows.txt', 'w') as f:
+            f.write(nan_rows.to_string())
 
         self.logger.debug("="*60 + "\n")
         self.logger.debug(" Final features DataFrame tail")

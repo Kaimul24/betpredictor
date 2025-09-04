@@ -7,10 +7,6 @@ from scrapers.items import BatterStat, PitcherStat, LineupItem, LineupPlayerItem
 from datetime import datetime
 from src.utils import normalize_names
 
-# USE LEADERBOARDS ENDPOINT TO GET ALL PLAYER IDS, THEN GET EACH PLAYER'S GAME LOGS FOR THE YEAR
-# TURN THIS SCRIPT INTO LINEUPS
-# FROM LEADERBOARDS ENDPOINT, ALSO GET MLB PLAYERID FOR EASIER JOINS BETWEEN SOURCES
-
 load_dotenv()
 TEAM_URL = os.getenv("TEAM_URL")
 GAME_LOG_URL = os.getenv("GAME_URL")
