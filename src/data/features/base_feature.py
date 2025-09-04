@@ -9,7 +9,6 @@ import pandas as pd
 import numpy as np
 
 
-# TODO: ADD ABSTRACT METHODS
 class BaseFeatures(ABC):
 
     def __init__(self, season: int, data: DataFrame, force_recreate: bool = False):
@@ -102,21 +101,25 @@ class BaseFeatures(ABC):
     
     @staticmethod
     def compute_rolling_stats(
-                        player_data: DataFrame,
+                        data: DataFrame,
                         prior_specs: Dict[str, Tuple[str, str]], 
                         shrinkage_weights_cols: List[str], 
                         ewm_cols: Dict[str, Tuple[str, str, str, int, bool]],
                         preserve_cols: List[str],
+                        by: pd.Series = pd.Series([]),
                         halflives=(3, 8, 20)) -> DataFrame:
-        
-        df = player_data.copy()
+
+        df = data.copy()
+
+        if by.empty:
+            by = df['player_id']
         
         df, priors = BaseFeatures.compute_weighted_priors(
             df, prior_specs
         )
 
         shrink_weights = {
-            key: BaseFeatures.cumsum_shift(df[key], df['player_id']) for key in shrinkage_weights_cols
+            key: BaseFeatures.cumsum_shift(df[key], by) for key in shrinkage_weights_cols
         }
 
         result = df[preserve_cols].copy()
@@ -127,13 +130,13 @@ class BaseFeatures(ABC):
             
             den = df[denom_key]
 
-            season_stats, N_season = BaseFeatures.expanding_weighted_mean(val, den, df['player_id'], val_is_rate=val_is_rate)
+            season_stats, N_season = BaseFeatures.expanding_weighted_mean(val, den, by, val_is_rate=val_is_rate)
             
             result[f'{name}_season'] = BaseFeatures.shrinkage(N_season, k, season_stats, df[prior_col])
 
             for hl in halflives:
                 
-                rate_hl = BaseFeatures.compute_ewm(val, den, df['player_id'], half_life=hl, val_is_rate=val_is_rate)
+                rate_hl = BaseFeatures.compute_ewm(val, den, by, half_life=hl, val_is_rate=val_is_rate)
 
                 result[f'{name}_ewm_h{hl}'] = BaseFeatures.shrinkage(shrink_weights[denom_key], k, rate_hl, df[prior_col])
 
@@ -147,7 +150,8 @@ class BaseFeatures(ABC):
         #         if col in result.columns and prior_col in df.columns:
         #             result[col] = result[col].fillna(df[prior_col])
 
-        result['last_app_date'] = df.groupby('player_id')['game_date'].shift(1)
+        if 'game_date' in df.columns:
+            result['last_app_date'] = df.groupby(by)['game_date'].shift(1)
         
         return result, priors
     

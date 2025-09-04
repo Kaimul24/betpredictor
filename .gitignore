@@ -140,7 +140,8 @@ venv.bak/
 .github
 *.parquet
 *.txt
-
+*.pkl
+*.png
 # DS_store
 .DS_store
 
