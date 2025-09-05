@@ -130,20 +130,3 @@ class oddsSpider(scrapy.Spider):
                     
                     item['season'] = year
                     yield item
-
-
-"""
-"page": "/betting-odds/[league]",
-            "query": {
-                "date": "2021-04-14",
-                "league": "mlb-baseball"
-            },
-            "buildId": "nOwST0v5KNHMp7dxb-TIk",
-            "assetPrefix": "/sbr-odds",
-            "isFallback": false,
-            "gssp": true,
-            "appGip": true,
-            "scriptLoader": [
-            ]
-
-"""
