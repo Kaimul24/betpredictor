@@ -65,19 +65,19 @@ class BattingFeatures(BaseFeatures):
         shrinkage_weights_cols = ["pa", "ab", "bip"]
     
         ewm_cols = {
-            "woba":             ("woba", "pa",  "prior_woba",                    150, True),
-            "ops":              ("ops",  "pa",  "prior_ops",                     150, True),
-            "wrc_plus":         ("wrc_plus","pa","prior_wrc_plus",               220, True),
-            "iso":              ("iso",  "ab",  "prior_iso",                     160, True),
-            "babip":            ("babip","bip", "prior_babip",                   320, True),
-            "barrel_percent":   ("barrel_percent","bip","prior_barrel_percent",  80, True),
-            "hard_hit":         ("hard_hit", "bip","prior_hard_hit",             110, True),
-            "ev":               ("ev",      "bip","prior_ev",                    60, True),
-            "gb_fb":            ("gb_fb",   "bip","prior_gb_fb",                 180, True),
-            "bb_k":             ("bb_k",    "pa", "prior_bb_k",                  200, True),
-            "baserunning":      ("baserunning","pa","prior_baserunning",         220, True),
-            "wraa":             ("wraa",    "pa", "prior_wraa",                  260, True),
-            "wpa":              ("wpa",     "pa", "prior_wpa",                   400, True),
+            "woba":             ("woba", "pa",  "prior_woba",                    100, True),
+            "ops":              ("ops",  "pa",  "prior_ops",                     100, True),
+            "wrc_plus":         ("wrc_plus","pa","prior_wrc_plus",               150, True),
+            "iso":              ("iso",  "ab",  "prior_iso",                     100, True),
+            "babip":            ("babip","bip", "prior_babip",                   200, True),
+            "barrel_percent":   ("barrel_percent","bip","prior_barrel_percent",  70, True),
+            "hard_hit":         ("hard_hit", "bip","prior_hard_hit",             100, True),
+            "ev":               ("ev",      "bip","prior_ev",                    50, True),
+            "gb_fb":            ("gb_fb",   "bip","prior_gb_fb",                 150, True),
+            "bb_k":             ("bb_k",    "pa", "prior_bb_k",                  150, True),
+            "baserunning":      ("baserunning","pa","prior_baserunning",         150, True),
+            "wraa":             ("wraa",    "pa", "prior_wraa",                  200, True),
+            "wpa":              ("wpa",     "pa", "prior_wpa",                   250, True),
         }
 
         result, priors = BaseFeatures.compute_rolling_stats(

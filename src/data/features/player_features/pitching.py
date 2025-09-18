@@ -382,12 +382,12 @@ class PitchingFeatures(BaseFeatures):
         shrinkage_weights_cols = ['tbf', 'bip', 'ip', 'apps']
 
         specs = {
-            'k_percent'     : ('k_percent',      'tbf',  'prior_k_percent',       150, True),
-            'bb_percent'    : ('bb_percent',     'tbf',  'prior_bb_percent',      150, True),
-            'babip'         : ('babip',          'bip',  'prior_babip',           200, True),
-            'barrel_percent': ('barrel_percent', 'bip',  'prior_barrel_percent',  120, True),
-            'hard_hit'      : ('hard_hit',       'bip',  'prior_hard_hit',        120, True),
-            'ev'            : ('ev',             'bip',  'prior_ev',              200, True),
+            'k_percent'     : ('k_percent',      'tbf',  'prior_k_percent',       120, True),
+            'bb_percent'    : ('bb_percent',     'tbf',  'prior_bb_percent',      120, True),
+            'babip'         : ('babip',          'bip',  'prior_babip',           180, True),
+            'barrel_percent': ('barrel_percent', 'bip',  'prior_barrel_percent',  100, True),
+            'hard_hit'      : ('hard_hit',       'bip',  'prior_hard_hit',        100, True),
+            'ev'            : ('ev',             'bip',  'prior_ev',              180, True),
             'hr_fb'         : ('hr_fb',          'bip',  'prior_hr_fb',            80, True),
             'fip'           : ('fip',            'ip',   'prior_fip',              20, True),
             'siera'         : ('siera',          'ip',   'prior_siera',            20, True),
@@ -434,15 +434,15 @@ class PitchingFeatures(BaseFeatures):
         shrinkage_weights_cols = ['tbf', 'bip', 'ip', 'apps']
         
         specs = {
-            'k_percent'     : ('k_percent',      'tbf',  'prior_k_percent',       150, True),
-            'bb_percent'    : ('bb_percent',     'tbf',  'prior_bb_percent',      150, True),
-            'babip'         : ('babip',          'bip',  'prior_babip',           200, True),
+            'k_percent'     : ('k_percent',      'tbf',  'prior_k_percent',       100, True),
+            'bb_percent'    : ('bb_percent',     'tbf',  'prior_bb_percent',      100, True),
+            'babip'         : ('babip',          'bip',  'prior_babip',           150, True),
             'barrel_percent': ('barrel_percent', 'bip',  'prior_barrel_percent',  120, True),
             'hard_hit'      : ('hard_hit',       'bip',  'prior_hard_hit',        120, True),
-            'ev'            : ('ev',             'bip',  'prior_ev',              200, True),
+            'ev'            : ('ev',             'bip',  'prior_ev',              120, True),
             'hr_fb'         : ('hr_fb',          'bip',  'prior_hr_fb',            80, True),
-            'fip'           : ('fip',            'ip',   'prior_fip',              20, True),
-            'siera'         : ('siera',          'ip',   'prior_siera',            20, True),
+            'fip'           : ('fip',            'ip',   'prior_fip',              50, True),
+            'siera'         : ('siera',          'ip',   'prior_siera',            50, True),
             'stuff'         : ('stuff',          'tbf',  'prior_stuff',            40, True),
             'wpa'           : ('wpa',         'apps', 'prior_wpa',              10, True),
         }

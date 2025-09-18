@@ -20,41 +20,63 @@ class Odds(BaseFeatures):
 
     def __init__(self, data: DataFrame, season: int) -> None:
         super().__init__(season, data)
-        print(self.data.columns)
-        print(self.data.head(6))
 
-        self.base_odds_cols = ['away_opening_odds', 'home_opening_odds', 'away_current_odds', 'home_current_odds']
+        self.base_odds_cols = ['away_opening_odds', 'home_opening_odds']
 
     def load_features(self):
         df = self.data[['game_date', 'game_datetime', 'away_team', 'home_team', 'winner', 'sportsbook', 'away_opening_odds', 
-                        'home_opening_odds', 'away_current_odds', 'home_current_odds']].copy()
+                        'home_opening_odds']].copy()
 
         df = self._convert_imp_prob(df)
         df = self._remove_vig(df)
-        df = self._handle_outliers(df)
+        df = self._build_odds_feats_per_game(df)
+        
+        return df
 
-        with open('all_odds.txt', 'w') as f:
-            f.write(df.to_string())
+    def _build_odds_feats_per_game(self, df: DataFrame) -> DataFrame:
+        df = df.copy()
+        g = df.groupby(['game_date', 'game_datetime', 'away_team', 'home_team'])
 
-        # df['away_opening_odds'] = df['away_opening_odds'].astype(int)
-        # df['home_opening_odds'] = df['home_opening_odds'].astype(int)
-        # df['away_current_odds'] = df['away_current_odds'].astype(int)
-        # df['home_current_odds'] = df['home_current_odds'].astype(int)
+        prob_medians_raw = g[['home_opening_prob_raw', 'away_opening_prob_raw']].transform('median')
+        prob_means_raw = g[['home_opening_prob_raw', 'away_opening_prob_raw']].transform('mean')
+        prob_std_raw = g[['home_opening_prob_raw', 'away_opening_prob_raw']].transform('std')
+
+        df['p_open_home_median'] = prob_medians_raw['home_opening_prob_raw']
+        df['p_open_home_mean'] = prob_means_raw['home_opening_prob_raw']
+        df['p_open_home_std'] = prob_std_raw['home_opening_prob_raw'].fillna(0.0)
+
+        df['p_open_away_median'] = prob_medians_raw['away_opening_prob_raw']
+        df['p_open_away_mean'] = prob_means_raw['away_opening_prob_raw']
+        df['p_open_away_std'] = prob_std_raw['away_opening_prob_raw'].fillna(0.0)
         
-        # df = df[(df['away_opening_odds'] == -10000) |
-        #         (df['home_opening_odds'] == -10000) |
-        #         (df['away_current_odds'] == -10000) |
-        #         (df['home_current_odds'] == -10000)]
-        
-        #df = self._concat_all_odds_per_game(df)
-        
+
+        prob_medians_nv = g[['home_opening_prob_nv', 'away_opening_prob_nv']].transform('median')
+        prob_means_nv = g[['home_opening_prob_nv', 'away_opening_prob_nv']].transform('mean')
+        prob_std_nv = g[['home_opening_prob_nv', 'away_opening_prob_nv']].transform('std')
+
+        df['p_open_home_max_nv'] = g['home_opening_prob_nv'].transform('max')
+        df['p_open_home_min_nv'] = g['home_opening_prob_nv'].transform('min')
+
+        df['p_open_away_max_nv'] = g['away_opening_prob_nv'].transform('max')
+        df['p_open_away_min_nv'] = g['away_opening_prob_nv'].transform('min')
+
+        df['p_open_home_median_nv'] = prob_medians_nv['home_opening_prob_nv']
+        df['p_open_home_mean_nv'] = prob_means_nv['home_opening_prob_nv']
+        df['p_open_home_std_nv'] = prob_std_nv['home_opening_prob_nv'].fillna(0.0)
+
+        df['p_open_away_median_nv'] = prob_medians_nv['away_opening_prob_nv']
+        df['p_open_away_mean_nv'] = prob_means_nv['away_opening_prob_nv']
+        df['p_open_away_std_nv'] = prob_std_nv['away_opening_prob_nv'].fillna(0.0)
+
+        return df
+
     def _concat_all_odds_per_game(self, df: DataFrame) -> DataFrame:
         id_cols = ['game_date', 'game_datetime', 'away_team', 'home_team']
         
         all_odds_df = df.pivot(
             index=id_cols,
             columns='sportsbook',
-            values = ['away_opening_odds', 'home_opening_odds', 'away_current_odds', 'home_current_odds']
+            values = ['away_opening_odds', 'home_opening_odds']
         )
 
         all_odds_df.columns = [f"{col}_{sportsbook}" for col, sportsbook in all_odds_df.columns]
@@ -70,7 +92,7 @@ class Odds(BaseFeatures):
         
         for col in self.base_odds_cols:
             df[f"{col[:12]}_prob_raw"] = to_prob(df[col])
-        print(df.columns)
+
         return df
     
     def _remove_vig(self, data: DataFrame) -> DataFrame:
@@ -81,15 +103,10 @@ class Odds(BaseFeatures):
         
         
         data[f"home_opening_prob_nv"], data[f"away_opening_prob_nv"] = _no_vig(data["home_opening_prob_raw"], data["away_opening_prob_raw"])
-        data[f"home_current_prob_nv"], data[f"away_current_prob_nv"] = _no_vig(data["home_current_prob_raw"], data["away_current_prob_raw"])
 
         data["vig_open"] = data['home_opening_prob_raw'] + data['away_opening_prob_raw']
-        data["vig_current"] = data['home_current_prob_raw'] + data['away_current_prob_raw']
-
         return data
     
-    def _build_per_game_odds_feats(self, data: DataFrame) -> DataFrame:
-        pass
     
     
     def _handle_outliers(self, data: DataFrame) -> DataFrame:
@@ -260,6 +277,8 @@ def main():
     odds_loader = OddsLoader()
     odds_data = odds_loader.load_for_season(2021)
     odds = Odds(odds_data, 2021).load_features()
+    with open('opening_odds_feats.txt', 'w') as f:
+        f.write(odds.to_string())
 
 if __name__ == "__main__":
     main()  

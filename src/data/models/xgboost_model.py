@@ -317,11 +317,13 @@ class XGBoostModel:
 
         self.logger.info(" Predictions on calibration set...")
         p_cal = bst.predict(self.dcal, iteration_range=(0, bst.best_iteration + 1))
+        min_bin_size = 100
         calibrator, metrics = select_and_fit_calibrator(
             y_cal=self.y_cal,
             p_cal=p_cal,
             methods=("platt", "isotonic"),
             selection_metric="ece",
+            min_bin_size=min_bin_size,
             n_bins=25,
             strategy="quantile",
         )
@@ -331,9 +333,9 @@ class XGBoostModel:
         self._save_model(bst)
 
         self._plot_roc(self.y_cal, p_cal, split="cal")
-        out_path_curve = plot_calibration(self.y_cal, p_cal, split="cal_before", filepath=filepath, n_bins=25)
+        out_path_curve = plot_calibration(self.y_cal, p_cal, split="cal_after", filepath=filepath, n_bins=25, min_bin_size=min_bin_size)
 
-        self.logger.info(f" Saved calibration curve (\"cal_before\") to {out_path_curve}")
+        self.logger.info(f" Saved calibration curve (\"cal_after\") to {out_path_curve}")
         
 
         return bst
@@ -381,7 +383,7 @@ class XGBoostModel:
         self._plot_roc(self.y_test, p_test, split="test")
 
         filepath = PLOTS_DIR / 'xgboost_calibration'
-        out_path_curve = plot_calibration(self.y_test, p_test, split="test", filepath=filepath, n_bins=25)
+        out_path_curve = plot_calibration(self.y_test, p_test, split="test", filepath=filepath, n_bins=25, min_bin_size=100)
         self.logger.info(f" Saved calibration curve (\"test\") to {out_path_curve}")
 
         return p_test

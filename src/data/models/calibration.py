@@ -8,9 +8,19 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss
 from sklearn.calibration import calibration_curve
 
-def plot_calibration(y_true, y_proba, split: str,  filepath: str,  n_bins: int = 10) -> str:
+def plot_calibration(y_true, y_proba, split: str, filepath: str, n_bins: int = 10, 
+                    min_bin_size: Optional[int] = None) -> str:
         """Plot and save reliability (calibration) curve with probability histogram."""
-        prob_true, prob_pred = calibration_curve(y_true, y_proba, n_bins=n_bins, strategy="quantile")
+        if min_bin_size is not None:
+            # Use quantile strategy for initial binning, then merge small bins
+            edges = _bin_edges(y_proba, n_bins, "quantile")
+            prob_true, prob_pred, counts, merged_edges = _merge_small_bins(
+                np.array(y_true), np.array(y_proba), edges, min_bin_size
+            )
+        else:
+            # Use original sklearn function
+            prob_true, prob_pred = calibration_curve(y_true, y_proba, n_bins=n_bins, strategy="quantile")
+        
         plt.figure(figsize=(6, 6))
         
         plt.plot(prob_pred, prob_true, marker='o', label='Model', linewidth=1.2)
@@ -18,7 +28,10 @@ def plot_calibration(y_true, y_proba, split: str,  filepath: str,  n_bins: int =
         plt.plot([0, 1], [0, 1], 'k--', label='Perfect')
         plt.xlabel("Predicted probability")
         plt.ylabel("Observed frequency")
-        plt.title(f"Calibration Curve ({split})")
+        title = f"Calibration Curve ({split})"
+        if min_bin_size is not None:
+            title += f" (min bin size: {min_bin_size})"
+        plt.title(title)
         plt.legend(loc="upper left")
         plt.grid(alpha=0.3)
 
@@ -52,6 +65,70 @@ def _bin_edges(y_prob: np.ndarray, n_bins: int, strategy: Literal["uniform", "qu
     raise ValueError("strategy must be 'uniform' or 'quantile'")
 
 
+def _merge_small_bins(y_true: np.ndarray, y_prob: np.ndarray, edges: np.ndarray, 
+                     min_bin_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Merge adjacent bins that fall below min_bin_size threshold.
+    Returns merged (prob_true, prob_pred, counts, merged_edges).
+    """
+    idx = np.digitize(y_prob, edges[1:-1], right=True)
+    n_bins = len(edges) - 1
+    
+    # Calculate initial bin statistics
+    bin_counts = np.zeros(n_bins, dtype=int)
+    bin_true_sums = np.zeros(n_bins, dtype=float)
+    bin_prob_sums = np.zeros(n_bins, dtype=float)
+    
+    for b in range(n_bins):
+        mask = (idx == b)
+        bin_counts[b] = int(mask.sum())
+        if bin_counts[b] > 0:
+            bin_true_sums[b] = float(np.sum(y_true[mask]))
+            bin_prob_sums[b] = float(np.sum(y_prob[mask]))
+    
+    # Merge bins with counts below threshold
+    merged_edges = [edges[0]]
+    merged_counts = []
+    merged_true_sums = []
+    merged_prob_sums = []
+    
+    current_count = 0
+    current_true_sum = 0.0
+    current_prob_sum = 0.0
+    
+    for b in range(n_bins):
+        current_count += bin_counts[b]
+        current_true_sum += bin_true_sums[b]
+        current_prob_sum += bin_prob_sums[b]
+        
+        # If we've reached min_bin_size or this is the last bin, finalize the merged bin
+        if current_count >= min_bin_size or b == n_bins - 1:
+            merged_counts.append(current_count)
+            merged_true_sums.append(current_true_sum)
+            merged_prob_sums.append(current_prob_sum)
+            merged_edges.append(edges[b + 1])
+            
+            # Reset for next merged bin
+            current_count = 0
+            current_true_sum = 0.0
+            current_prob_sum = 0.0
+    
+    # Convert to final statistics
+    merged_counts = np.array(merged_counts)
+    prob_true = np.empty(len(merged_counts), dtype=float)
+    prob_pred = np.empty(len(merged_counts), dtype=float)
+    
+    for i in range(len(merged_counts)):
+        if merged_counts[i] > 0:
+            prob_true[i] = merged_true_sums[i] / merged_counts[i]
+            prob_pred[i] = merged_prob_sums[i] / merged_counts[i]
+        else:
+            prob_true[i] = np.nan
+            prob_pred[i] = (merged_edges[i] + merged_edges[i + 1]) / 2.0
+    
+    return prob_true, prob_pred, merged_counts, np.array(merged_edges)
+
+
 def _bin_stats_from_edges(y_true: np.ndarray, y_prob: np.ndarray, edges: np.ndarray
                           ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return (prob_true, prob_pred, counts) for fixed bin edges."""
@@ -78,14 +155,21 @@ def expected_calibration_error(
     y_prob: np.ndarray,
     n_bins: int = 10,
     strategy: Literal["uniform", "quantile"] = "uniform",
+    min_bin_size: Optional[int] = None,
 ) -> float:
     """
     ECE = sum_k (n_k / N) * |acc_k - conf_k| over non-empty bins.
+    If min_bin_size is provided, adjacent bins below this threshold will be merged.
     """
     y_true = np.asarray(y_true, dtype=float)
     y_prob = np.asarray(y_prob, dtype=float)
     edges = _bin_edges(y_prob, n_bins, strategy)
-    prob_true, prob_pred, counts = _bin_stats_from_edges(y_true, y_prob, edges)
+    
+    if min_bin_size is not None:
+        prob_true, prob_pred, counts, _ = _merge_small_bins(y_true, y_prob, edges, min_bin_size)
+    else:
+        prob_true, prob_pred, counts = _bin_stats_from_edges(y_true, y_prob, edges)
+    
     m = counts > 0
     if not np.any(m):
         return float("nan")
@@ -206,6 +290,7 @@ def select_and_fit_calibrator(
     selection_metric: Literal["ece", "brier", "logloss"] = "ece",
     n_bins: int = 10,
     strategy: Literal["uniform", "quantile"] = "quantile",
+    min_bin_size: Optional[int] = None,
     y_eval: Optional[np.ndarray] = None,
     p_eval_raw: Optional[np.ndarray] = None,
 ) -> Tuple[BaseCalibrator, Dict[str, Dict[str, float]]]:
@@ -216,6 +301,7 @@ def select_and_fit_calibrator(
     Return (best_calibrator, per_method_metrics).
 
     per_method_metrics[method] includes {'ece','brier','logloss'}.
+    If min_bin_size is provided, ECE calculation will merge adjacent bins below this threshold.
     """
     y_cal = np.asarray(y_cal, dtype=float)
     p_cal = np.asarray(p_cal, dtype=float)
@@ -241,7 +327,7 @@ def select_and_fit_calibrator(
     for name, cal in fitted.items():
         p_eval = eval_probs(cal)
         metrics[name] = {
-            "ece": expected_calibration_error(eval_y, p_eval, n_bins=n_bins, strategy=strategy),
+            "ece": expected_calibration_error(eval_y, p_eval, n_bins=n_bins, strategy=strategy, min_bin_size=min_bin_size),
             "brier": brier(eval_y, p_eval),
             "logloss": nll(eval_y, p_eval),
         }

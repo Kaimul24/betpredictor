@@ -99,7 +99,7 @@ class PreProcessing():
         self.exclude_columns = [
             # Game outcome information (data leakage)
             'team_score', 'opposing_team_score', 'home_score', 
-            'winning_team', 'losing_team',
+            'winning_team', 'losing_team', 'winner'
             
             # Identifiers and metadata
             'game_id', 'game_datetime', 'season',
@@ -133,10 +133,19 @@ class PreProcessing():
         test_df = filtered_dfs[-1].reset_index()
         
         
-        val_df = val_df.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team'])
-        test_df = test_df.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team'])
+        val_df = val_df.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team']).sort_index()
+        test_df = test_df.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team']).sort_index()
 
         train_data = pd.concat(train_dfs)
+        
+        self.logger.info(f" Dropping {train_data.isna().any(axis=1).sum()} rows from training data...")
+        train_data = train_data.dropna()
+
+        self.logger.info(f" Dropping {val_df.isna().any(axis=1).sum()} rows from validation data...")
+        val_df = val_df.dropna()
+
+        self.logger.info(f" Dropping {test_df.isna().any(axis=1).sum()} rows from test data...")
+        test_df = test_df.dropna()
 
         self.logger.debug(f" Dtypes\n{train_dfs[0].dtypes.value_counts()}")
         self._log_nan_rows(train_dfs)
@@ -241,7 +250,7 @@ class PreProcessing():
         all_features = []
 
         for year in self.seasons:
-            feat_pipe = FeaturePipeline(year)
+            feat_pipe = FeaturePipeline(year, logger=self.logger)
             season_feats = feat_pipe.start_pipeline(force_recreate, clear_log)
             all_features.append(season_feats)
         
@@ -250,7 +259,14 @@ class PreProcessing():
     def _log_nan_rows(self, dfs: List[DataFrame]) -> None:
         for i, df in enumerate(dfs):
             na_rows = df[df.isna().any(axis=1)]
-            self.logger.debug(f" --- DataFrame {i+1} ---\n{na_rows}")
+            if not na_rows.empty:
+                self.logger.debug(f" --- DataFrame {i+1} ---")
+                for idx, row in na_rows.iterrows():
+                    nan_cols = row[row.isna()].index.tolist()
+                    self.logger.debug(f" Row {idx}: NaN columns = {nan_cols}")
+                self.logger.debug(f"\n{na_rows}")
+            else:
+                self.logger.debug(f" --- DataFrame {i+1} --- No NaN rows found")
     
     def _save_cached_data(self, processed_data: Dict) -> None:
         """Save processed data to cache files"""
