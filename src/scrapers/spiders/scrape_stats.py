@@ -133,6 +133,12 @@ class fgSpider(scrapy.Spider):
                 babip = game.get("BABIP", 0.0)
                 item['babip'] = babip
 
+                k_percent = game.get("K%", 0.0)
+                item['k_percent'] = k_percent
+
+                bb_percent = game.get("BB%", 0.0)
+                item['bb_percent'] = bb_percent
+
                 bb_k = game.get("BB/K", 0.0)
                 item['bb_k'] = bb_k
 

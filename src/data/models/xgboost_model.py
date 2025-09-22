@@ -1,4 +1,5 @@
 from pandas.core.api import DataFrame as DataFrame
+import pandas as pd
 import logging, sys, argparse, json, os
 import xgboost as xgb
 import optuna
@@ -152,7 +153,7 @@ class XGBoostModel:
             
             params = {
                     'verbosity': 1,
-                    'objective': 'binary:logistic',
+                    'objective': 'binary:logitraw',
                     'device': "cpu",
                     'tree_method': 'hist',
                     'eval_metric': 'logloss',
@@ -241,46 +242,11 @@ class XGBoostModel:
         plt.close()
         self.logger.info(f" Saved ROC curve ({split}) to {out_path}")
 
-    # def _plot_calibration(self, y_true, y_proba, split: str, n_bins: int = 10):
-    #     """Plot and save reliability (calibration) curve with probability histogram."""
-    #     prob_true, prob_pred = calibration_curve(y_true, y_proba, n_bins=25, strategy="quantile")
-    #     plt.figure(figsize=(6, 6))
-
-    #     plt.plot(prob_pred, prob_true, marker='o', label='Model', linewidth=1.2)
-
-    #     plt.plot([0, 1], [0, 1], 'k--', label='Perfect')
-    #     plt.xlabel("Predicted probability")
-    #     plt.ylabel("Observed frequency")
-    #     plt.title(f"Calibration Curve ({split})")
-    #     plt.legend(loc="upper left")
-    #     plt.grid(alpha=0.3)
-
-    #     out_path_curve = PLOTS_DIR / f"xgboost_calibration_{split}.png"
-    #     plt.tight_layout()
-    #     plt.savefig(out_path_curve, dpi=120)
-    #     plt.close()
-    #     self.logger.info(f" Saved calibration curve ({split}) to {out_path_curve}")
-
-    #     fig, ax1 = plt.subplots(figsize=(6, 6))
-    #     ax1.plot(prob_pred, prob_true, marker='o', label='Model', linewidth=1.2)
-    #     ax1.plot([0, 1], [0, 1], 'k--', label='Perfect')
-    #     ax1.set_xlabel("Predicted probability")
-    #     ax1.set_ylabel("Observed frequency")
-    #     ax1.set_title(f"Calibration + Histogram ({split})")
-    #     ax1.grid(alpha=0.3)
-    #     ax2 = ax1.twinx()
-    #     ax2.hist(y_proba, bins=20, range=(0,1), alpha=0.3, color='tab:blue')
-    #     ax2.set_ylabel("Count")
-    #     out_path_combo = PLOTS_DIR / f"xgboost_calibration_hist_{split}.png"
-    #     fig.tight_layout()
-    #     fig.savefig(out_path_combo, dpi=120)
-    #     plt.close(fig)
-    #     self.logger.info(f" Saved calibration+hist plot ({split}) to {out_path_combo}")
 
     def train(self, hyperparams: Dict = None):
 
         BASE_PARAMS = {
-                    'objective': 'binary:logistic',
+                    'objective': 'binary:logitraw',
                     'device': "cpu",
                     'tree_method': 'hist',
                     'eval_metric': 'logloss',
@@ -327,8 +293,34 @@ class XGBoostModel:
             n_bins=25,
             strategy="quantile",
         )
+        ll_cal    = log_loss(self.y_val[len(p_es):], p_cal)
+        auc_cal   = roc_auc_score(self.y_val[len(p_es):], p_cal)
+        brier_cal = brier_score_loss(self.y_val[len(p_es):], p_cal)
+
+        self.logger.info(f" Val(CAL) Log Loss: {ll_cal}")
+        self.logger.info(f" Val(CAL) ROC AUC: {auc_cal}")
+        self.logger.info(f" Val(CAL) Brier:   {brier_cal}")
+        
         self.logger.info(f" Calibration candidates: {metrics}")
         save_calibrator(calibrator, str(CAL_DIR / "xgb_calibrator.json"))
+
+        self.logger.info(" Evaluating calibrated predictions on calibration set...")
+        p_cal_calibrated = apply_calibration(calibrator, p_cal)
+        
+        ll_cal_after = log_loss(self.y_cal, p_cal_calibrated)
+        auc_cal_after = roc_auc_score(self.y_cal, p_cal_calibrated)
+        brier_cal_after = brier_score_loss(self.y_cal, p_cal_calibrated)
+        
+        self.logger.info(f" Val(CAL) Post-Calibration Log Loss: {ll_cal_after}")
+        self.logger.info(f" Val(CAL) Post-Calibration ROC AUC: {auc_cal_after}")
+        self.logger.info(f" Val(CAL) Post-Calibration Brier:   {brier_cal_after}")
+        
+        # Calculate improvement metrics
+        ll_improvement = ll_cal - ll_cal_after
+        brier_improvement = brier_cal - brier_cal_after
+        
+        self.logger.info(f" Log Loss improvement: {ll_improvement:.4f}")
+        self.logger.info(f" Brier Score improvement: {brier_improvement:.4f}")
 
         self._save_model(bst)
 

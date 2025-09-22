@@ -7,7 +7,8 @@ class PlayerLoader(BaseDataLoader):
     def __init__(self):
         super().__init__()
         self.batting_columns = ['player_id', 'mlb_id', 'game_date', 'team', 'batorder',
-                                'pos', 'dh', 'ab', 'pa', 'bip', 'ops', 'babip', 'bb_k',
+                                'pos', 'dh', 'ab', 'pa', 'bip', 'ops', 'babip', 
+                                'k_percent', 'bb_percent', 'bb_k',
                                 'wrc_plus', 'woba', 'barrel_percent', 'hard_hit',
                                 'ev', 'iso', 'gb_fb', 'baserunning', 'wraa', 'wpa',
                                 'season']

@@ -19,6 +19,8 @@ class BatterStat(scrapy.Item):
     bip = scrapy.Field()
     ops = scrapy.Field()
     babip = scrapy.Field()
+    k_percent = scrapy.Field()
+    bb_percent = scrapy.Field()
     bb_k = scrapy.Field()
     wrc_plus = scrapy.Field()
     woba = scrapy.Field()

@@ -99,16 +99,15 @@ class PreProcessing():
         self.exclude_columns = [
             # Game outcome information (data leakage)
             'team_score', 'opposing_team_score', 'home_score', 
-            'winning_team', 'losing_team', 'winner'
+            'winning_team', 'losing_team', 'winner',
             
             # Identifiers and metadata
             'game_id', 'game_datetime', 'season',
             
             # Player names (categorical with too many unique values)
             'away_starter_normalized', 'home_starter_normalized',
-            'starter_normalized', 'opposing_starter_normalized',
-            'name_team_starter', 'normalized_player_name_team_starter',
-            'name_opposing_starter', 'normalized_player_name_opposing_starter',
+            'starter_normalized', 'opposing_starter_normalized', 'team_starter_normalized_player_name',
+            'opposing_team_starter_normalized_player_name', 'team_starter_name', 'opposing_team_starter_name',
             
             # IDs and foreign keys
             'team_starter_id', 'opposing_starter_id', 'player_id_team_starter',
@@ -132,12 +131,11 @@ class PreProcessing():
         val_df = filtered_dfs[-2].reset_index()
         test_df = filtered_dfs[-1].reset_index()
         
-        
         val_df = val_df.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team']).sort_index()
         test_df = test_df.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team']).sort_index()
 
         train_data = pd.concat(train_dfs)
-        
+
         self.logger.info(f" Dropping {train_data.isna().any(axis=1).sum()} rows from training data...")
         train_data = train_data.dropna()
 
@@ -385,7 +383,7 @@ def main():
     # Set up logging first, before creating PreProcessing instance
     logger = setup_logging(args)
     
-    pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025])
+    pre_processor = PreProcessing([2021, 2022, 2023])
     pre_processor.logger = logger  # Assign the logger
     
     preprocessed_feats = pre_processor.preprocess_feats(

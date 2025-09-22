@@ -100,6 +100,8 @@ CREATE TABLE IF NOT EXISTS batting_stats (
   bip             INTEGER,
   ops             REAL,
   babip           REAL,
+  k_percent       REAL,
+  bb_percent      REAL,
   bb_k            REAL,
   wrc_plus        REAL,
   woba            REAL,

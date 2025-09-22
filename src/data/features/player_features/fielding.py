@@ -27,7 +27,7 @@ class FieldingFeatures(BaseFeatures):
         df = self.data.copy()
         df = df.sort_values(['player_id', 'month'])
         df['frv_per_9'] = (df['frv'].div(df['total_innings'], fill_value=pd.NA)) * 9.0
-        #logging.info(f"\n{df[['name', 'month', 'frv_g', 'frv', 'total_innings']].head(10)}")
+
         return df
 
 if __name__ == "__main__":

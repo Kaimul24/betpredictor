@@ -130,11 +130,11 @@ class SqlitePipeline:
                 execute_query("""
                     INSERT OR REPLACE INTO batting_stats
                     (player_id, mlb_id, name, normalized_player_name, game_date, team, batorder, pos, dh, ab, pa, bip, 
-                    ops, babip, bb_k, wrc_plus, woba, barrel_percent, hard_hit, ev, iso, gb_fb, baserunning, 
+                    ops, babip, k_percent, bb_percent, bb_k, wrc_plus, woba, barrel_percent, hard_hit, ev, iso, gb_fb, baserunning, 
                     wraa, wpa, season, scraped_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (p['player_id'], p['mlb_id'], p['name'], p['normalized_player_name'], p['date'], p['team'], p['batorder'], p['pos'], p['dh'], p['ab'], p['pa'],
-                     p['bip'], p['ops'], p['babip'], p['bb_k'], p['wrc_plus'], p['woba'], p['barrel_percent'], p['hard_hit'], p['ev'],
+                     p['bip'], p['ops'], p['babip'], p['k_percent'], p['bb_percent'], p['bb_k'], p['wrc_plus'], p['woba'], p['barrel_percent'], p['hard_hit'], p['ev'],
                      p['iso'], p['gb_fb'], p['baserunning'], p['wraa'], p['wpa'], p['season'], p['scraped_at']),
                     readonly=False
                 )

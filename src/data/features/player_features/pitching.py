@@ -101,11 +101,20 @@ class PitchingFeatures(BaseFeatures):
             how='left',
             suffixes=('_team_starter', '_opposing_starter')
         )
-    
 
         all_matchups_with_stats.drop(columns=['team_opposing_starter'], inplace= True)
         all_matchups_with_stats.rename(columns={'team_team_starter': 'team'}, inplace=True)
-        
+
+        new_column_names = {}
+        for col in all_matchups_with_stats.columns:
+
+            if col.endswith('_team_starter'):
+                new_column_names[col] = f"team_starter_{col.removesuffix('_team_starter')}"
+            elif col.endswith('_opposing_starter'):
+                new_column_names[col] = f"opposing_team_starter_{col.removesuffix('_opposing_starter')}"
+
+        all_matchups_with_stats = all_matchups_with_stats.rename(columns=new_column_names)
+
         reliver_rolling_stats = reliver_rolling_stats.rename(columns={'player_id': 'fg_id', 'mlb_id': 'player_id'})
         starters_rolling_stats = starters_rolling_stats.rename(columns={'player_id': 'fg_id', 'mlb_id': 'player_id'})
         
@@ -150,7 +159,7 @@ class PitchingFeatures(BaseFeatures):
         
         value_cols = [c for c in bullpen_roster_with_stats.columns 
               if any(s in c for s in ['_season', '_ewm_h3', '_ewm_h8', '_ewm_h20', '_li'])
-              or c in ['fip', 'siera', 'stuff', 'gmli', 'wpa_li']]
+              or c in ['fip', 'era', 'siera', 'stuff', 'gmli', 'wpa_li']]
 
         usage_df = self._compute_bullpen_usage(bullpen_roster_with_stats)
         
@@ -158,7 +167,7 @@ class PitchingFeatures(BaseFeatures):
             bullpen_roster_with_stats
             .groupby(['game_date', 'team'], observed=True)[value_cols]
             .mean()
-            .rename(columns=lambda c: f"pen_{c}")
+            .rename(columns=lambda c: f"team_pen_{c}")
             .reset_index()
         )
 
@@ -166,26 +175,18 @@ class PitchingFeatures(BaseFeatures):
         all_matchups_with_stats = all_matchups_with_stats.merge(bullpen_agg, on=['game_date','team'], how='left')
 
         all_matchups_with_stats = self._fill_bullpen_with_priors(all_matchups_with_stats, rl_priors)
-
-        for col in ['last_app_date_team_starter', 'last_app_date_opposing_starter']:
-            all_matchups_with_stats[col] = all_matchups_with_stats[col].fillna(pd.to_datetime(f"{self.season}-01-01"))
             
         logger.debug(f"Pitching Rosters with stats: {len(all_matchups_with_stats)}")
         logger.info(f" Rosters with stats rows with NAN\n{all_matchups_with_stats[all_matchups_with_stats.isna().any(axis=1)]}")
         logger.debug(f" all_matchups_with_stats_cols\n{all_matchups_with_stats.columns.to_list()}\n")
 
-        first_cols = ['game_date', 'dh', 'season', 'team', 'opposing_team', 'name_team_starter', 
-                      'normalized_player_name_team_starter', 'name_opposing_starter', 
-                      'normalized_player_name_opposing_starter']
+        first_cols = ['game_date', 'dh', 'season', 'team', 'opposing_team', 'team_starter_name', 'opposing_team_starter_name']
         
         remaining_cols = [col for col in all_matchups_with_stats.columns if col not in first_cols]
 
         all_matchups_with_stats = all_matchups_with_stats[first_cols + remaining_cols]
 
         logger.info(f" Final Pitcher Features\n{all_matchups_with_stats.head(5)}")
-
-        with open("pitching_features.txt", "w") as f:
-            f.write(all_matchups_with_stats.to_string())
 
         try:
             all_matchups_with_stats.to_parquet(cache_path, index=True)
@@ -276,11 +277,11 @@ class PitchingFeatures(BaseFeatures):
 
         g = df.groupby(['game_date', 'team'], observed=True)
         out = pd.DataFrame({
-            'pen_rest_days_mean'     : g['rest_days'].mean(),
-            'pen_rest_days_median'   : g['rest_days'].median(),
-            'pen_freshness_mean'     : g['freshness'].mean(),
-            'pen_freshness_gmliw'    : (g.apply(lambda x: (x['freshness'] * x['w_norm']).sum())),
-            'pen_hi_lev_available'   : g.apply(lambda x: ( (x['rest_days'] >= 1).astype(int) * x['w_norm'] ).sum()),
+            'team_pen_rest_days_mean'     : g['rest_days'].mean(),
+            'team_pen_rest_days_median'   : g['rest_days'].median(),
+            'team_pen_freshness_mean'     : g['freshness'].mean(),
+            'team_pen_freshness_gmliw'    : (g.apply(lambda x: (x['freshness'] * x['w_norm']).sum())),
+            'team_pen_hi_lev_available'   : g.apply(lambda x: ( (x['rest_days'] >= 1).astype(int) * x['w_norm'] ).sum()),
         }).reset_index()
 
         return out
@@ -365,6 +366,7 @@ class PitchingFeatures(BaseFeatures):
         rel["wpa_li"] = rel["wpa"] / rel["gmli"].replace(0, np.nan)
 
         prior_specs = {
+            "prior_era"           : ("era",             "ip"),
             "prior_k_percent"     : ("k_percent",      "tbf"),
             "prior_bb_percent"    : ("bb_percent",     "tbf"),
             "prior_babip"         : ("babip",          "bip"),
@@ -382,6 +384,7 @@ class PitchingFeatures(BaseFeatures):
         shrinkage_weights_cols = ['tbf', 'bip', 'ip', 'apps']
 
         specs = {
+            'era'           : ('era',            'ip',   'prior_era',             30,  True),
             'k_percent'     : ('k_percent',      'tbf',  'prior_k_percent',       120, True),
             'bb_percent'    : ('bb_percent',     'tbf',  'prior_bb_percent',      120, True),
             'babip'         : ('babip',          'bip',  'prior_babip',           180, True),
@@ -418,6 +421,7 @@ class PitchingFeatures(BaseFeatures):
         start['apps'] = 1
 
         prior_specs = {
+            "prior_era"           : ("era",             "ip"),
             "prior_k_percent"     : ("k_percent",      "tbf"),
             "prior_bb_percent"    : ("bb_percent",     "tbf"),
             "prior_babip"         : ("babip",          "bip"),
@@ -434,6 +438,7 @@ class PitchingFeatures(BaseFeatures):
         shrinkage_weights_cols = ['tbf', 'bip', 'ip', 'apps']
         
         specs = {
+            'era'           : ('era',            'ip',   'prior_era',             30,  True),
             'k_percent'     : ('k_percent',      'tbf',  'prior_k_percent',       100, True),
             'bb_percent'    : ('bb_percent',     'tbf',  'prior_bb_percent',      100, True),
             'babip'         : ('babip',          'bip',  'prior_babip',           150, True),
