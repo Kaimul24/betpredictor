@@ -19,11 +19,9 @@ class TeamFeatures(BaseFeatures):
             raise RuntimeError("_transform_schedule() in feature_pipeline.py is meant to be called before any method in TeamFeatures is used.")
         
     def load_features(self) -> DataFrame:
-        
         win_pct = self.calc_rolling_win_pct()
         run_diff = self.calc_run_diff_metrics()
         one_run_games = self.calc_one_run_win_pct()
-        
 
         result = pd.merge(
             win_pct,
@@ -41,7 +39,21 @@ class TeamFeatures(BaseFeatures):
             how='inner'
         )
 
+        result = self._team_games_played(result)
+
         return result
+    
+    def _team_games_played(self, df: DataFrame) -> DataFrame:
+        
+        df = df.copy().reset_index()
+        df.sort_values(['game_date', 'dh', 'game_datetime', 'game_id'], inplace=True)
+
+        df['team_gp'] = df.groupby('team').cumcount()
+        df['opposing_team_gp'] = df.groupby('opposing_team').cumcount()
+        df.set_index(keys=['game_date', 'dh', 'game_datetime', 'game_id', 'team', 'opposing_team'], inplace=True)
+        df.sort_index(level=['game_date', 'dh', 'game_datetime', 'team'], ascending=[True, True, True, True], inplace=True)
+
+        return df
     
     def calc_rolling_win_pct(self) -> DataFrame:
         df = self.data.reset_index().copy()

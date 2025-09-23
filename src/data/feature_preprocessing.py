@@ -102,7 +102,7 @@ class PreProcessing():
             'winning_team', 'losing_team', 'winner',
             
             # Identifiers and metadata
-            'game_id', 'game_datetime', 'season',
+            'game_datetime', 'season',
             
             # Player names (categorical with too many unique values)
             'away_starter_normalized', 'home_starter_normalized',
@@ -113,14 +113,18 @@ class PreProcessing():
             'team_starter_id', 'opposing_starter_id', 'player_id_team_starter',
             'player_id_opposing_starter', 'mlb_id', 'venue_id',
             
-            # Date columns (temporal leakage risk)
-            'last_app_date_team_starter', 'last_app_date_opposing_starter',
-            
             # Status and other metadata
             'status', 'venue_name', 'venue_timezone', 'venue_gametime_offset'
         ]
 
-    def _feature_scaling(self, dfs: List[Tuple[DataFrame, DataFrame]]) -> Dict[str, Union[DataFrame, StandardScaler]]:
+    def _remove_early_games(self, dfs: List[DataFrame]) -> List:
+        removed_early = []
+        for df in dfs:  # This tries to iterate over a DataFrame
+            d = df[(df['team_gp'] > 10) & (df['opposing_team_gp'] > 10)]
+            removed_early.append(d)
+        return removed_early
+           
+    def _feature_scaling(self, dfs: List[Tuple[DataFrame, DataFrame]], is_xgboost: bool = False) -> Dict[str, Union[DataFrame, StandardScaler]]:
 
         stat_dfs = [df[0] for df in dfs]
         odds_dfs = [df[1] for df in dfs]
@@ -128,11 +132,18 @@ class PreProcessing():
         filtered_dfs = [df[[col for col in df.columns if col not in self.exclude_columns]] for df in stat_dfs]
         
         train_dfs = filtered_dfs[:2]
+        old_train_len = len(train_dfs[0])
         val_df = filtered_dfs[-2].reset_index()
         test_df = filtered_dfs[-1].reset_index()
+
+        train_dfs = self._remove_early_games(train_dfs)
+        val_df = self._remove_early_games([val_df])[0]
+        test_df = self._remove_early_games([test_df])[0]
+
+        assert len(train_dfs[0]) < old_train_len
         
-        val_df = val_df.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team']).sort_index()
-        test_df = test_df.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team']).sort_index()
+        val_df = val_df.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team', 'game_id']).sort_index()
+        test_df = test_df.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team', 'game_id']).sort_index()
 
         train_data = pd.concat(train_dfs)
 
@@ -163,38 +174,41 @@ class PreProcessing():
         self.logger.info(f" Boolean columns: {bool_cols}")
         self.logger.info(f" Numeric columns to scale: {len(numeric_cols)}")
 
-        scaler = StandardScaler()
+        scaler = None
 
-        if bool_cols:
-            X_train_numeric_scaled = pd.DataFrame(
-                scaler.fit_transform(X_train[numeric_cols]),
-                columns=numeric_cols,
-                index=X_train.index
-            )
-            
-            X_train_bool = X_train[bool_cols].astype('int')
-            
-            X_train_scaled = pd.concat([X_train_numeric_scaled, X_train_bool], axis=1)
-            
-            X_val_numeric_scaled = pd.DataFrame(
-                scaler.transform(X_val[numeric_cols]),
-                columns=numeric_cols,
-                index=X_val.index
-            )
-            X_val_bool = X_val[bool_cols].astype('int')
-            X_val_scaled = pd.concat([X_val_numeric_scaled, X_val_bool], axis=1)
-            
-            X_test_numeric_scaled = pd.DataFrame(
-                scaler.transform(X_test[numeric_cols]),
-                columns=numeric_cols,
-                index=X_test.index
-            )
-            X_test_bool = X_test[bool_cols].astype('int')
-            X_test_scaled = pd.concat([X_test_numeric_scaled, X_test_bool], axis=1)
+        if not is_xgboost:
+            scaler = StandardScaler()
 
-        self.logger.debug(f" Dtypes\n{X_train_scaled.dtypes.value_counts()}")
+            if bool_cols:
+                X_train_numeric_scaled = pd.DataFrame(
+                    scaler.fit_transform(X_train[numeric_cols]),
+                    columns=numeric_cols,
+                    index=X_train.index
+                )
+                
+                X_train_bool = X_train[bool_cols].astype('int')
+                
+                X_train = pd.concat([X_train_numeric_scaled, X_train_bool], axis=1)
+                
+                X_val_numeric_scaled = pd.DataFrame(
+                    scaler.transform(X_val[numeric_cols]),
+                    columns=numeric_cols,
+                    index=X_val.index
+                )
+                X_val_bool = X_val[bool_cols].astype('int')
+                X_val = pd.concat([X_val_numeric_scaled, X_val_bool], axis=1)
+                
+                X_test_numeric_scaled = pd.DataFrame(
+                    scaler.transform(X_test[numeric_cols]),
+                    columns=numeric_cols,
+                    index=X_test.index
+                )
+                X_test_bool = X_test[bool_cols].astype('int')
+                X_test = pd.concat([X_test_numeric_scaled, X_test_bool], axis=1)
+
+        self.logger.debug(f" Dtypes\n{X_train.dtypes.value_counts()}")
         self.logger.debug(f" Final X_train head\n{X_train.head(3).to_string()}")
-        self._log_nan_rows([X_train_scaled, X_val_scaled, X_test_scaled])
+        self._log_nan_rows([X_train, X_val, X_test])
         
         self.scaler = scaler
 
@@ -221,11 +235,11 @@ class PreProcessing():
         split_odds_dfs = [odds_train, odds_val, odds_test]
             
         return {
-            'X_train': X_train_scaled,
+            'X_train': X_train,
             'y_train': y_train,
-            'X_val': X_val_scaled,
+            'X_val': X_val,
             'y_val': y_val,
-            'X_test': X_test_scaled,
+            'X_test': X_test,
             'y_test': y_test,
             'odds_dfs': split_odds_dfs,
             'scaler': scaler
@@ -331,7 +345,7 @@ class PreProcessing():
                 except Exception as e:
                     self.logger.error(f" Error removing cache file {cache_path}: {e}")
     
-    def preprocess_feats(self, force_recreate: bool = False, force_recreate_preprocessing: bool = False, clear_log: bool = False) -> Dict:
+    def preprocess_feats(self, force_recreate: bool = False, force_recreate_preprocessing: bool = False, clear_log: bool = False, is_xgboost: bool = False) -> Dict:
         """
         Main preprocessing method with caching functionality.
         
@@ -369,7 +383,7 @@ class PreProcessing():
         odds_separated_dfs = self._separate_odds_cols(raw_feats)
 
         self.logger.info(f" Performing feature scaling and data splitting")
-        processed_data = self._feature_scaling(odds_separated_dfs)
+        processed_data = self._feature_scaling(odds_separated_dfs, is_xgboost)
         
         self.logger.info(f" Caching processed data")
         self._save_cached_data(processed_data)

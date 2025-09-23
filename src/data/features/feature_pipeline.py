@@ -452,10 +452,10 @@ class FeaturePipeline():
         else:
             final_result = metadata_df
 
-        self.logger.debug("="*50 + "\n")
-        self.logger.debug(" Resulting DataFrame after matching schedule")       
-        self.logger.debug(final_result.to_string())
-        self.logger.debug("="*50 + "\n")
+        # self.logger.debug("="*50 + "\n")
+        # self.logger.debug(" Resulting DataFrame after matching schedule")       
+        # self.logger.debug(final_result.to_string())
+        # self.logger.debug("="*50 + "\n")
 
         return final_result
 
@@ -604,12 +604,6 @@ class FeaturePipeline():
         pitching_features_opp_bp = pitching_features_opp_bp.sort_index(level=['game_date', 'dh', 'team'])
         pitching_features_opp_bp = pitching_features_opp_bp.reset_index()
 
-        self.logger.info(f" Adding engineered matchup columns...")
-        # starter_era_cols = ['starter_era', 'starter_fip', 'starter_siera']
-        # ewm_cols = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
-        # team_vs_opp_era = FeaturePipeline._add_matchup_cols_diff_same_base(pitching_features_opp_bp, starter_era_cols, ewm_cols)
-        # pitching_features_opp_bp = pitching_features_opp_bp.assign(**team_vs_opp_era)
-        
         transformed_schedule_reset = transformed_schedule.reset_index()
         batting_features_reset = batting_features.reset_index()
         
@@ -647,8 +641,14 @@ class FeaturePipeline():
             suffixes=('_to_drop', '_to_drop')
         )
 
+        self.logger.info(f" Adding engineered matchup columns...")
+
         pitcher_ewm_cols = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
-        starter_cols = ['starter_era','starter_k_percent', 'starter_barrel_percent', 'starter_fip', 'starter_siera', 'starter_stuff']
+        starter_cols = ['starter_era', 'starter_k_percent', 'starter_barrel_percent', 'starter_fip', 'starter_siera', 'starter_stuff']
+
+        # starter_cols = ['starter_era','starter_siera', 'starter_fip', 'starter_k_bb_percent', 'starter_bb_percent', 
+        #                 'starter_k_percent', 'starter_barrel_percent', 'starter_fip', 'starter_siera', 'starter_stuff',
+        #                 'starter_babip']
         
         starter_matchups = FeaturePipeline._add_matchup_cols_diff_same_base(df=final_features,
                                                                             cols=starter_cols,
@@ -695,7 +695,7 @@ class FeaturePipeline():
                                                     col in ['wind', 'condition'] or 
                                                     col.endswith('_to_drop')])
         
-        final_features = final_features.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team'])
+        final_features = final_features.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team', 'game_id'])
 
         assert final_features.index.get_level_values('game_date').is_monotonic_increasing, "final_features game_date not globally sorted"
 

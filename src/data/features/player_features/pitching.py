@@ -47,6 +47,9 @@ class PitchingFeatures(BaseFeatures):
             else:
                 logger.info(f" No cached pitching stats for {self.season}")
 
+        logger.info(" Adding K-BB% to features...")
+        self.data['k_bb_percent'] = self.data['k_percent'] - self.data['bb_percent']
+
         logger.info(f" Calculating pitcher rolling stats...")
         logger.info(" Loading roster...")
         roster_data = TeamLoader().load_roster(self.season)
@@ -369,6 +372,7 @@ class PitchingFeatures(BaseFeatures):
             "prior_era"           : ("era",             "ip"),
             "prior_k_percent"     : ("k_percent",      "tbf"),
             "prior_bb_percent"    : ("bb_percent",     "tbf"),
+            "prior_k_bb_percent"  : ("k_bb_percent",     "tbf"),
             "prior_babip"         : ("babip",          "bip"),
             "prior_barrel_percent": ("barrel_percent", "bip"),
             "prior_hard_hit"      : ("hard_hit",       "bip"),
@@ -387,6 +391,7 @@ class PitchingFeatures(BaseFeatures):
             'era'           : ('era',            'ip',   'prior_era',             30,  True),
             'k_percent'     : ('k_percent',      'tbf',  'prior_k_percent',       120, True),
             'bb_percent'    : ('bb_percent',     'tbf',  'prior_bb_percent',      120, True),
+            'k_bb_percent'  : ('bb_percent',        'tbf',  'prior_bb_percent',   120, True),
             'babip'         : ('babip',          'bip',  'prior_babip',           180, True),
             'barrel_percent': ('barrel_percent', 'bip',  'prior_barrel_percent',  100, True),
             'hard_hit'      : ('hard_hit',       'bip',  'prior_hard_hit',        100, True),
@@ -424,6 +429,7 @@ class PitchingFeatures(BaseFeatures):
             "prior_era"           : ("era",             "ip"),
             "prior_k_percent"     : ("k_percent",      "tbf"),
             "prior_bb_percent"    : ("bb_percent",     "tbf"),
+            "prior_k_bb_percent"    : ("k_bb_percent",     "tbf"),
             "prior_babip"         : ("babip",          "bip"),
             "prior_barrel_percent": ("barrel_percent", "bip"),
             "prior_hard_hit"      : ("hard_hit",       "bip"),
@@ -441,6 +447,7 @@ class PitchingFeatures(BaseFeatures):
             'era'           : ('era',            'ip',   'prior_era',             30,  True),
             'k_percent'     : ('k_percent',      'tbf',  'prior_k_percent',       100, True),
             'bb_percent'    : ('bb_percent',     'tbf',  'prior_bb_percent',      100, True),
+            'k_bb_percent'  : ('bb_percent',     'tbf',  'prior_bb_percent',      120, True),
             'babip'         : ('babip',          'bip',  'prior_babip',           150, True),
             'barrel_percent': ('barrel_percent', 'bip',  'prior_barrel_percent',  120, True),
             'hard_hit'      : ('hard_hit',       'bip',  'prior_hard_hit',        120, True),
@@ -449,7 +456,7 @@ class PitchingFeatures(BaseFeatures):
             'fip'           : ('fip',            'ip',   'prior_fip',              50, True),
             'siera'         : ('siera',          'ip',   'prior_siera',            50, True),
             'stuff'         : ('stuff',          'tbf',  'prior_stuff',            40, True),
-            'wpa'           : ('wpa',         'apps', 'prior_wpa',              10, True),
+            'wpa'           : ('wpa',            'apps', 'prior_wpa',              10, True),
         }
         
         cols = ['player_id', 'mlb_id', 'game_date','dh','team','season','name',

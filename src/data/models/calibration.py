@@ -7,6 +7,7 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss
 from sklearn.calibration import calibration_curve
+from scipy.optimize import minimize
 
 def plot_calibration(y_true, y_proba, split: str, filepath: str, n_bins: int = 10, 
                     min_bin_size: Optional[int] = None) -> str:
@@ -204,6 +205,8 @@ class BaseCalibrator:
             x = np.asarray(obj["x"], dtype=float)
             y = np.asarray(obj["y"], dtype=float)
             return IsotonicCalibrator(x_thresholds=x, y_thresholds=y)
+        if kind == "temperature":
+            return TemperatureCalibrator(T=float(obj["T"]))
         raise ValueError(f"Unknown calibrator kind: {kind}")
 
 
@@ -256,6 +259,27 @@ class IsotonicCalibrator(BaseCalibrator):
             "x": self.x_thresholds.astype(float).tolist(),
             "y": self.y_thresholds.astype(float).tolist(),
         }
+    
+@dataclass
+class TemperatureCalibrator(BaseCalibrator):
+    """
+    Temperature scaling on logits: p_hat = sigmoid(logit(p) / T).
+    T > 0.  T=1 is no-op; T>1 softens; T<1 sharpens.
+    """
+    T: float
+
+    def __init__(self, T: float = 1.0):
+        super().__init__(kind="temperature")
+        if T <= 0:
+            raise ValueError("Temperature T must be > 0.")
+        self.T = float(T)
+
+    def transform(self, p: np.ndarray) -> np.ndarray:
+        z = _to_logit(p) / self.T
+        return 1.0 / (1.0 + np.exp(-z))
+
+    def to_dict(self) -> Dict:
+        return {"kind": "temperature", "T": float(self.T)}
 
 def fit_platt(y_cal: np.ndarray, p_cal: np.ndarray) -> PlattCalibrator:
     """
@@ -268,6 +292,35 @@ def fit_platt(y_cal: np.ndarray, p_cal: np.ndarray) -> PlattCalibrator:
     a = float(lr.coef_[0, 0])
     b = float(lr.intercept_[0])
     return PlattCalibrator(a=a, b=b)
+
+def fit_temperature(y_cal: np.ndarray, p_cal: np.ndarray) -> TemperatureCalibrator:
+    y = np.asarray(y_cal, dtype=float).ravel()
+    p = _clip_probs(np.asarray(p_cal, dtype=float).ravel())
+
+    def nll_for_logT(logT_array: np.ndarray) -> float:
+        logT = logT_array[0]
+        T = np.exp(logT)
+        z = _to_logit(p) / T
+        pT = 1.0 / (1.0 + np.exp(-z))
+        return log_loss(y, _clip_probs(pT))
+    
+    logT_starts = np.linspace(np.log(0.05), np.log(10.0), 10)
+    best_result = None
+    best_nll = float('inf')
+    
+    for logT_start in logT_starts:
+        result = minimize(nll_for_logT, x0=np.array([logT_start]), 
+                         method='L-BFGS-B',
+                         bounds=[(np.log(0.01), np.log(20.0))])
+        
+        if result.success and result.fun < best_nll:
+            best_nll = result.fun
+            best_result = result
+
+    optimal_temperature = np.exp(best_result.x[0])
+    
+    return TemperatureCalibrator(T=optimal_temperature)
+    
 
 
 def fit_isotonic(y_cal: np.ndarray, p_cal: np.ndarray) -> IsotonicCalibrator:
@@ -311,6 +364,8 @@ def select_and_fit_calibrator(
         fitted["platt"] = fit_platt(y_cal, p_cal)
     if "isotonic" in methods:
         fitted["isotonic"] = fit_isotonic(y_cal, p_cal)
+    if "temperature" in methods:
+        fitted["temperature"] = fit_temperature(y_cal, p_cal)
 
     if y_eval is not None and p_eval_raw is not None:
         y_eval = np.asarray(y_eval, dtype=float)
@@ -357,4 +412,3 @@ def load_calibrator(path: str) -> BaseCalibrator:
         obj = json.load(f)
     return BaseCalibrator.from_dict(obj)
 
-    
