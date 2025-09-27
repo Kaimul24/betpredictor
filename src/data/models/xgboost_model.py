@@ -119,9 +119,10 @@ class XGBoostModel:
         self.dval_es = xgb.DMatrix(self.X_val[:cutoff], label=self.y_val[:cutoff])
         self.dcal    = xgb.DMatrix(self.X_val[cutoff:], label=self.y_val[cutoff:])
         self.y_cal   = self.y_val[cutoff:]
+        self.y_val_es = self.y_val[:cutoff]
         
 
-    def train_and_eval_model(self, retune_hyperparams: bool = False):
+    def train_and_eval_model(self):
         """
         Train and evaluate the XGBoost model.
         
@@ -267,9 +268,6 @@ class XGBoostModel:
         return out
 
     def train(self, hyperparams: Dict = None):
-        def sigmoid(x):
-            return 1 / (1 + np.exp(-x))
-
         BASE_PARAMS = {
                     'objective': 'binary:logistic',
                     'device': "cpu",
@@ -292,42 +290,27 @@ class XGBoostModel:
             early_stopping_rounds=50
         )
 
-        self.logger.info(f" Uncalibrated scores...")
-        m_es = bst.predict(self.dval_es, iteration_range=(0, bst.best_iteration + 1), output_margin=True)
-        X_val_es = self.X_val[:self.val_cutoff]
-        y_val_es = self.y_val[:self.val_cutoff]
-
-        games_es  = self._game_level_margin(X_val_es, m_es, y_val_es)
-        d_es      = games_es['d'].values
-        y_es      = games_es['y_home'].values
-        p_es = sigmoid(d_es)
+        self.logger.info(f" Early stopping scores...")
+        p_es = bst.predict(self.dval_es, iteration_range=(0, bst.best_iteration + 1))
         
-        ll_es    = log_loss(y_es, p_es)
-        auc_es   = roc_auc_score(y_es, p_es)
-        brier_es = brier_score_loss(y_es, p_es)
+        ll_es    = log_loss(self.y_val_es, p_es)
+        auc_es   = roc_auc_score(self.y_val_es, p_es)
+        brier_es = brier_score_loss(self.y_val_es, p_es)
         
         self.logger.info(f" Val(ES) Log Loss: {ll_es}")
         self.logger.info(f" Val(ES) ROC AUC: {auc_es}")
         self.logger.info(f" Val(ES) Brier:   {brier_es}")
 
         filepath = PLOTS_DIR / 'xgboost_calibration_es'
-        out_path_curve = plot_calibration(y_es, p_es, split="val_es", filepath=filepath, n_bins=25)
+        out_path_curve = plot_calibration(self.y_val_es, p_es, split="val_es", filepath=filepath, n_bins=25)
         self.logger.info(f" Saved calibration curve (\"val_es\") to {out_path_curve}")
 
         self.logger.info(" Predictions on calibration set...")
-        m_cal = bst.predict(self.dcal, iteration_range=(0, bst.best_iteration + 1), output_margin=True)
+        p_cal_raw = bst.predict(self.dcal, iteration_range=(0, bst.best_iteration + 1))
 
-        X_cal = self.X_val[self.val_cutoff:]
-        y_cal = self.y_val[self.val_cutoff:]
-
-        games_cal  = self._game_level_margin(X_cal, m_cal, y_cal)
-        d_cal      = games_cal['d'].values
-        y_cal      = games_cal['y_home'].values
-        p_cal_raw = sigmoid(d_cal)
-
-        ll_cal_pre    = log_loss(y_cal, p_cal_raw)
-        auc_cal_pre   = roc_auc_score(y_cal, p_cal_raw)
-        brier_cal_pre = brier_score_loss(y_cal, p_cal_raw)
+        ll_cal_pre    = log_loss(self.y_cal, p_cal_raw)
+        auc_cal_pre   = roc_auc_score(self.y_cal, p_cal_raw)
+        brier_cal_pre = brier_score_loss(self.y_cal, p_cal_raw)
 
         self.logger.info(f" Val(CAL) Pre-Calibration Log Loss: {ll_cal_pre}")
         self.logger.info(f" Val(CAL) Pre-Calibration ROC AUC: {auc_cal_pre}")
@@ -335,10 +318,10 @@ class XGBoostModel:
 
         min_bin_size = 100
         filepath = PLOTS_DIR / 'xgboost_calibration'
-        out_path_curve = plot_calibration(y_cal, p_cal_raw, split="pre_cal", filepath=filepath, n_bins=25, min_bin_size=min_bin_size)
+        out_path_curve = plot_calibration(self.y_cal, p_cal_raw, split="pre_cal", filepath=filepath, n_bins=25, min_bin_size=min_bin_size)
 
         calibrator, metrics = select_and_fit_calibrator(
-            y_cal=y_cal,
+            y_cal=self.y_cal,
             p_cal=p_cal_raw,
             methods=("platt",'temperature'),
             selection_metric="logloss",
@@ -354,9 +337,9 @@ class XGBoostModel:
         self.logger.info(" Evaluating calibrated predictions on calibration set...")
         p_cal_calibrated = apply_calibration(calibrator, p_cal_raw)
         
-        ll_cal_after = log_loss(y_cal, p_cal_calibrated)
-        auc_cal_after = roc_auc_score(y_cal, p_cal_calibrated)
-        brier_cal_after = brier_score_loss(y_cal, p_cal_calibrated)
+        ll_cal_after = log_loss(self.y_cal, p_cal_calibrated)
+        auc_cal_after = roc_auc_score(self.y_cal, p_cal_calibrated)
+        brier_cal_after = brier_score_loss(self.y_cal, p_cal_calibrated)
         
         self.logger.info(f" Val(CAL) Post-Calibration Log Loss: {ll_cal_after}")
         self.logger.info(f" Val(CAL) Post-Calibration ROC AUC: {auc_cal_after}")
@@ -369,8 +352,8 @@ class XGBoostModel:
 
         self._save_model(bst)
 
-        self._plot_roc(y_cal, p_cal_calibrated, split="cal")
-        out_path_curve = plot_calibration(y_cal, p_cal_calibrated, split="cal_after", filepath=filepath, n_bins=25, min_bin_size=min_bin_size)
+        self._plot_roc(self.y_cal, p_cal_calibrated, split="cal")
+        out_path_curve = plot_calibration(self.y_cal, p_cal_calibrated, split="cal_after", filepath=filepath, n_bins=25, min_bin_size=min_bin_size)
 
         self.logger.info(f" Saved calibration curve (\"cal_after\") to {out_path_curve}")
 
@@ -389,10 +372,6 @@ class XGBoostModel:
         return {}
 
     def predict(self, model: xgb.Booster = None):
-
-        def sigmoid(x):
-                return 1 / (1 + np.exp(-x))
-        
         if not model:
             model = self._load_model()
 
@@ -401,13 +380,7 @@ class XGBoostModel:
             return
         
         self.logger.info(f" Predicting on test set")
-        m_test = model.predict(self.dtest, iteration_range=(0, model.best_iteration + 1), output_margin=True)
-
-        games_test  = self._game_level_margin(self.X_test, m_test, self.y_test)
-        d_test      = games_test['d'].values
-        y_test     = games_test['y_home'].values
-        p_test_raw = sigmoid(d_test)
-
+        p_test_raw = model.predict(self.dtest, iteration_range=(0, model.best_iteration + 1))
         try:
             cal = load_calibrator(str(CAL_DIR / "xgb_calibrator.json"))
             p_test = apply_calibration(cal, p_test_raw)
@@ -417,18 +390,18 @@ class XGBoostModel:
             self.logger.info(" No calibrator found; using raw probabilities.")
         
 
-        test_log_loss = log_loss(y_test, p_test)
-        test_roc_auc  = roc_auc_score(y_test, p_test)
-        test_brier    = brier_score_loss(y_test, p_test)
+        test_log_loss = log_loss(self.y_test, p_test)
+        test_roc_auc  = roc_auc_score(self.y_test, p_test)
+        test_brier    = brier_score_loss(self.y_test, p_test)
 
         self.logger.info(f" Test Log Loss: {test_log_loss}")
         self.logger.info(f" Test ROC AUC: {test_roc_auc}")
         self.logger.info(f" Test Brier Score: {test_brier}")
 
-        self._plot_roc(y_test, p_test, split="test")
+        self._plot_roc(self.y_test, p_test, split="test")
 
         filepath = PLOTS_DIR / 'xgboost_calibration'
-        out_path_curve = plot_calibration(y_test, p_test, split="test", filepath=filepath, n_bins=25, min_bin_size=100)
+        out_path_curve = plot_calibration(self.y_test, p_test, split="test", filepath=filepath, n_bins=25, min_bin_size=100)
         self.logger.info(f" Saved calibration curve (\"test\") to {out_path_curve}")
 
         return p_test

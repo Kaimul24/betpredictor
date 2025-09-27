@@ -7,7 +7,7 @@ import pandas as pd
 from pandas.core.api import DataFrame as DataFrame
 import logging, sys, argparse
 import numpy as np
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 from src.config import PROJECT_ROOT
 
@@ -236,7 +236,8 @@ class FeaturePipeline():
 
 
         self.logger.info(f" Adding team batting comparison stats for {self.season}")
-        batting_comp_cols = ["woba", "wrc_plus", "hard_hit", "barrel_percent", "bb_k"]
+        batting_comp_cols = ["woba", "wrc_plus", "hard_hit", "barrel_percent", "bb_k", "ops",
+                             "babip", "ev", "iso", "baserunning", "wpa"]
         ewm_cols = ['season', 'ewm_h3', 'ewm_h10', 'ewm_h25']
         batting_comp_stats = FeaturePipeline._add_matchup_cols_diff_same_base(team_and_opponent_feats, batting_comp_cols, ewm_cols)
         team_and_opponent_feats = team_and_opponent_feats.assign(**batting_comp_stats)
@@ -269,7 +270,7 @@ class FeaturePipeline():
 
         return pd.concat([df, opp_aligned], axis=1)    
 
-    def _match_schedule_to_odds(self, schedule_data: DataFrame, odds_data: DataFrame) -> DataFrame:
+    def _match_schedule_to_odds(self, schedule_data: DataFrame, odds_data: DataFrame) -> Tuple[DataFrame, DataFrame]:
         """
         Match schedule games to odds. A single game will have many odds matches. Games without a match are due to incorrect labeling
         of game_datetime in the schedule data, so the odds game_datetime is used. This is handled in find_unmatched_games and _handle_unmatched_games
@@ -409,6 +410,8 @@ class FeaturePipeline():
 
                 # self._print_matching_summary(schedule_data, odds_data, final_merged, remaining_unmatched_games)
                 merged_games = final_merged
+                all_odds_data.set_index(["game_date", "dh", "home_team", "away_team", "game_id"], inplace=True)
+                all_odds_data.drop(columns=[col for col in all_odds_data.columns if col not in ['sportsbook', 'away_opening_prob_raw', 'home_opening_prob_raw', 'home_opening_prob_nv', 'away_opening_prob_nv']], inplace=True)
             else:
                 self.logger.warning("handle_unmatched_games returned no matches")
 
@@ -418,6 +421,7 @@ class FeaturePipeline():
         merged_games = merged_games.reset_index()
         merged_games = merged_games.sort_values(id_cols).set_index(id_cols)
         
+
         game_metadata_cols = [
             'game_id', 'day_night_game', 'season', 'venue_name', 'venue_id',
             'venue_elevation', 'venue_timezone', 'venue_gametime_offset', 'status',
@@ -433,7 +437,8 @@ class FeaturePipeline():
             'p_open_home_max_nv', 'p_open_home_min_nv', 'p_open_away_max_nv',
             'p_open_away_min_nv', 'p_open_home_median_nv', 'p_open_home_mean_nv', 
             'p_open_home_std_nv', 'p_open_away_median_nv', 'p_open_away_mean_nv', 
-            'p_open_away_std_nv'
+            'p_open_away_std_nv', 'p_open_mean_nv_diff', 'p_open_med_nv_diff', 
+            'p_open_max_nv_diff', 'p_open_min_nv_diff'
         ]
         
         existing_metadata_cols = [col for col in game_metadata_cols if col in merged_games.columns]
@@ -459,7 +464,7 @@ class FeaturePipeline():
         self.logger.debug(final_result.to_string())
         self.logger.debug("="*50 + "\n")
         
-        return final_result
+        return final_result, all_odds_data
 
     def _log_matching_summary(self, schedule_data: DataFrame, odds_data: DataFrame, 
                                final_merged: DataFrame, remaining_unmatched: DataFrame):
@@ -560,7 +565,7 @@ class FeaturePipeline():
         else:
             return DataFrame()
         
-    def start_pipeline(self, force_recreate: bool = False, clear_log: bool = False):
+    def start_pipeline(self, force_recreate: bool = False, clear_log: bool = False) -> Tuple[DataFrame, DataFrame]:
         self.logger.info("="*60)
         self.logger.info(f" Starting feature pipeline...")
         self.logger.info("="*60 + "\n")
@@ -575,7 +580,7 @@ class FeaturePipeline():
 
         odds_data = self._load_odds_data()
         odds_feats = Odds(odds_data, self.season).load_features()
-        odds_sch_matched = self._match_schedule_to_odds(schedule_data, odds_feats)
+        odds_sch_matched, raw_odds_data = self._match_schedule_to_odds(schedule_data, odds_feats)
 
         transformed_schedule = self._transform_schedule(odds_sch_matched)
         batting_features = self._get_batting_features(transformed_schedule, force_recreate)
@@ -646,7 +651,9 @@ class FeaturePipeline():
         self.logger.info(f" Adding engineered matchup columns...")
 
         pitcher_ewm_cols = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
-        starter_cols = ['starter_era', 'starter_k_percent', 'starter_barrel_percent', 'starter_fip', 'starter_siera', 'starter_stuff']
+        starter_cols = ['starter_era', 'starter_babip', 'starter_hard_hit', 'starter_k_percent', 
+                        'starter_barrel_percent', 'starter_fip', 'starter_siera', 'starter_stuff',
+                        'starter_ev', 'starter_hr_fb', 'starter_wpa']
         
         starter_matchups = FeaturePipeline._add_matchup_cols_diff_same_base(df=final_features,
                                                                             cols=starter_cols,
@@ -654,7 +661,10 @@ class FeaturePipeline():
                                                                             
         final_features = final_features.assign(**starter_matchups)
 
-        pen_cols = ['pen_era','pen_k_percent', 'pen_bb_percent', 'pen_barrel_percent', 'pen_fip', 'pen_siera', 'pen_stuff']
+        pen_cols = ['pen_era', 'pen_babip', 'pen_hard_hit', 'pen_k_percent', 
+                        'pen_barrel_percent', 'pen_fip', 'pen_siera', 'pen_stuff',
+                        'pen_ev', 'pen_hr_fb', 'pen_wpa_li']
+        
         
         pen_matchups = FeaturePipeline._add_matchup_cols_diff_same_base(df=final_features,
                                                                             cols=pen_cols,
@@ -675,16 +685,15 @@ class FeaturePipeline():
         
         final_features = final_features.assign(**team_pitching_vs_opp_batting)
 
-        # team_metrics_cols = ["win_pct", "pyth_expectation", "run_diff", "one_run_win_pct"]
-        # team_metrics_ewm_cols = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
-        # team_metrics_matchups = FeaturePipeline._add_matchup_cols_diff_same_base(df=final_features,
-        #                                                                          cols=team_metrics_cols,
-        #                                                                          ewm_cols=team_metrics_ewm_cols)
+        team_metrics_cols = ["win_pct", "pyth_expectation", "run_diff", "one_run_win_pct"]
+        team_metrics_ewm_cols = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
+        team_metrics_matchups = FeaturePipeline._add_matchup_cols_diff_same_base(df=final_features,
+                                                                                 cols=team_metrics_cols,
+                                                                                 ewm_cols=team_metrics_ewm_cols)
         
-        # final_features = final_features.assign(**team_metrics_matchups)
+        final_features = final_features.assign(**team_metrics_matchups)
 
         assert (final_features['starter_fip_woba_season_diff'] == final_features['team_starter_fip_season'] - final_features['opposing_team_woba_season']).all()
-
 
 
         final_features = final_features.drop(columns=[col for col in final_features.columns if col.endswith('_sch_bat') or
@@ -711,7 +720,7 @@ class FeaturePipeline():
         self.logger.debug(final_features.tail().to_string())
         self.logger.debug("="*60 + "\n")
 
-        return final_features
+        return final_features, raw_odds_data
     
     def _collapse_data(self, df: DataFrame) -> DataFrame:
         df = df.copy()
@@ -719,8 +728,8 @@ class FeaturePipeline():
         home_df = df[df['is_home']]
         away_df = df[~df['is_home']]
         
-        const_cols = [col for col in df.columns if 'team_' not in col and 'opposing_team_' not in col]
-
+        const_cols = [col for col in df.columns if 'team_' not in col and 'opposing_' not in col]
+        
         assert len(home_df) + len(away_df) == len(df)
 
         home_rename = {
@@ -757,7 +766,8 @@ class FeaturePipeline():
 
         from_away_cols = [col for col in final_df.columns if col.endswith('_drop_away')]
         final_df = final_df.drop(columns=from_away_cols)
-
+        final_df = final_df.rename(columns={'is_winner': 'is_winner_home'})
+        
         return final_df
 
 
@@ -823,8 +833,9 @@ def main():
     
     feat_pipe = FeaturePipeline(2021, logger)
 
-    features = feat_pipe.start_pipeline(args.force_recreate, args.clear_log)
-
+    features, raw_odds_data = feat_pipe.start_pipeline(args.force_recreate, args.clear_log)
+    with open("raw_odds_data.txt", "w") as f:
+        f.write(raw_odds_data.to_string())
 
 if __name__ == "__main__":
     main()

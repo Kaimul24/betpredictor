@@ -94,56 +94,49 @@ class PreProcessing():
             'scaler': self.cache_dir / f"scaler_seasons_{self.seasons_str}.pkl"
         }
 
-        self.target = ['is_winner']
+        self.target = ['is_winner_home']
 
         self.exclude_columns = [
-            # Game outcome information (data leakage)
-            'team_score', 'opposing_team_score', 'home_score', 
-            'winning_team', 'losing_team', 'winner',
+            'home_team_score', 'away_team_score', 'home_score', 
+            'winning_team', 'losing_team', 'winner', 'away_score',
             
-            # Identifiers and metadata
-            'game_datetime', 'season',
+            'game_datetime', 'season', 'is_home',
             
-            # Player names (categorical with too many unique values)
             'away_starter_normalized', 'home_starter_normalized',
-            'starter_normalized', 'opposing_starter_normalized', 'team_starter_normalized_player_name',
-            'opposing_team_starter_normalized_player_name', 'team_starter_name', 'opposing_team_starter_name',
+            'starter_normalized', 'home_opposing_starter_normalized', 'home_opposing_starter_normalized', 'home_team_starter_normalized_player_name',
+            'away_team_starter_normalized_player_name', 'home_team_starter_name', 'away_team_starter_name', 'away_opposing_starter_normalized',
             
-            # IDs and foreign keys
-            'team_starter_id', 'opposing_starter_id', 'player_id_team_starter',
-            'player_id_opposing_starter', 'mlb_id', 'venue_id',
-            
-            # Status and other metadata
+            'home_team_starter_id', 'away_starter_id','away_team_starter_id', 'away_team_starter_player_id', 'mlb_id', 'venue_id',
+
             'status', 'venue_name', 'venue_timezone', 'venue_gametime_offset'
         ]
 
     def _remove_early_games(self, dfs: List[DataFrame]) -> List:
         removed_early = []
         for df in dfs:  # This tries to iterate over a DataFrame
-            d = df[(df['team_gp'] > 10) & (df['opposing_team_gp'] > 10)]
+            print(df.columns.to_list())
+            d = df[(df['home_team_gp'] > 10) & (df['away_team_gp'] > 10)]
             removed_early.append(d)
         return removed_early
            
     def _feature_scaling(self, dfs: List[Tuple[DataFrame, DataFrame]], is_xgboost: bool = False) -> Dict[str, Union[DataFrame, StandardScaler]]:
 
-        stat_dfs = [df[0] for df in dfs]
-        odds_dfs = [df[1] for df in dfs]
-        
-        filtered_dfs = [df[[col for col in df.columns if col not in self.exclude_columns]] for df in stat_dfs]
+
+        filtered_dfs = [df[[col for col in df.columns if col not in self.exclude_columns]] for df in dfs]
         
         train_dfs = filtered_dfs[:2]
         old_train_len = len(train_dfs[0])
         val_df = filtered_dfs[-2].reset_index()
         test_df = filtered_dfs[-1].reset_index()
 
-        train_dfs = self._remove_early_games(train_dfs)
-        val_df = self._remove_early_games([val_df])[0]
-        test_df = self._remove_early_games([test_df])[0]
+        # train_dfs = self._remove_early_games(train_dfs)
+        # val_df = self._remove_early_games([val_df])[0]
+        # test_df = self._remove_early_games([test_df])[0]
 
-        assert len(train_dfs[0]) < old_train_len
+        # assert len(train_dfs[0]) < old_train_len
         
-        val_df = val_df.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team', 'game_id']).sort_index()
-        test_df = test_df.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team', 'game_id']).sort_index()
+        val_df = val_df.set_index(['season', 'game_date', 'dh', 'home_team', 'away_team', 'game_id']).sort_index()
+        test_df = test_df.set_index(['season', 'game_date', 'dh', 'home_team', 'away_team', 'game_id']).sort_index()
 
         train_data = pd.concat(train_dfs)
 
@@ -157,6 +150,7 @@ class PreProcessing():
         test_df = test_df.dropna()
 
         self.logger.debug(f" Dtypes\n{train_dfs[0].dtypes.value_counts()}")
+        self.logger.debug(f" Features\n{train_dfs[0].columns.to_list()}")
         self._log_nan_rows(train_dfs)
 
         X_train = train_data.drop(columns=self.target)
@@ -170,13 +164,14 @@ class PreProcessing():
 
         bool_cols = X_train.select_dtypes(include=['bool']).columns.tolist()
         numeric_cols = X_train.select_dtypes(exclude=['bool']).columns.tolist()
+        object_cols = X_train.select_dtypes(include=['object']).columns.tolist()
         
         self.logger.info(f" Boolean columns: {bool_cols}")
-        self.logger.info(f" Numeric columns to scale: {len(numeric_cols)}")
-
+        self.logger.info(f" Object cols: {object_cols}")
         scaler = None
 
         if not is_xgboost:
+            self.logger.info(f" Numeric columns to scale: {len(numeric_cols)}")
             scaler = StandardScaler()
 
             if bool_cols:
@@ -211,28 +206,6 @@ class PreProcessing():
         self._log_nan_rows([X_train, X_val, X_test])
         
         self.scaler = scaler
-
-        odds_train = odds_dfs[0] if len(odds_dfs) > 0 else DataFrame()
-
-        if len(odds_dfs) > 1:
-            if len(odds_dfs) >= len(self.seasons):
-
-                odds_train_list = odds_dfs[:-2]
-                odds_train = pd.concat(odds_train_list) if odds_train_list else DataFrame()
-                
-
-                odds_val = odds_dfs[-2].reset_index()
-                odds_test = odds_dfs[-1].reset_index()
-                
-                if not odds_val.empty:
-                    odds_val = odds_val.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team'])
-                if not odds_test.empty:
-                    odds_test = odds_test.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team'])
-        else:
-            odds_val = DataFrame()
-            odds_test = DataFrame()
-        
-        split_odds_dfs = [odds_train, odds_val, odds_test]
             
         return {
             'X_train': X_train,
@@ -241,7 +214,6 @@ class PreProcessing():
             'y_val': y_val,
             'X_test': X_test,
             'y_test': y_test,
-            'odds_dfs': split_odds_dfs,
             'scaler': scaler
         }
 
@@ -258,15 +230,17 @@ class PreProcessing():
         
         return results
         
-    def _get_features(self, force_recreate: bool = False, clear_log: bool = False) -> List[DataFrame]:
+    def _get_features(self, force_recreate: bool = False, clear_log: bool = False) -> Tuple[List[DataFrame], List[DataFrame]]:
         all_features = []
+        all_odds = []
 
         for year in self.seasons:
             feat_pipe = FeaturePipeline(year, logger=self.logger)
-            season_feats = feat_pipe.start_pipeline(force_recreate, clear_log)
+            season_feats, odds_data = feat_pipe.start_pipeline(force_recreate, clear_log)
             all_features.append(season_feats)
+            all_odds.append(odds_data)
         
-        return all_features
+        return all_features, odds_data
     
     def _log_nan_rows(self, dfs: List[DataFrame]) -> None:
         for i, df in enumerate(dfs):
@@ -286,16 +260,6 @@ class PreProcessing():
             for key in ['X_train', 'y_train', 'X_val', 'y_val', 'X_test', 'y_test']:
                 processed_data[key].to_parquet(self.cache_paths[key], index=True)
                 self.logger.info(f" Cached {key} to {self.cache_paths[key]}")
-            
-            odds_dfs = processed_data['odds_dfs']
-            odds_keys = ['odds_train', 'odds_val', 'odds_test']
-            for i, odds_key in enumerate(odds_keys):
-                if i < len(odds_dfs) and not odds_dfs[i].empty:
-                    odds_dfs[i].to_parquet(self.cache_paths[odds_key], index=True)
-                    self.logger.info(f" Cached {odds_key}")
-                else:
-                    DataFrame().to_parquet(self.cache_paths[odds_key], index=False)
-                    self.logger.info(f" Cached empty {odds_key}")
             
             joblib.dump(processed_data['scaler'], self.cache_paths['scaler'])
             self.logger.info(f" Cached scaler to {self.cache_paths['scaler']}")
@@ -345,7 +309,7 @@ class PreProcessing():
                 except Exception as e:
                     self.logger.error(f" Error removing cache file {cache_path}: {e}")
     
-    def preprocess_feats(self, force_recreate: bool = False, force_recreate_preprocessing: bool = False, clear_log: bool = False, is_xgboost: bool = False) -> Dict:
+    def preprocess_feats(self, force_recreate: bool = False, force_recreate_preprocessing: bool = False, clear_log: bool = False, is_xgboost: bool = False) -> Tuple[Dict, DataFrame]:
         """
         Main preprocessing method with caching functionality.
         
@@ -365,6 +329,7 @@ class PreProcessing():
             cached_data = self._load_cached_data()
             if cached_data is not None:
                 self.logger.info(f" Successfully loaded cached preprocessed data")
+                print(cached_data.keys())
                 return cached_data
             else:
                 self.logger.warning(f" Failed to load cached data, reprocessing...")
@@ -377,18 +342,15 @@ class PreProcessing():
             self.logger.info(f" No cached preprocessed data found, processing features...")
 
         self.logger.info(f" Getting raw features for seasons {self.seasons}")
-        raw_feats = self._get_features(force_recreate, clear_log)
-        
-        self.logger.info(f" Separating odds columns")
-        odds_separated_dfs = self._separate_odds_cols(raw_feats)
+        features, odds_data = self._get_features(force_recreate, clear_log)
 
         self.logger.info(f" Performing feature scaling and data splitting")
-        processed_data = self._feature_scaling(odds_separated_dfs, is_xgboost)
+        processed_data = self._feature_scaling(features, is_xgboost)
         
         self.logger.info(f" Caching processed data")
         self._save_cached_data(processed_data)
         
-        return processed_data
+        return processed_data, odds_data
 
 
 def main():
@@ -400,7 +362,7 @@ def main():
     pre_processor = PreProcessing([2021, 2022, 2023])
     pre_processor.logger = logger  # Assign the logger
     
-    preprocessed_feats = pre_processor.preprocess_feats(
+    preprocessed_feats, odds_data = pre_processor.preprocess_feats(
         force_recreate=args.force_recreate,
         force_recreate_preprocessing=args.force_recreate_preprocessing,
         clear_log=args.clear_log
