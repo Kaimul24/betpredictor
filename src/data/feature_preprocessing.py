@@ -88,9 +88,7 @@ class PreProcessing():
             'y_val': self.cache_dir / f"y_val_seasons_{self.seasons_str}.parquet",
             'X_test': self.cache_dir / f"X_test_seasons_{self.seasons_str}.parquet",
             'y_test': self.cache_dir / f"y_test_seasons_{self.seasons_str}.parquet",
-            'odds_train': self.cache_dir / f"odds_train_seasons_{self.seasons_str}.parquet",
-            'odds_val': self.cache_dir / f"odds_val_seasons_{self.seasons_str}.parquet", 
-            'odds_test': self.cache_dir / f"odds_test_seasons_{self.seasons_str}.parquet",
+            'odds_data': self.cache_dir / f"odds_data_seasons_{self.seasons_str}.parquet",
             'scaler': self.cache_dir / f"scaler_seasons_{self.seasons_str}.pkl"
         }
 
@@ -119,22 +117,14 @@ class PreProcessing():
             removed_early.append(d)
         return removed_early
            
-    def _feature_scaling(self, dfs: List[Tuple[DataFrame, DataFrame]], is_xgboost: bool = False) -> Dict[str, Union[DataFrame, StandardScaler]]:
-
+    def _feature_scaling(self, dfs: List[DataFrame], is_xgboost: bool = False) -> Dict[str, Union[DataFrame, StandardScaler | None]]:
 
         filtered_dfs = [df[[col for col in df.columns if col not in self.exclude_columns]] for df in dfs]
         
         train_dfs = filtered_dfs[:2]
-        old_train_len = len(train_dfs[0])
         val_df = filtered_dfs[-2].reset_index()
         test_df = filtered_dfs[-1].reset_index()
 
-        # train_dfs = self._remove_early_games(train_dfs)
-        # val_df = self._remove_early_games([val_df])[0]
-        # test_df = self._remove_early_games([test_df])[0]
-
-        # assert len(train_dfs[0]) < old_train_len
-        
         val_df = val_df.set_index(['season', 'game_date', 'dh', 'home_team', 'away_team', 'game_id']).sort_index()
         test_df = test_df.set_index(['season', 'game_date', 'dh', 'home_team', 'away_team', 'game_id']).sort_index()
 
@@ -240,7 +230,7 @@ class PreProcessing():
             all_features.append(season_feats)
             all_odds.append(odds_data)
         
-        return all_features, odds_data
+        return all_features, all_odds
     
     def _log_nan_rows(self, dfs: List[DataFrame]) -> None:
         for i, df in enumerate(dfs):
@@ -254,20 +244,23 @@ class PreProcessing():
             else:
                 self.logger.debug(f" --- DataFrame {i+1} --- No NaN rows found")
     
-    def _save_cached_data(self, processed_data: Dict) -> None:
+    def _save_cached_data(self, processed_data: Dict, odds_data: DataFrame) -> None:
         """Save processed data to cache files"""
         try:
             for key in ['X_train', 'y_train', 'X_val', 'y_val', 'X_test', 'y_test']:
                 processed_data[key].to_parquet(self.cache_paths[key], index=True)
                 self.logger.info(f" Cached {key} to {self.cache_paths[key]}")
             
+            odds_data.to_parquet(self.cache_paths['odds_data'], index=True)
+            self.logger.info(f" Cached odds to {self.cache_paths['odds_data']}")
+
             joblib.dump(processed_data['scaler'], self.cache_paths['scaler'])
             self.logger.info(f" Cached scaler to {self.cache_paths['scaler']}")
             
         except Exception as e:
             self.logger.error(f" Failed to cache processed data: {e}")
     
-    def _load_cached_data(self) -> Dict:
+    def _load_cached_data(self) -> Union[Tuple[Dict, DataFrame], None]:
         """Load processed data from cache files"""
         try:
             cached_data = {}
@@ -275,20 +268,15 @@ class PreProcessing():
             for key in ['X_train', 'y_train', 'X_val', 'y_val', 'X_test', 'y_test']:
                 cached_data[key] = pd.read_parquet(self.cache_paths[key])
                 self.logger.info(f" Loaded cached {key}")
-            
-            odds_dfs = []
-            for odds_key in ['odds_train', 'odds_val', 'odds_test']:
-                if self.cache_paths[odds_key].exists():
-                    odds_dfs.append(pd.read_parquet(self.cache_paths[odds_key]))
-                else:
-                    odds_dfs.append(DataFrame())
+    
 
-            cached_data['odds_dfs'] = odds_dfs
+            odds_df = pd.read_parquet(self.cache_paths['odds_data'])
+            self.logger.info(" Loaded cached odds")
 
             cached_data['scaler'] = joblib.load(self.cache_paths['scaler'])
             self.logger.info(f" Loaded cached scaler")
             
-            return cached_data
+            return cached_data, odds_df
             
         except Exception as e:
             self.logger.error(f" Failed to load cached data: {e}")
@@ -329,8 +317,7 @@ class PreProcessing():
             cached_data = self._load_cached_data()
             if cached_data is not None:
                 self.logger.info(f" Successfully loaded cached preprocessed data")
-                print(cached_data.keys())
-                return cached_data
+                return cached_data[0], cached_data[1]
             else:
                 self.logger.warning(f" Failed to load cached data, reprocessing...")
         
@@ -346,11 +333,13 @@ class PreProcessing():
 
         self.logger.info(f" Performing feature scaling and data splitting")
         processed_data = self._feature_scaling(features, is_xgboost)
+
+        all_odds = pd.concat(odds_data)
         
         self.logger.info(f" Caching processed data")
-        self._save_cached_data(processed_data)
+        self._save_cached_data(processed_data, all_odds)
         
-        return processed_data, odds_data
+        return processed_data, all_odds
 
 
 def main():
@@ -367,6 +356,8 @@ def main():
         force_recreate_preprocessing=args.force_recreate_preprocessing,
         clear_log=args.clear_log
     )
+
+    print(preprocessed_feats.keys())
 
 
 if __name__ == "__main__":

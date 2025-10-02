@@ -429,14 +429,14 @@ def main():
     model_args = create_args()
     logger = setup_logging(model_args)
 
-    all_data = PreProcessing([2021, 2022, 2023, 2024, 2025]).preprocess_feats(
+    model_data, odds_data = PreProcessing([2021, 2022, 2023, 2024, 2025]).preprocess_feats(
             force_recreate=model_args.force_recreate,
             force_recreate_preprocessing=model_args.force_recreate_preprocessing,
             clear_log=model_args.clear_log,
             is_xgboost=True
         )
     
-    model = XGBoostModel(model_args, logger, all_data)
+    model = XGBoostModel(model_args, logger, model_data)
     model.train_and_eval_model()
     test_pred = model.predict()
     
