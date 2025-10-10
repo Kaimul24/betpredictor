@@ -373,7 +373,7 @@ class XGBoostModel:
 
     def predict(self, model: xgb.Booster = None):
         if not model:
-            model = self._load_model()
+            model = self.load_model()
 
         if model is None:
             self.logger.error(f" No model has been trained!")
@@ -414,7 +414,7 @@ class XGBoostModel:
         self.logger.info(f" Succesfully saved XGBoost model to {xgboost_model_path}")
 
     
-    def _load_model(self) -> xgb:
+    def load_model(self) -> xgb:
         model_path = SAVED_MODEL_DIR / "saved_xgboost.json"
         if model_path.exists():
             bst = xgb.Booster()
@@ -428,7 +428,8 @@ class XGBoostModel:
 def main():
     model_args = create_args()
     logger = setup_logging(model_args)
-    logger.info("="*50 + "XGBOOST MODEL" + "="*50)
+    logger.info("="*75 + "XGBOOST MODEL" + "="*75)
+    
     model_data, odds_data = PreProcessing([2021, 2022, 2023, 2024, 2025]).preprocess_feats(
             force_recreate=model_args.force_recreate,
             force_recreate_preprocessing=model_args.force_recreate_preprocessing,

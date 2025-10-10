@@ -109,7 +109,7 @@ class PreProcessing():
 
     def _remove_early_games(self, dfs: List[DataFrame]) -> List:
         removed_early = []
-        for df in dfs:  # This tries to iterate over a DataFrame
+        for df in dfs:
             print(df.columns.to_list())
             d = df[(df['home_team_gp'] > 10) & (df['away_team_gp'] > 10)]
             removed_early.append(d)
@@ -127,6 +127,10 @@ class PreProcessing():
         test_df = test_df.set_index(['season', 'game_date', 'dh', 'home_team', 'away_team', 'game_id']).sort_index()
 
         train_data = pd.concat(train_dfs)
+        
+        for data in [train_data, val_df, test_df]:
+            assert data.index.get_level_values(level='season').is_monotonic_increasing, f"{data} season is not globally sorted"
+            assert data.index.get_level_values(level='game_date').is_monotonic_increasing, f"{data} game_date is not globally sorted"
 
         self.logger.info(f" Dropping {train_data.isna().any(axis=1).sum()} rows from training data...")
         train_data = train_data.dropna()
@@ -341,13 +345,12 @@ class PreProcessing():
 
 
 def main():
-    args = create_args()  # Get args from return value
+    args = create_args()
     
-    # Set up logging first, before creating PreProcessing instance
     logger = setup_logging(args)
     
     pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025])
-    pre_processor.logger = logger  # Assign the logger
+    pre_processor.logger = logger
     
     preprocessed_feats, odds_data = pre_processor.preprocess_feats(
         force_recreate=args.force_recreate,
@@ -355,7 +358,8 @@ def main():
         clear_log=args.clear_log
     )
 
-    print(preprocessed_feats.keys())
+    with open('odds_data.txt', 'w') as f:
+        f.write(odds_data.to_string())
 
 
 if __name__ == "__main__":
