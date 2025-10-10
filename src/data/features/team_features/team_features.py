@@ -74,7 +74,7 @@ class TeamFeatures(BaseFeatures):
         
         team_grouping = df['team']
         
-        result, _ = self.compute_rolling_stats(
+        result, _ = BaseFeatures.compute_rolling_stats(
             df,
             prior_specs=prior_specs,
             shrinkage_weights_cols=shrinkage_weights_cols,
@@ -110,7 +110,7 @@ class TeamFeatures(BaseFeatures):
         preserve_cols = ['game_id', 'game_date', 'dh', 'game_datetime', 'team', 'opposing_team']
         team_opp_grouping = pd.MultiIndex.from_arrays([df['team'], df['opposing_team']])
     
-        result, _ = self.compute_rolling_stats(
+        result, _ = BaseFeatures.compute_rolling_stats(
             df,
             prior_specs=prior_specs,
             shrinkage_weights_cols=shrinkage_weights_cols,

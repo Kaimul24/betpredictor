@@ -87,7 +87,7 @@ class BaseFeatures(ABC):
         return rate, den_cum
     
     @staticmethod
-    def compute_weighted_priors(data: DataFrame, prior_specs) -> DataFrame:
+    def compute_weighted_priors(data: DataFrame, prior_specs) -> Tuple[DataFrame, Dict[str, float]]:
 
         df = data.copy()
 
@@ -107,11 +107,11 @@ class BaseFeatures(ABC):
                         ewm_cols: Dict[str, Tuple[str, str, str, int, bool]],
                         preserve_cols: List[str],
                         by: pd.Series = pd.Series([]),
-                        halflives=(3, 8, 20)) -> DataFrame:
+                        halflives=(3, 8, 20)) -> Tuple[DataFrame, Dict]:
 
         df = data.copy()
-
-        if by.empty:
+        
+        if by.empty and not df.empty:
             by = df['player_id']
         
         df, priors = BaseFeatures.compute_weighted_priors(

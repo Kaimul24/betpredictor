@@ -64,10 +64,10 @@ CREATE TABLE IF NOT EXISTS players (
 );
 
 CREATE TABLE IF NOT EXISTS batting_stats (
-  player_id       INTEGER, 
+  player_id       INTEGER,
   mlb_id          INTEGER,
   name            TEXT,
-  normalized_player_name TEXT,
+  normalized_player_name TEXT, 
   game_date       TEXT,
   team            TEXT,
   batorder        TEXT,
@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS batting_stats (
   bip             INTEGER,
   ops             REAL,
   babip           REAL,
+  k_percent       REAL,
+  bb_percent      REAL,
   bb_k            REAL,
   wrc_plus        REAL,
   woba            REAL,

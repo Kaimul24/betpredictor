@@ -76,8 +76,6 @@ class PreProcessing():
         self.seasons = seasons
         self.seasons_str = "_".join(map(str, seasons))
 
-        
-        # Define cache paths for each dataset
         self.cache_dir = FEATURES_CACHE_PATH / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
@@ -121,7 +119,7 @@ class PreProcessing():
 
         filtered_dfs = [df[[col for col in df.columns if col not in self.exclude_columns]] for df in dfs]
         
-        train_dfs = filtered_dfs[:2]
+        train_dfs = filtered_dfs[:3]
         val_df = filtered_dfs[-2].reset_index()
         test_df = filtered_dfs[-1].reset_index()
 
@@ -348,7 +346,7 @@ def main():
     # Set up logging first, before creating PreProcessing instance
     logger = setup_logging(args)
     
-    pre_processor = PreProcessing([2021, 2022, 2023])
+    pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025])
     pre_processor.logger = logger  # Assign the logger
     
     preprocessed_feats, odds_data = pre_processor.preprocess_feats(

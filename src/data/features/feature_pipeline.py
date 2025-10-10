@@ -421,7 +421,6 @@ class FeaturePipeline():
         merged_games = merged_games.reset_index()
         merged_games = merged_games.sort_values(id_cols).set_index(id_cols)
         
-
         game_metadata_cols = [
             'game_id', 'day_night_game', 'season', 'venue_name', 'venue_id',
             'venue_elevation', 'venue_timezone', 'venue_gametime_offset', 'status',

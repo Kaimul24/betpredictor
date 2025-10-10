@@ -428,7 +428,7 @@ class XGBoostModel:
 def main():
     model_args = create_args()
     logger = setup_logging(model_args)
-
+    logger.info("="*50 + "XGBOOST MODEL" + "="*50)
     model_data, odds_data = PreProcessing([2021, 2022, 2023, 2024, 2025]).preprocess_feats(
             force_recreate=model_args.force_recreate,
             force_recreate_preprocessing=model_args.force_recreate_preprocessing,

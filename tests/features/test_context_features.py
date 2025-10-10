@@ -99,10 +99,10 @@ class TestGameContextFeatures:
         
         assert_dataframe_not_empty(day_night_encoded)
         assert 'day_night_game' in day_night_encoded.columns
-        
+
         unique_values = day_night_encoded['day_night_game'].unique()
-        assert all(val in [0, 1] for val in unique_values), \
-            f"Day/night encoding should be 0 or 1, got {unique_values}"
+        assert set(unique_values).issubset({True, False}), \
+            f"Day/night encoding should be boolean, got {unique_values}"
         
         original_data = context_features.data.reset_index()
         for i, row in day_night_encoded.iterrows():
@@ -110,9 +110,9 @@ class TestGameContextFeatures:
             encoded_value = row['day_night_game']
             
             if original_value == 'day':
-                assert encoded_value == 1, "Day games should be encoded as 1"
+                assert bool(encoded_value), "Day games should be encoded as True"
             elif original_value == 'night':
-                assert encoded_value == 0, "Night games should be encoded as 0"
+                assert not bool(encoded_value), "Night games should be encoded as False"
 
     def test_wind_encoding(self, context_features):
         """Test wind feature encoding including magnitude and direction."""
@@ -132,10 +132,10 @@ class TestGameContextFeatures:
         
         for direction_col in expected_directions:
             assert direction_col in wind_encoded.columns, f"Missing wind direction column: {direction_col}"
-            assert wind_encoded[direction_col].dtype == 'int64', \
-                f"Wind direction {direction_col} should be int64"
-            assert all(val in [0, 1] for val in wind_encoded[direction_col].unique()), \
-                f"Wind direction {direction_col} should be one-hot encoded (0 or 1)"
+            assert wind_encoded[direction_col].dtype == 'bool', \
+                f"Wind direction {direction_col} should be bool"
+            assert set(wind_encoded[direction_col].unique()).issubset({True, False}), \
+                f"Wind direction {direction_col} should be one-hot encoded booleans"
 
     def test_wind_magnitude_parsing(self, context_features):
         """Test that wind magnitude is correctly parsed from wind strings."""
@@ -173,10 +173,10 @@ class TestGameContextFeatures:
         for condition_col in expected_conditions:
             assert condition_col in condition_encoded.columns, \
                 f"Missing condition column: {condition_col}"
-            assert condition_encoded[condition_col].dtype == 'int64', \
-                f"Condition {condition_col} should be int64"
-            assert all(val in [0, 1] for val in condition_encoded[condition_col].unique()), \
-                f"Condition {condition_col} should be one-hot encoded (0 or 1)"
+            assert condition_encoded[condition_col].dtype == 'bool', \
+                f"Condition {condition_col} should be bool"
+            assert set(condition_encoded[condition_col].unique()).issubset({True, False}), \
+                f"Condition {condition_col} should be one-hot encoded booleans"
 
     def test_condition_unknown_handling(self, context_features):
         """Test that missing conditions are handled as 'Unknown'."""
@@ -187,13 +187,13 @@ class TestGameContextFeatures:
             original_condition = original_data.iloc[i]['condition']
             
             if pd.isna(original_condition):
-                assert row['condition_Unknown'] == 1, \
+                assert bool(row['condition_Unknown']), \
                     "Missing condition should be encoded as Unknown"
-                
+
                 other_conditions = [col for col in condition_encoded.columns 
                                   if col.startswith('condition_') and col != 'condition_Unknown']
-                assert all(row[col] == 0 for col in other_conditions), \
-                    "Only Unknown condition should be 1 for missing values"
+                assert all(not bool(row[col]) for col in other_conditions), \
+                    "Only Unknown condition should be True for missing values"
 
     def test_weather_features_integration(self, context_features):
         """Test that weather features are properly integrated."""
@@ -240,7 +240,7 @@ class TestGameContextFeatures:
         assert any(col.startswith('condition_') for col in features.columns)
         
         assert 'day_night_game' in features.columns
-        assert all(val in [0, 1] for val in features['day_night_game'].unique())
+        assert set(features['day_night_game'].unique()).issubset({True, False})
 
     def test_missing_condition_column_error(self, clean_db):
         """Test that missing condition column raises appropriate error."""
@@ -286,8 +286,8 @@ class TestGameContextFeatures:
         
         for col in categorical_cols:
             if col in features.columns:
-                assert features[col].dtype == 'int64', \
-                    f"Categorical feature {col} should be int64, got {features[col].dtype}"
+                assert features[col].dtype == 'bool', \
+                    f"Categorical feature {col} should be bool, got {features[col].dtype}"
         
         if 'wind_magnitude' in features.columns:
             assert features['wind_magnitude'].dtype.name.startswith('int'), \

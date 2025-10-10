@@ -70,7 +70,7 @@ class TestPlayerLoader:
             ('Mookie Betts', 2024, 'April', 8.1, 125.0),
             ('Mookie Betts', 2024, 'May', 6.5, 135.0),
             ('Rafael Devers', 2024, 'April', -2.1, 110.0),
-            ('Jung Hoo Lee', 2023, 'April', 1.2, 15.0),  # Different season
+            ('Jung Hoo Lee', 2023, 'April', 1.2, 15.0),
         ]
         insert_fielding_stats(clean_db, stats)
         return stats
@@ -230,8 +230,8 @@ class TestPlayerLoader:
        
         mike_trout_data = df[df['name'] == 'Mike Trout'].reset_index(drop=True)
         assert len(mike_trout_data) == 2
-        assert mike_trout_data.iloc[0]['month'] == 4  # April = 4
-        assert mike_trout_data.iloc[1]['month'] == 5  # May = 5
+        assert mike_trout_data.iloc[0]['month'] == 4 
+        assert mike_trout_data.iloc[1]['month'] == 5 
 
     @pytest.mark.skip(reason="player_vs_pitcher_matchup not yet implemented")
     def test_player_vs_pitcher_matchup(self, player_loader, sample_batting_stats, sample_pitching_stats):

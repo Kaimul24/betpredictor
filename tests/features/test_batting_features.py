@@ -1,518 +1,315 @@
-"""
-Tests for BattingFeatures class.
+"""Tests for BattingFeatures aligned with the current rolling stats implementation."""
 
-Tests the batting stats rolling features calculation including:
-- Rolling window calculations with proper temporal ordering
-- Data leakage prevention by ensuring only historical data is used
-- Weighted averages for plate appearance dependent metrics
-- Simple averages for rate metrics
-- Multiple rolling windows (3, 5, 9, 14, 25 games) plus season window (0)
-- Season window using expanding calculations for all historical data
-- Player batch processing
-- Caching functionality
-"""
-
-import pytest
-import pandas as pd
-import numpy as np
-from datetime import date, timedelta
 from pathlib import Path
-from unittest.mock import patch
 
+import pandas as pd
+import pytest
+
+from src.data.features.base_feature import BaseFeatures
+from src.data.features.player_features import batting
 from src.data.features.player_features.batting import BattingFeatures
-from tests.conftest import (
-    insert_batting_stats, insert_players, assert_dataframe_schema,
-    assert_dataframe_not_empty
-)
 
 
-class TestBattingFeatures:
-    """Test suite for BattingFeatures class."""
+@pytest.fixture
+def sample_batting_frame() -> pd.DataFrame:
+    base_date = pd.Timestamp("2024-04-01")
+    rows = []
+    stats = [
+        (0.30, 0.70, 110, 0.280, 0.26, 0.07, 0.28, 6.0, 35.0, 88.0, 0.18, 1.10, 0.10, 0.50, 0.03, 2, 4),
+        (0.40, 0.75, 120, 0.300, 0.23, 0.08, 0.31, 7.0, 40.0, 89.0, 0.20, 1.05, 0.12, 0.80, 0.04, 3, 4),
+        (0.50, 0.80, 130, 0.320, 0.21, 0.09, 0.34, 9.0, 45.0, 90.0, 0.22, 1.00, 0.15, 1.10, 0.05, 5, 4),
+    ]
 
-    @pytest.fixture
-    def batting_features(self, clean_db):
-        """Create a BattingFeatures instance with clean database."""
-        empty_df = pd.DataFrame()
-        return BattingFeatures(season=2024, data=empty_df)
+    for idx, (
+        woba,
+        ops,
+        wrc_plus,
+        babip,
+        k_pct,
+        bb_pct,
+        bb_k,
+        barrel,
+        hard_hit,
+        ev,
+        iso,
+        gb_fb,
+        baserunning,
+        wraa,
+        wpa,
+        bip,
+        ab,
+    ) in enumerate(stats):
+        rows.append(
+            {
+                "player_id": "p1",
+                "mlb_id": 101,
+                "team": "NYY",
+                "pos": "OF",
+                "game_date": base_date + pd.Timedelta(days=idx),
+                "dh": 0,
+                "ab": ab,
+                "pa": 4,
+                "bip": bip,
+                "woba": woba,
+                "ops": ops,
+                "wrc_plus": wrc_plus,
+                "babip": babip,
+                "k_percent": k_pct,
+                "bb_percent": bb_pct,
+                "bb_k": bb_k,
+                "barrel_percent": barrel,
+                "hard_hit": hard_hit,
+                "ev": ev,
+                "iso": iso,
+                "gb_fb": gb_fb,
+                "baserunning": baserunning,
+                "wraa": wraa,
+                "wpa": wpa,
+                "season": 2024,
+            }
+        )
 
-    def _load_batting_data(self, season=2024):
-        """Helper method to load batting data from database for testing."""
-        from src.data.database import get_database_manager
-        db = get_database_manager()
-        
-        query = """
-        SELECT player_id, game_date, team, dh, ab, pa, ops, wrc_plus, season
-        FROM batting_stats 
-        WHERE season = ?
-        ORDER BY game_date, dh
-        """
-        
-        with db.get_reader_connection() as conn:
-            data = pd.read_sql_query(query, conn, params=[season])
-        
-        return data
+    df = pd.DataFrame(rows)
+    df["game_date"] = pd.to_datetime(df["game_date"])
+    return df
 
-    @pytest.fixture 
-    def sample_players(self, clean_db):
-        """Sample player data for testing."""
-        players = [
-            ('1', 'John Doe', 'OF', 'NYY'),
-            ('2', 'Jane Smith', 'IF', 'BOS'), 
-            ('3', 'Bob Johnson', 'C', 'TB')
-        ]
-        insert_players(clean_db, players)
-        return players
 
-    @pytest.fixture
-    def temporal_batting_data(self, clean_db, sample_players):
-        """
-        Sample batting data with temporal ordering for data leakage testing.
-        Creates a sequence of games over multiple days with varying stats.
-        """
-        base_date = date(2024, 4, 1)
-        
-        stats = []
-        
-        for i in range(10):
-            game_date = base_date + timedelta(days=i)
-            ops_value = 1.000 - (i * 0.05)  # Declining from 1.000 to 0.550
-            wrc_plus_value = 150 - (i * 5)  # Declining from 150 to 105
-            pa_value = 4 + (i % 2)  # Alternating between 4 and 5 PA
-            
-            stats.append((
-                '1', 
-                game_date.strftime('%Y-%m-%d'),
-                'NYY',
-                0,  # dh
-                pa_value,  # ab (simplified, usually less than PA)
-                pa_value,  # pa
-                ops_value,  # ops
-                wrc_plus_value,  # wrc_plus
-                2024
-            ))
-        
-        # Player 2: 8 games with improving performance
-        for i in range(8):
-            game_date = base_date + timedelta(days=i)
-            ops_value = 0.600 + (i * 0.04)  # Improving from 0.600 to 0.880
-            wrc_plus_value = 80 + (i * 8)  # Improving from 80 to 136
-            pa_value = 3 + (i % 3)  # PA between 3-5
-            
-            stats.append((
-                '2',
-                game_date.strftime('%Y-%m-%d'),
-                'BOS', 
-                0,  # dh
-                pa_value,
-                pa_value,
-                ops_value,
-                wrc_plus_value,
-                2024
-            ))
-        
-        for i in range(5):
-            game_date = base_date + timedelta(days=i*2)
-            stats.append((
-                '3',
-                game_date.strftime('%Y-%m-%d'),
-                'TB',
-                0,  # dh  
-                4,  # ab
-                4,  # pa
-                0.750,  # ops
-                110,  # wrc_plus
-                2024
-            ))
+@pytest.fixture
+def fake_batting_cache(monkeypatch, tmp_path):
+    store = {}
 
-        insert_batting_stats(clean_db, stats)
-        return stats
+    def fake_to_parquet(self, path, index=True, *_, **__):
+        cache_path = Path(path)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        store[cache_path] = self.copy()
+        cache_path.write_text("cached", encoding="utf-8")
 
-    @pytest.fixture
-    def doubleheader_batting_data(self, clean_db, sample_players):
-        """
-        Sample batting data including doubleheader games for testing dh handling.
-        """
-        base_date = date(2024, 4, 1)
-        stats = []
-        
-        # Player 1: Regular game + doubleheader
-        for dh in [0, 1]:  # Game 1 and Game 2 of doubleheader
-            stats.append((
-                '1',
-                base_date.strftime('%Y-%m-%d'),
-                'NYY',
-                dh,
-                4,  # ab
-                4,  # pa
-                0.800 + (dh * 0.1),  # Different performance in each game
-                120 + (dh * 10),  # wrc_plus
-                2024
-            ))
-        
-        next_date = base_date + timedelta(days=1)
-        stats.append((
-            '1',
-            next_date.strftime('%Y-%m-%d'),
-            'NYY',
-            0,
-            4,
-            4,
-            0.750,
-            110,
-            2024
-        ))
-        
-        insert_batting_stats(clean_db, stats)
-        return stats
+    def fake_read_parquet(path, *_, **__):
+        cache_path = Path(path)
+        if cache_path not in store:
+            raise FileNotFoundError(cache_path)
+        return store[cache_path].copy()
 
-    def test_init(self):
-        """Test BattingFeatures initialization."""
-        data = pd.DataFrame()
-        bf = BattingFeatures(season=2024, data=data)
-        
-        assert bf.season == 2024
-        assert bf.rolling_windows == [25, 14, 9, 5, 3, 0]
-        assert len(bf.rolling_metrics) == 13
-        assert 'ops' in bf.rolling_metrics
-        assert 'wrc_plus' in bf.rolling_metrics
+    monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet)
+    monkeypatch.setattr(pd, "read_parquet", fake_read_parquet)
+    monkeypatch.setattr(batting, "FEATURES_CACHE_PATH", tmp_path)
+    monkeypatch.setattr(batting, "BATTING_CACHE_PATH", "batting_features_{}.parquet")
 
-    def test_load_data_empty_season(self, batting_features):
-        """Test loading batting data with no data for season."""
-        data = self._load_batting_data(2024)
-        assert data.empty, "Should return empty DataFrame when no batting data exists"
+    return store
 
-    def test_load_data_with_data(self, batting_features, temporal_batting_data):
-        """Test loading batting data returns expected data structure."""
-        data = self._load_batting_data(2024)
-        
-        assert_dataframe_not_empty(data)
-        expected_columns = ['player_id', 'game_date', 'team', 'dh', 'ab', 'pa', 'ops', 'wrc_plus', 'season']
-        assert_dataframe_schema(data, expected_columns)
-        
-        assert len(data) == len(temporal_batting_data)
-        assert data['season'].iloc[0] == 2024
 
-    def test_rolling_window_calculation_temporal_validation(self, batting_features, temporal_batting_data):
-        """
-        Test that rolling calculations only use historical data (no data leakage).
-        Verify that current game stats are not included in rolling calculations.
-        """
-        data = self._load_batting_data(2024)
-        player1_data = data[data['player_id'] == 'player1'].copy()
-        player1_data['game_date'] = pd.to_datetime(player1_data['game_date'])
-        player1_data = player1_data.sort_values(['game_date', 'dh'])
-        
-        rolling_stats = batting_features._calculate_rolling_window_for_player(player1_data)
-        
-        window_3_stats = rolling_stats[rolling_stats['window_size'] == 3].copy()
-        window_3_stats = window_3_stats.sort_values(['game_date', 'dh'])
-        
-        first_game = window_3_stats.iloc[0]
-        assert pd.isna(first_game['ops_rolling']), "First game should have no rolling stats"
-        
-        second_game = window_3_stats.iloc[1]
-        first_game_ops = player1_data.iloc[0]['ops']
-        assert abs(second_game['ops_rolling'] - first_game_ops) < 0.001, \
-            "Second game rolling should equal first game's stats"
-        
-        if len(window_3_stats) >= 4:
-            fourth_game = window_3_stats.iloc[3]
-            
-            historical_games = player1_data.iloc[0:3]
-            expected_ops = (
-                (historical_games['ops'] * historical_games['pa']).sum() / 
-                historical_games['pa'].sum()
-            )
-            
-            assert abs(fourth_game['ops_rolling'] - expected_ops) < 0.001, \
-                f"Fourth game OPS rolling should be weighted average of games 1-3. " \
-                f"Expected: {expected_ops}, Got: {fourth_game['ops_rolling']}"
+@pytest.fixture
+def doubleheader_frame() -> pd.DataFrame:
+    base_date = pd.Timestamp("2024-05-01")
+    rows = [
+        {
+            "player_id": "p1",
+            "mlb_id": 101,
+            "team": "NYY",
+            "pos": "OF",
+            "game_date": base_date,
+            "dh": 0,
+            "ab": 4,
+            "pa": 4,
+            "bip": 3,
+            "woba": 0.32,
+            "ops": 0.72,
+            "wrc_plus": 118,
+            "babip": 0.285,
+            "k_percent": 0.25,
+            "bb_percent": 0.08,
+            "bb_k": 0.30,
+            "barrel_percent": 6.0,
+            "hard_hit": 34.0,
+            "ev": 87.5,
+            "iso": 0.19,
+            "gb_fb": 1.15,
+            "baserunning": 0.09,
+            "wraa": 0.40,
+            "wpa": 0.02,
+            "season": 2024,
+        },
+        {
+            "player_id": "p1",
+            "mlb_id": 101,
+            "team": "NYY",
+            "pos": "OF",
+            "game_date": base_date,
+            "dh": 1,
+            "ab": 4,
+            "pa": 4,
+            "bip": 4,
+            "woba": 0.38,
+            "ops": 0.77,
+            "wrc_plus": 126,
+            "babip": 0.295,
+            "k_percent": 0.22,
+            "bb_percent": 0.085,
+            "bb_k": 0.35,
+            "barrel_percent": 7.5,
+            "hard_hit": 38.0,
+            "ev": 88.2,
+            "iso": 0.21,
+            "gb_fb": 1.05,
+            "baserunning": 0.11,
+            "wraa": 0.65,
+            "wpa": 0.03,
+            "season": 2024,
+        },
+        {
+            "player_id": "p1",
+            "mlb_id": 101,
+            "team": "NYY",
+            "pos": "OF",
+            "game_date": base_date + pd.Timedelta(days=1),
+            "dh": 0,
+            "ab": 5,
+            "pa": 5,
+            "bip": 5,
+            "woba": 0.43,
+            "ops": 0.80,
+            "wrc_plus": 132,
+            "babip": 0.305,
+            "k_percent": 0.20,
+            "bb_percent": 0.09,
+            "bb_k": 0.38,
+            "barrel_percent": 8.5,
+            "hard_hit": 42.0,
+            "ev": 89.0,
+            "iso": 0.23,
+            "gb_fb": 0.98,
+            "baserunning": 0.13,
+            "wraa": 0.90,
+            "wpa": 0.05,
+            "season": 2024,
+        },
+    ]
 
-    def test_rolling_window_weighted_vs_simple_averages(self, batting_features, temporal_batting_data):
-        """
-        Test that PA-dependent metrics use weighted averages while 
-        rate metrics use simple averages.
-        """
-        data = self._load_batting_data(2024)
-        player2_data = data[data['player_id'] == 'player2'].copy()
-        player2_data['game_date'] = pd.to_datetime(player2_data['game_date'])
-        player2_data = player2_data.sort_values(['game_date', 'dh'])
-        
-        player2_data['woba'] = 0.350  # PA-weighted metric
-        player2_data['babip'] = 0.300  # PA-weighted metric
-        player2_data['bb_k'] = 0.50   # PA-weighted metric
-        player2_data['barrel_percent'] = 8.5  # Simple average metric
-        player2_data['hard_hit'] = 40.0       # Simple average metric
-        player2_data['ev'] = 88.5             # PA-weighted metric
-        player2_data['iso'] = 0.200           # PA-weighted metric
-        player2_data['gb_fb'] = 1.20          # Simple average metric
-        player2_data['baserunning'] = 0.5     # Simple average metric
-        player2_data['wraa'] = 2.1            # Simple average metric
-        player2_data['wpa'] = 0.15            # Simple average metric
-        
-        rolling_stats = batting_features._calculate_rolling_window_for_player(player2_data)
-        
-        window_5_stats = rolling_stats[rolling_stats['window_size'] == 5].copy()
-        window_5_stats = window_5_stats.sort_values(['game_date', 'dh'])
-        
-        if len(window_5_stats) >= 6:
-            last_game = window_5_stats.iloc[5]
-            historical_games = player2_data.iloc[0:5]
-            
-            expected_ops_weighted = (
-                (historical_games['ops'] * historical_games['pa']).sum() / 
-                historical_games['pa'].sum()
-            )
-            assert abs(last_game['ops_rolling'] - expected_ops_weighted) < 0.001, \
-                "OPS should use weighted average"
-            
-            expected_barrel_simple = historical_games['barrel_percent'].mean()
-            assert abs(last_game['barrel_percent_rolling'] - expected_barrel_simple) < 0.001, \
-                "Barrel percent should use simple average"
+    df = pd.DataFrame(rows)
+    df["game_date"] = pd.to_datetime(df["game_date"])
+    return df
 
-    def test_season_window_calculation(self, batting_features, temporal_batting_data):
-        """
-        Test that season window (window=0) uses expanding window with all historical data.
-        Season stats should include all games from season start up to (but not including) current game.
-        """
-        data = self._load_batting_data(2024)
-        player1_data = data[data['player_id'] == 'player1'].copy()
-        player1_data['game_date'] = pd.to_datetime(player1_data['game_date'])
-        player1_data = player1_data.sort_values(['game_date', 'dh'])
-        
-        for metric in batting_features.rolling_metrics:
-            if metric not in player1_data.columns:
-                player1_data[metric] = np.random.uniform(0.1, 1.0, len(player1_data))
-        
-        rolling_stats = batting_features._calculate_rolling_window_for_player(player1_data)
-        
-        season_stats = rolling_stats[rolling_stats['window_size'] == 0].copy()
-        season_stats = season_stats.sort_values(['game_date', 'dh'])
-        
-        first_game = season_stats.iloc[0]
-        assert pd.isna(first_game['ops_rolling']), "First game should have no season rolling stats"
-        
-        if len(season_stats) >= 2:
-            second_game = season_stats.iloc[1]
-            first_game_ops = player1_data.iloc[0]['ops']
-            assert abs(second_game['ops_rolling'] - first_game_ops) < 0.001, \
-                "Second game season rolling should equal first game's stats"
-        
-        if len(season_stats) >= 5:
-            fifth_game = season_stats.iloc[4]
-            
-            historical_games = player1_data.iloc[0:4]
-            expected_ops = (
-                (historical_games['ops'] * historical_games['pa']).sum() / 
-                historical_games['pa'].sum()
-            )
-            
-            assert abs(fifth_game['ops_rolling'] - expected_ops) < 0.001, \
-                f"Fifth game season OPS should be weighted average of all previous games. " \
-                f"Expected: {expected_ops}, Got: {fifth_game['ops_rolling']}"
-        
-        if len(season_stats) >= 3:
-            for i in range(1, min(len(season_stats), 5)):
-                game = season_stats.iloc[i]
-                expected_games = i
-                assert abs(game['games_in_window'] - expected_games) < 0.1, \
-                    f"Season window game {i+1} should have {expected_games} games in window, " \
-                    f"got {game['games_in_window']}"
 
-    def test_rolling_window_multiple_windows(self, batting_features, temporal_batting_data):
-        """Test that all rolling windows (25, 14, 9, 5, 3, 0) are calculated."""
-        data = self._load_batting_data(2024)
-        player1_data = data[data['player_id'] == 'player1'].copy()
-        player1_data['game_date'] = pd.to_datetime(player1_data['game_date'])
-        
-        for metric in batting_features.rolling_metrics:
-            if metric not in player1_data.columns:
-                player1_data[metric] = np.random.uniform(0.1, 1.0, len(player1_data))
-        
-        rolling_stats = batting_features._calculate_rolling_window_for_player(player1_data)
-        
-        unique_windows = rolling_stats['window_size'].unique()
-        expected_windows = [25, 14, 9, 5, 3, 0]
-        assert set(unique_windows) == set(expected_windows), \
-            f"Expected windows {expected_windows}, got {unique_windows}"
-        
-        for window in expected_windows:
-            window_data = rolling_stats[rolling_stats['window_size'] == window]
-            assert len(window_data) == len(player1_data), \
-                f"Window {window} should have {len(player1_data)} rows, got {len(window_data)}"
+def _shrink(prev_vals: pd.Series, prev_weights: pd.Series, prior: float, k: int) -> float:
+    weight_total = float(prev_weights.sum())
+    if weight_total <= 0:
+        return float(prior)
+    rate = float((prev_vals * prev_weights).sum() / weight_total)
+    return (weight_total / (weight_total + k)) * rate + (k / (weight_total + k)) * prior
 
-    def test_doubleheader_handling(self, batting_features, doubleheader_batting_data):
-        """Test proper handling of doubleheader games in rolling calculations."""
-        data = self._load_batting_data(2024)
-        player1_data = data[data['player_id'] == 'player1'].copy()
-        player1_data['game_date'] = pd.to_datetime(player1_data['game_date'])
-        
-        for metric in batting_features.rolling_metrics:
-            if metric not in player1_data.columns:
-                player1_data[metric] = 0.5
-        
-        rolling_stats = batting_features._calculate_rolling_window_for_player(player1_data)
-        
-        window_3_stats = rolling_stats[rolling_stats['window_size'] == 3]
-        assert len(window_3_stats) == 3, "Should handle doubleheader games correctly"
-        
-        sorted_data = window_3_stats.sort_values(['game_date', 'dh'])
-        assert sorted_data.iloc[0]['dh'] == 0, "First game should be dh=0"
-        assert sorted_data.iloc[1]['dh'] == 1, "Second game should be dh=1"
-        assert sorted_data.iloc[2]['dh'] == 0, "Third game should be dh=0"
 
-    def test_process_player_batch(self, batting_features, temporal_batting_data):
-        """Test batch processing of multiple players."""
-        player_ids = ['player1', 'player2']
-        
-        from src.data.database import get_database_manager
-        db = get_database_manager()
-        
-        for metric in ['woba', 'babip', 'bb_k', 'barrel_percent', 'hard_hit', 'ev', 'iso', 'gb_fb', 'baserunning', 'wraa', 'wpa']:
-            update_query = f"UPDATE batting_stats SET {metric} = ? WHERE season = ?"
-            db.execute_write_query(update_query, (0.5, 2024))
-        
-        batch_result = batting_features._process_player_batch(player_ids)
-        
-        assert_dataframe_not_empty(batch_result)
-        
-        unique_players = batch_result['player_id'].unique()
-        assert set(unique_players) == set(player_ids), \
-            f"Expected players {player_ids}, got {unique_players}"
-        
-        unique_windows = batch_result['window_size'].unique()
-        assert set(unique_windows) == set(batting_features.rolling_windows)
+def test_load_features_returns_expected_columns(sample_batting_frame, fake_batting_cache):
+    features = BattingFeatures(2024, sample_batting_frame, force_recreate=True)
+    result = features.load_features()
 
-    def test_empty_player_batch(self, batting_features):
-        """Test batch processing with no players returns empty DataFrame."""
-        result = batting_features._process_player_batch([])
-        assert isinstance(result, pd.DataFrame)
-        assert result.empty
+    assert not result.empty
 
-    def test_nonexistent_player_batch(self, batting_features, temporal_batting_data):
-        """Test batch processing with nonexistent players."""
-        result = batting_features._process_player_batch(['nonexistent_player'])
-        assert isinstance(result, pd.DataFrame)
-        assert result.empty
+    expected_subset = {
+        "player_id",
+        "mlb_id",
+        "team",
+        "pos",
+        "game_date",
+        "dh",
+        "season",
+        "ab",
+        "pa",
+        "woba_season",
+        "woba_ewm_h3",
+        "woba_ewm_h10",
+        "woba_ewm_h25",
+        "last_app_date",
+    }
+    assert expected_subset.issubset(result.columns)
 
-    @patch('data.features.player_features.batting.BATTING_CACHE_PATH', 'test_batting_{}.parquet')
-    def test_caching_functionality(self, batting_features, temporal_batting_data, tmp_path):
-        """Test that rolling stats are properly cached and retrieved."""
-        
-        from src.data.database import get_database_manager
-        db = get_database_manager()
-        
-        for metric in ['woba', 'babip', 'bb_k', 'barrel_percent', 'hard_hit', 'ev', 'iso', 'gb_fb', 'baserunning', 'wraa', 'wpa']:
-            update_query = f"UPDATE batting_stats SET {metric} = ? WHERE season = ?"
-            db.execute_write_query(update_query, (0.5, 2024))
-        
-        with patch('data.features.player_features.batting.FEATURES_CACHE_PATH', tmp_path):
-            
-            result1 = batting_features.calculate_all_player_rolling_stats()
-            assert_dataframe_not_empty(result1)
-            
-            cache_file = tmp_path / 'test_batting_2024.parquet'
-            assert cache_file.exists(), "Cache file should be created"
-            
-            result2 = batting_features.calculate_all_player_rolling_stats()
-            
-            pd.testing.assert_frame_equal(result1, result2)
+    ordered = result.sort_values(["player_id", "game_date", "dh"]).reset_index(drop=True)
+    assert list(ordered["game_date"]) == sorted(sample_batting_frame["game_date"].tolist())
 
-    def test_rolling_stats_shift_validation(self, batting_features, temporal_batting_data):
-        """
-        Test that rolling calculations are properly shifted to prevent data leakage.
-        Current game stats should never appear in rolling calculations for the same game.
-        """
-        data = self._load_batting_data(2024)
-        player1_data = data[data['player_id'] == 'player1'].copy()
-        player1_data['game_date'] = pd.to_datetime(player1_data['game_date'])
-        player1_data = player1_data.sort_values(['game_date', 'dh'])
-        
-        for metric in batting_features.rolling_metrics:
-            if metric not in player1_data.columns:
-                player1_data[metric] = np.random.uniform(0.1, 1.0, len(player1_data))
-        
-        rolling_stats = batting_features._calculate_rolling_window_for_player(player1_data)
-        
-        window_3_stats = rolling_stats[rolling_stats['window_size'] == 3].copy()
-        window_3_stats = window_3_stats.sort_values(['game_date', 'dh'])
-        
-        for i, row in window_3_stats.iterrows():
-            current_game_ops = row['ops']
-            rolling_ops = row['ops_rolling']
-            
-            if not pd.isna(rolling_ops):
 
-                assert abs(rolling_ops - current_game_ops) > 0.001 or pd.isna(rolling_ops), \
-                    f"Rolling OPS should not equal current game OPS for game {i}. " \
-                    f"Current: {current_game_ops}, Rolling: {rolling_ops}"
+def test_season_stats_apply_prior_and_shift(sample_batting_frame, fake_batting_cache):
+    features = BattingFeatures(2024, sample_batting_frame, force_recreate=True)
+    result = features.load_features().sort_values(["player_id", "game_date", "dh"]).reset_index(drop=True)
+    source = sample_batting_frame.sort_values(["player_id", "game_date", "dh"]).reset_index(drop=True)
 
-    def test_window_size_metadata(self, batting_features, temporal_batting_data):
-        """Test that window size and games count metadata is correctly calculated."""
-        data = self._load_batting_data(2024)
-        player1_data = data[data['player_id'] == 'player1'].copy()
-        player1_data['game_date'] = pd.to_datetime(player1_data['game_date'])
+    prior_woba = float((source["woba"] * source["pa"]).sum() / source["pa"].sum())
+    assert result.loc[0, "woba_season"] == pytest.approx(prior_woba)
+    assert pd.isna(result.loc[0, "last_app_date"])
 
-        
-        for metric in batting_features.rolling_metrics:
-            if metric not in player1_data.columns:
-                player1_data[metric] = 0.5
-        
-        rolling_stats = batting_features._calculate_rolling_window_for_player(player1_data)
-        
-        window_5_stats = rolling_stats[rolling_stats['window_size'] == 5].copy()
-        window_5_stats = window_5_stats.sort_values(['game_date', 'dh'])
+    for idx in range(1, len(source)):
+        expected = _shrink(source.iloc[:idx]["woba"], source.iloc[:idx]["pa"], prior_woba, 100)
+        assert result.loc[idx, "woba_season"] == pytest.approx(expected)
+        assert result.loc[idx, "last_app_date"] == source.loc[idx - 1, "game_date"]
+        assert result.loc[idx, "woba_season"] != pytest.approx(source.loc[idx, "woba"])
 
-        window_5_stats = window_5_stats.reset_index()
-        for i, row in window_5_stats.iterrows():
-            expected_games = min(i, 5) if i > 0 else np.nan
-            
-            if not pd.isna(expected_games):
-                assert abs(row['games_in_window'] - expected_games) < 0.1 or pd.isna(row['games_in_window']), \
-                    f"Games in window should be {expected_games}, got {row['games_in_window']}"
-        
-        season_stats = rolling_stats[rolling_stats['window_size'] == 0].copy()
-        season_stats = season_stats.sort_values(['game_date', 'dh'])
-        season_stats = season_stats.reset_index()
-        
-        for i, row in season_stats.iterrows():
-            expected_games = i if i > 0 else np.nan
-            
-            if not pd.isna(expected_games):
-                assert abs(row['games_in_window'] - expected_games) < 0.1 or pd.isna(row['games_in_window']), \
-                    f"Season window games in window should be {expected_games}, got {row['games_in_window']}"
 
-    def test_season_vs_rolling_window_behavior(self, batting_features, temporal_batting_data):
-        """
-        Test that season window (0) behaves differently from rolling windows.
-        Season window should expand while rolling windows should maintain fixed size.
-        """
-        data = self._load_batting_data(2024)
-        player1_data = data[data['player_id'] == 'player1'].copy()
-        player1_data['game_date'] = pd.to_datetime(player1_data['game_date'])
-        player1_data = player1_data.sort_values(['game_date', 'dh'])
-        
-        for metric in batting_features.rolling_metrics:
-            if metric not in player1_data.columns:
-                player1_data[metric] = np.random.uniform(0.1, 1.0, len(player1_data))
-        
-        rolling_stats = batting_features._calculate_rolling_window_for_player(player1_data)
-        
-        if len(player1_data) >= 7:
-            game_7_stats = rolling_stats.reset_index()
-            game_7_stats = game_7_stats.groupby('window_size').nth(6)
-            
-            if 0 in game_7_stats.index:
-                season_games = game_7_stats.loc[0, 'games_in_window']
-                assert abs(season_games - 6) < 0.1, \
-                    f"Season window should have 6 games for 7th game, got {season_games}"
-            
-            if 3 in game_7_stats.index:
-                rolling_3_games = game_7_stats.loc[3, 'games_in_window'] 
-                assert abs(rolling_3_games - 3) < 0.1, \
-                    f"3-game rolling window should have 3 games for 7th game, got {rolling_3_games}"
-            
-            if 5 in game_7_stats.index:
-                rolling_5_games = game_7_stats.loc[5, 'games_in_window']
-                assert abs(rolling_5_games - 5) < 0.1, \
-                    f"5-game rolling window should have 5 games for 7th game, got {rolling_5_games}"
+def test_metric_specific_denominators(sample_batting_frame, fake_batting_cache):
+    features = BattingFeatures(2024, sample_batting_frame, force_recreate=True)
+    result = features.load_features().sort_values(["player_id", "game_date", "dh"]).reset_index(drop=True)
+    source = sample_batting_frame.sort_values(["player_id", "game_date", "dh"]).reset_index(drop=True)
+
+    barrel_prior = float((source["barrel_percent"] * source["bip"]).sum() / source["bip"].sum())
+    iso_prior = float((source["iso"] * source["ab"]).sum() / source["ab"].sum())
+
+    assert result.loc[0, "barrel_percent_season"] == pytest.approx(barrel_prior)
+    assert result.loc[0, "iso_season"] == pytest.approx(iso_prior)
+
+    expected_barrel = _shrink(source.iloc[:1]["barrel_percent"], source.iloc[:1]["bip"], barrel_prior, 70)
+    expected_iso = _shrink(source.iloc[:1]["iso"], source.iloc[:1]["ab"], iso_prior, 100)
+
+    assert result.loc[1, "barrel_percent_season"] == pytest.approx(expected_barrel)
+    assert result.loc[1, "iso_season"] == pytest.approx(expected_iso)
+
+
+def test_load_features_uses_cache_when_available(sample_batting_frame, fake_batting_cache, monkeypatch):
+    features = BattingFeatures(2024, sample_batting_frame, force_recreate=False)
+    first = features.load_features()
+
+    cache_paths = list(fake_batting_cache.keys())
+    assert cache_paths, "Expected first run to persist cache"
+    assert cache_paths[0].exists()
+
+    def fail_compute(*_, **__):
+        raise AssertionError("compute_rolling_stats should not run when cache exists")
+
+    monkeypatch.setattr(BaseFeatures, "compute_rolling_stats", staticmethod(fail_compute))
+
+    cached_features = BattingFeatures(2024, sample_batting_frame, force_recreate=False)
+    second = cached_features.load_features()
+
+    pd.testing.assert_frame_equal(first, second)
+
+
+def test_doubleheader_games_respect_temporal_order(doubleheader_frame, fake_batting_cache):
+    features = BattingFeatures(2024, doubleheader_frame, force_recreate=True)
+    result = features.load_features().sort_values(["player_id", "game_date", "dh"]).reset_index(drop=True)
+
+    source = doubleheader_frame.sort_values(["player_id", "game_date", "dh"]).reset_index(drop=True)
+    prior_woba = float((source["woba"] * source["pa"]).sum() / source["pa"].sum())
+
+    assert result.loc[0, "woba_season"] == pytest.approx(prior_woba)
+    assert pd.isna(result.loc[0, "last_app_date"])
+
+    expected_after_game1 = _shrink(source.iloc[:1]["woba"], source.iloc[:1]["pa"], prior_woba, 100)
+    assert result.loc[1, "woba_season"] == pytest.approx(expected_after_game1)
+    assert result.loc[1, "last_app_date"] == source.loc[0, "game_date"]
+
+    expected_after_game2 = _shrink(source.iloc[:2]["woba"], source.iloc[:2]["pa"], prior_woba, 100)
+    assert result.loc[2, "woba_season"] == pytest.approx(expected_after_game2)
+    assert result.loc[2, "last_app_date"] == source.loc[1, "game_date"]
+
+
+def test_temporal_validation_with_unsorted_input(sample_batting_frame, fake_batting_cache):
+    scrambled = sample_batting_frame.sample(frac=1.0, random_state=7).reset_index(drop=True)
+
+    features = BattingFeatures(2024, scrambled, force_recreate=True)
+    result = features.load_features().sort_values(["player_id", "game_date", "dh"]).reset_index(drop=True)
+
+    source = sample_batting_frame.sort_values(["player_id", "game_date", "dh"]).reset_index(drop=True)
+    prior_woba = float((source["woba"] * source["pa"]).sum() / source["pa"].sum())
+
+    assert result.loc[0, "woba_season"] == pytest.approx(prior_woba)
+    for idx in range(1, len(source)):
+        expected = _shrink(source.iloc[:idx]["woba"], source.iloc[:idx]["pa"], prior_woba, 100)
+        assert result.loc[idx, "woba_season"] == pytest.approx(expected)
+        assert result.loc[idx, "last_app_date"] == source.loc[idx - 1, "game_date"]
+        assert result.loc[idx, "woba_season"] != pytest.approx(source.loc[idx, "woba"])
