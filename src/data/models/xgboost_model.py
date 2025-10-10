@@ -182,7 +182,7 @@ class XGBoostModel:
                 params['skip_drop']= trial.suggest_float('skip_drop', 1e-5, 1.0)
             
             dtrain = self.dtrain
-            tscv = TimeSeriesSplit(n_splits=5)
+            tscv = TimeSeriesSplit(n_splits=3)
 
             folds = list(tscv.split(np.arange(len(self.X_train))))
             

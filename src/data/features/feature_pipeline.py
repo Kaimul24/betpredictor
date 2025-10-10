@@ -162,7 +162,7 @@ class FeaturePipeline():
             schedule_df.reset_index()[["game_id", "game_date", "dh", "team", "opposing_team"]]
             .drop_duplicates()
         )
-
+        
         lineups_for_games = games.merge(
             lineups_data[["game_date", "team", "opposing_team", "dh", "player_id", "batting_order", "position"]],
             on=["game_date", "dh", "team", "opposing_team"],
@@ -173,13 +173,16 @@ class FeaturePipeline():
         batting_features['player_id'] = batting_features['player_id'].astype('int64')
         lineups_for_games['player_id'] = lineups_for_games['player_id'].astype('int64')
 
+        # print(f"LINEUP FOR GAMES: {len(lineups_for_games)}")
         lineups_with_stats = lineups_for_games.merge(
             batting_features,
             on=["game_date", "dh", "player_id"],
-            how="inner",
+            how="left",
             suffixes=("", "_bf"),
-            validate="1:m"
         )
+
+        # print(f"AFTER MERGES: {len(lineups_with_stats)}")
+        # print(lineups_with_stats.isna().any(axis=1).sum())
 
         lineups_with_stats = lineups_with_stats.drop(columns=["team_bf"], errors="ignore")
 
@@ -188,6 +191,9 @@ class FeaturePipeline():
               c == 'team_frv_per_9']
 
         assert len(value_cols) == 61
+
+        league_medians = batting_features[value_cols].median()
+        lineups_with_stats[value_cols] = lineups_with_stats[value_cols].fillna(league_medians)
 
         team_features = (
             lineups_with_stats
@@ -570,7 +576,7 @@ class FeaturePipeline():
         self.logger.info("="*60 + "\n")
         schedule_data = self._load_schedule_data()
 
-        far_future_games =schedule_data[(schedule_data['game_datetime'].astype('datetime64[ns]') - schedule_data['game_date'].astype('datetime64[ns]')) > pd.Timedelta("2 Days")]
+        far_future_games = schedule_data[(schedule_data['game_datetime'].astype('datetime64[ns]') - schedule_data['game_date'].astype('datetime64[ns]')) > pd.Timedelta("2 Days")]
 
         self.logger.info(f" Far rescheduled games\n{far_future_games}")
         self.logger.info(f" Dropping rescheduled games that are far past original game_date")

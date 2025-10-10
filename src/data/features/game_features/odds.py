@@ -68,8 +68,8 @@ class Odds(BaseFeatures):
         df['p_open_away_mean_nv'] = prob_means_nv['away_opening_prob_nv']
         df['p_open_away_std_nv'] = prob_std_nv['away_opening_prob_nv'].fillna(0.0)
 
-        df['p_open_mean_nv_diff'] = prob_medians_nv['home_opening_prob_nv'] - prob_medians_nv['away_opening_prob_nv']
-        df['p_open_med_nv_diff'] = prob_means_nv['home_opening_prob_nv'] - prob_means_nv['away_opening_prob_nv']
+        df['p_open_med_nv_diff'] = prob_medians_nv['home_opening_prob_nv'] - prob_medians_nv['away_opening_prob_nv']
+        df['p_open_mean_nv_diff'] = prob_means_nv['home_opening_prob_nv'] - prob_means_nv['away_opening_prob_nv']
 
         df['p_open_max_nv_diff'] = df['p_open_home_max_nv'] - df['p_open_away_max_nv']
         df['p_open_min_nv_diff'] = df['p_open_home_min_nv'] - df['p_open_away_min_nv']
