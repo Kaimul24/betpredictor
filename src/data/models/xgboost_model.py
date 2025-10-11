@@ -45,9 +45,12 @@ def create_args():
 
 class XGBoostModel:
 
-    def __init__(self, model_args, logger, all_data: Dict):
+    def __init__(self, model_args, all_data: Dict, logger=None):
         self.model_args = model_args
-        self.logger = logger
+        if logger == None:
+            self.logger = setup_logging("xgboost_model", LOG_FILE)
+        else:
+            self.logger = logger
 
         self.hyperparam_path = HYPERPARAM_DIR / "xgboost_hyperparams.json"       
 
@@ -344,16 +347,17 @@ class XGBoostModel:
             return
         
         self.logger.info(f" Predicting on test set")
-        p_test_raw = model.predict(self.dtest, iteration_range=(0, model.best_iteration + 1))
+        p_test_raw = model.predict(self.dtest, iteration_range=(0, model.best_iteration + 1), training=False)
+        self.logger.info(f" Raw predictions before calibration: Min: {p_test_raw.min()}, Max: {p_test_raw.max()}, Std: {p_test_raw.std()}")
         try:
             cal = load_calibrator(str(CAL_DIR / "xgb_calibrator.json"))
             p_test = apply_calibration(cal, p_test_raw)
             self.logger.info(" Applied calibrator to test predictions.")
+            self.logger.info(f" Predictions after calibartion: Min: {p_test.min()}, Max: {p_test.max()}, Std: {p_test.std()}")
         except FileNotFoundError:
             p_test = p_test_raw
             self.logger.info(" No calibrator found; using raw probabilities.")
         
-
         test_log_loss = log_loss(self.y_test, p_test)
         test_roc_auc  = roc_auc_score(self.y_test, p_test)
         test_brier    = brier_score_loss(self.y_test, p_test)
@@ -401,7 +405,7 @@ def main():
             is_xgboost=True
         )
     
-    model = XGBoostModel(model_args, logger, model_data)
+    model = XGBoostModel(model_args, model_data, logger)
     model.train_and_eval_model()
     test_pred = model.predict()
     

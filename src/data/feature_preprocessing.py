@@ -5,7 +5,6 @@ import argparse
 from typing import List, Tuple, Dict, Union
 from sklearn.preprocessing import StandardScaler
 from src.config import PROJECT_ROOT, FEATURES_CACHE_PATH
-import pickle
 import joblib
 
 from dotenv import load_dotenv
@@ -322,8 +321,7 @@ def main():
         clear_log=args.clear_log
     )
 
-    with open('odds_data.txt', 'w') as f:
-        f.write(odds_data.to_string())
+
 
 
 if __name__ == "__main__":
