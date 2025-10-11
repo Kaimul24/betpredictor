@@ -1,6 +1,81 @@
 from datetime import date, timedelta, datetime
+import logging
+import sys
 import unicodedata
 import re
+from pathlib import Path
+from typing import List, Optional, Union
+
+
+def setup_logging(
+    logger_name: str,
+    log_file: Optional[Union[Path, str]] = None,
+    args=None,
+    console_level: int = logging.INFO,
+    file_level: int = logging.DEBUG,
+    propagate: bool = False,
+    base_logger: Optional[logging.Logger] = None,
+):
+    """
+    Configure and return a logger with consistent console and file handlers.
+
+    Args:
+        logger_name: Name of the logger to configure.
+        log_file: Default path for the log file when file logging is enabled.
+        args: Optional argparse namespace with log-related arguments.
+        console_level: Logging level for the console stream handler.
+        file_level: Logging level for the optional file handler.
+        propagate: Whether to propagate log records to parent loggers.
+        base_logger: Existing logger whose handlers should be reused.
+
+    Returns:
+        Configured logger instance.
+    """
+    logger = logging.getLogger(logger_name)
+
+    if base_logger is logger:
+        base_logger = None
+
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = propagate
+    logger.handlers.clear()
+
+    formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+
+    handlers: List[logging.Handler] = []
+    if base_logger and base_logger.handlers:
+        handlers.extend(base_logger.handlers)
+
+    if not handlers:
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setLevel(console_level)
+        stream_handler.setFormatter(formatter)
+        handlers.append(stream_handler)
+
+    log_messages: List[str] = []
+
+    if not base_logger and log_file and bool(args and getattr(args, "log", False)):
+        log_path = Path(getattr(args, "log_file", "") or log_file).expanduser()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if args and getattr(args, "clear_log", False):
+            log_path.write_text("")
+            log_messages.append(f"Cleared log file: {log_path}")
+
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        file_handler.setLevel(file_level)
+        file_handler.setFormatter(formatter)
+        handlers.append(file_handler)
+        log_messages.append(f"Logging to file: {log_path}")
+
+    for handler in handlers:
+        logger.addHandler(handler)
+
+    for message in log_messages:
+        logger.info(message)
+
+    return logger
+
 
 def daterange(start_date: date, end_date: date):
     days = int((end_date - start_date).days)
@@ -91,22 +166,16 @@ def normalize_datetime_string(dt_string: str) -> str:
     if not dt_string or not isinstance(dt_string, str):
         return ""
     
-    # Remove timezone info (anything after + or Z at the end)
-    # This handles formats like '2021-04-13T18:10:00+00:00' and '2021-04-13T18:10:00Z'
     dt_clean = re.sub(r'(\+\d{2}:\d{2}|Z)$', '', dt_string.strip())
     
-    # Replace space with T if needed (handle format like '2021-04-13 18:10:00')
     if ' ' in dt_clean and 'T' not in dt_clean:
         dt_clean = dt_clean.replace(' ', 'T')
     
-    # Ensure we have the T separator between date and time
     if len(dt_clean) >= 19 and dt_clean[10] != 'T':
-        # If we have a datetime string but no T separator, add it
         if len(dt_clean.split()) == 2:
             date_part, time_part = dt_clean.split()
             dt_clean = f"{date_part}T{time_part}"
-    
-    # Truncate to seconds precision (remove milliseconds if present)
+
     if '.' in dt_clean:
         dt_clean = dt_clean.split('.')[0]
     

@@ -1,6 +1,6 @@
 from pandas.core.api import DataFrame as DataFrame
 import pandas as pd
-import logging, sys, argparse, json, os
+import argparse, json, os
 import xgboost as xgb
 import optuna
 import numpy as np
@@ -14,6 +14,7 @@ from tqdm import tqdm
 from src.data.models.calibration import select_and_fit_calibrator, save_calibrator, load_calibrator, apply_calibration, plot_calibration
 from src.data.feature_preprocessing import PreProcessing
 from src.config import PROJECT_ROOT
+from src.utils import setup_logging
 
 LOG_DIR = PROJECT_ROOT / "src" / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -41,43 +42,6 @@ def create_args():
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
     return parser.parse_args()
-
-def setup_logging(args):
-    """Configure logging based on CLI arguments"""
-    logger = logging.getLogger("xgboost_model")
-    logger.setLevel(logging.DEBUG)
-    logger.propagate = False 
-
-    if logger.handlers:
-        logger.handlers.clear()
-    
-    fmt = logging.Formatter(
-        "%(levelname)s:%(name)s:%(message)s"
-    )
-    
-    sh = logging.StreamHandler(sys.stdout)
-    sh.setLevel(logging.INFO)
-    sh.setFormatter(fmt)
-    logger.addHandler(sh)
-    
-    if hasattr(args, 'log') and args.log:
-        log_file = args.log_file if hasattr(args, 'log_file') and args.log_file else LOG_FILE
-        
-        if hasattr(args, 'clear_log') and args.clear_log:
-            try:
-                with open(log_file, 'w') as f:
-                    pass
-                logger.info(f" Cleared log file: {log_file}")
-            except Exception as e:
-                logger.info(f" Warning: Could not clear log file {log_file}: {e}")
-        
-        fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(fmt)
-        logger.addHandler(fh)
-        logger.info(f" Logging to file: {log_file}")
-    
-    return logger
 
 class XGBoostModel:
 
@@ -427,7 +391,7 @@ class XGBoostModel:
 
 def main():
     model_args = create_args()
-    logger = setup_logging(model_args)
+    logger = setup_logging("xgboost_model", LOG_FILE, args=model_args)
     logger.info("="*75 + "XGBOOST MODEL" + "="*75)
     
     model_data, odds_data = PreProcessing([2021, 2022, 2023, 2024, 2025]).preprocess_feats(

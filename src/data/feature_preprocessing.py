@@ -1,7 +1,7 @@
 from src.data.features.feature_pipeline import FeaturePipeline
 import pandas as pd
 from pandas.core.api import DataFrame as DataFrame
-import logging, sys, argparse, os
+import argparse
 from typing import List, Tuple, Dict, Union
 from sklearn.preprocessing import StandardScaler
 from src.config import PROJECT_ROOT, FEATURES_CACHE_PATH
@@ -9,11 +9,9 @@ import pickle
 import joblib
 
 from dotenv import load_dotenv
-from pathlib import Path
+from src.utils import setup_logging
 
 load_dotenv()
-
-
 
 LOG_DIR = PROJECT_ROOT / "src" / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -28,45 +26,6 @@ def create_args():
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
     return parser.parse_args()
-
-
-def setup_logging(args=None):
-    """Configure logging based on CLI arguments"""
-    logger = logging.getLogger("feature_preprocessing")
-    logger.setLevel(logging.DEBUG)
-    logger.propagate = False 
-
-    if logger.handlers:
-        logger.handlers.clear()
-    
-    fmt = logging.Formatter(
-        "%(levelname)s:%(name)s:%(message)s"
-    )
-    
-    sh = logging.StreamHandler(sys.stdout)
-    sh.setLevel(logging.INFO)
-    sh.setFormatter(fmt)
-    logger.addHandler(sh)
-    
-
-    if args and hasattr(args, 'log') and args.log:
-        log_file = args.log_file if hasattr(args, 'log_file') and args.log_file else LOG_FILE
-        
-        if hasattr(args, 'clear_log') and args.clear_log:
-            try:
-                with open(log_file, 'w') as f:
-                    pass
-                logger.info(f" Cleared log file: {log_file}")
-            except Exception as e:
-                logger.info(f" Warning: Could not clear log file {log_file}: {e}")
-        
-        fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(fmt)
-        logger.addHandler(fh)
-        logger.info(f" Logging to file: {log_file}")
-    
-    return logger
 
 
 
@@ -226,12 +185,17 @@ class PreProcessing():
         all_features = []
         all_odds = []
 
+        pipeline_logger = setup_logging(
+            "feature_pipeline",
+            base_logger=getattr(self, "logger", None)
+        )
+
         for year in self.seasons:
-            feat_pipe = FeaturePipeline(year, logger=self.logger)
+            feat_pipe = FeaturePipeline(year, logger=pipeline_logger)
             season_feats, odds_data = feat_pipe.start_pipeline(force_recreate, clear_log)
             all_features.append(season_feats)
             all_odds.append(odds_data)
-        
+
         return all_features, all_odds
     
     def _log_nan_rows(self, dfs: List[DataFrame]) -> None:
@@ -312,7 +276,7 @@ class PreProcessing():
             Dictionary containing processed features and data splits
         """
         if not hasattr(self, 'logger'):
-            self.logger = setup_logging()
+            self.logger = setup_logging("feature_preprocessing", LOG_FILE)
 
         if not force_recreate_preprocessing and self._cache_exists():
             self.logger.info(f" Found cached preprocessed data for seasons {self.seasons}")
@@ -347,7 +311,7 @@ class PreProcessing():
 def main():
     args = create_args()
     
-    logger = setup_logging(args)
+    logger = setup_logging("feature_preprocessing", LOG_FILE, args=args)
     
     pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025])
     pre_processor.logger = logger

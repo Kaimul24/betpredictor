@@ -5,9 +5,10 @@ Orchestrates the feature engineering process for all features. Applies normaliza
 
 import pandas as pd
 from pandas.core.api import DataFrame as DataFrame
-import logging, sys, argparse
+import logging
+import argparse
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 
 from src.config import PROJECT_ROOT
 
@@ -23,12 +24,11 @@ from src.data.loaders.game_loader import GameLoader
 from src.data.loaders.odds_loader import OddsLoader
 from src.data.loaders.player_loader import PlayerLoader
 from src.data.loaders.team_loader import TeamLoader
+from src.utils import setup_logging
 
 LOG_DIR = PROJECT_ROOT / "src" / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "feature_pipeline.log"
-
-logger = logging.getLogger("feature_pipeline")
 
 def create_args():
     """Parse command line arguments"""
@@ -40,50 +40,12 @@ def create_args():
     args = parser.parse_args()
     return args
 
-def setup_logging(args):
-    """Configure logging based on CLI arguments"""
+class FeaturePipeline:
 
-    logger.setLevel(logging.DEBUG)
-    logger.propagate = False 
-
-    if logger.handlers:
-        logger.handlers.clear()
-    
-    fmt = logging.Formatter(
-        "%(levelname)s:%(name)s:%(message)s"
-    )
-    
-    sh = logging.StreamHandler(sys.stdout)
-    sh.setLevel(logging.INFO)
-    sh.setFormatter(fmt)
-    logger.addHandler(sh)
-    
-
-    if hasattr(args, 'log') and args.log:
-        log_file = args.log_file if hasattr(args, 'log_file') and args.log_file else LOG_FILE
-        
-        if hasattr(args, 'clear_log') and args.clear_log:
-            try:
-                with open(log_file, 'w') as f:
-                    pass
-                logger.info(f"Cleared log file: {log_file}")
-            except Exception as e:
-                logger.info(f"Warning: Could not clear log file {log_file}: {e}")
-        
-        fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(fmt)
-        logger.addHandler(fh)
-        logger.info(f"Logging to file: {log_file}")
-    
-    return logger
-
-class FeaturePipeline():
-
-    def __init__(self, season: int, logger):
+    def __init__(self, season: int, logger: Optional[logging.Logger] = None):
         self.season = season
         self.cache = {}
-        self.logger = logger
+        self.logger = logger or logging.getLogger("feature_pipeline")
 
     def _transform_schedule(self, schedule_data: DataFrame) -> DataFrame:
         """Splits each game in the schedule into 2 rows, each representing one team's perspective of the game"""
@@ -834,7 +796,7 @@ class FeaturePipeline():
         
 def main():
     args = create_args()
-    logger = setup_logging(args)
+    logger = setup_logging("feature_pipeline", LOG_FILE, args=args)
     
     feat_pipe = FeaturePipeline(2021, logger)
 
