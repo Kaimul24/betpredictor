@@ -8,6 +8,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss
 from sklearn.calibration import calibration_curve
 from scipy.optimize import minimize
+from scipy.special import expit as sigmoid
 
 def plot_calibration(y_true, y_proba, split: str, filepath: str, n_bins: int = 10, 
                     min_bin_size: Optional[int] = None) -> str:
@@ -188,9 +189,9 @@ def nll(y_true: np.ndarray, y_prob: np.ndarray) -> float:
 
 @dataclass
 class BaseCalibrator:
-    kind: Literal["platt", "isotonic"]
+    kind: Literal["platt", "isotonic", "temperature"]
 
-    def transform(self, p: np.ndarray) -> np.ndarray:
+    def transform(self, p: np.ndarray, p_mkt: Optional[np.ndarray] = None) -> np.ndarray:
         raise NotImplementedError
 
     def to_dict(self) -> Dict:
@@ -213,8 +214,9 @@ class BaseCalibrator:
 @dataclass
 class PlattCalibrator(BaseCalibrator):
     """
-    Platt scaling: sigmoid(a * logit(p) + b).
-    Fit is just a logistic regression on logit(p) -> y.
+    Platt scaling for residual model: calibrates r = logit(p_raw) - logit(p_mkt).
+    Fit: logistic regression on residual r -> y.
+    Transform: r' = a*r + b, then p_hat = sigmoid(logit(p_mkt) + r').
     """
     a: float
     b: float
@@ -224,8 +226,25 @@ class PlattCalibrator(BaseCalibrator):
         self.a = a
         self.b = b
 
-    def transform(self, p: np.ndarray) -> np.ndarray:
-        z = self.a * _to_logit(p) + self.b
+    def transform(self, p: np.ndarray, p_mkt: Optional[np.ndarray] = None) -> np.ndarray:
+        """
+        Transform raw predictions using calibrated residuals.
+        
+        Args:
+            p: Raw model predictions
+            p_mkt: Market probabilities (baseline) - required for Platt calibration
+            
+        Returns:
+            Calibrated predictions
+        """
+        if p_mkt is None:
+            raise ValueError("p_mkt is required for PlattCalibrator")
+        # Compute residual: r = logit(p_raw) - logit(p_mkt)
+        r = _to_logit(p) - _to_logit(p_mkt)
+        # Apply calibration: r' = a*r + b
+        r_cal = self.a * r + self.b
+        # Recombine: p_hat = sigmoid(logit(p_mkt) + r')
+        z = _to_logit(p_mkt) + r_cal
         return 1.0 / (1.0 + np.exp(-z))
 
     def to_dict(self) -> Dict:
@@ -246,7 +265,8 @@ class IsotonicCalibrator(BaseCalibrator):
         self.x_thresholds = np.asarray(x_thresholds, dtype=float)
         self.y_thresholds = np.asarray(y_thresholds, dtype=float)
 
-    def transform(self, p: np.ndarray) -> np.ndarray:
+    def transform(self, p: np.ndarray, p_mkt: Optional[np.ndarray] = None) -> np.ndarray:
+        """Isotonic calibration ignores p_mkt (direct mapping)."""
         p = np.asarray(p, dtype=float)
 
         out = np.interp(p, self.x_thresholds, self.y_thresholds)
@@ -263,8 +283,10 @@ class IsotonicCalibrator(BaseCalibrator):
 @dataclass
 class TemperatureCalibrator(BaseCalibrator):
     """
-    Temperature scaling on logits: p_hat = sigmoid(logit(p) / T).
-    T > 0.  T=1 is no-op; T>1 softens; T<1 sharpens.
+    Temperature scaling for residual model: calibrates r = logit(p_raw) - logit(p_mkt).
+    Fit: minimize log loss with scaled residuals.
+    Transform: r' = r / T, then p_hat = sigmoid(logit(p_mkt) + r').
+    T > 0. T=1 is no-op; T>1 softens residuals; T<1 sharpens residuals.
     """
     T: float
 
@@ -274,35 +296,87 @@ class TemperatureCalibrator(BaseCalibrator):
             raise ValueError("Temperature T must be > 0.")
         self.T = float(T)
 
-    def transform(self, p: np.ndarray) -> np.ndarray:
-        z = _to_logit(p) / self.T
+    def transform(self, p: np.ndarray, p_mkt: Optional[np.ndarray] = None) -> np.ndarray:
+        """
+        Transform raw predictions using temperature-scaled residuals.
+        
+        Args:
+            p: Raw model predictions
+            p_mkt: Market probabilities (baseline) - required for temperature calibration
+            
+        Returns:
+            Calibrated predictions
+        """
+        if p_mkt is None:
+            raise ValueError("p_mkt is required for TemperatureCalibrator")
+        # Compute residual: r = logit(p_raw) - logit(p_mkt)
+        r = _to_logit(p) - _to_logit(p_mkt)
+        # Apply temperature scaling: r' = r / T
+        r_scaled = r / self.T
+        # Recombine: p_hat = sigmoid(logit(p_mkt) + r')
+        z = _to_logit(p_mkt) + r_scaled
         return 1.0 / (1.0 + np.exp(-z))
 
     def to_dict(self) -> Dict:
         return {"kind": "temperature", "T": float(self.T)}
 
-def fit_platt(y_cal: np.ndarray, p_cal: np.ndarray) -> PlattCalibrator:
+def fit_platt(y_cal: np.ndarray, p_cal: np.ndarray, p_mkt_cal: np.ndarray) -> PlattCalibrator:
     """
-    Fit Platt scaling by logistic regression on logit(p_cal).
+    Fit Platt scaling on residual logits.
+    
+    Args:
+        y_cal: True labels
+        p_cal: Raw model predictions
+        p_mkt_cal: Market probabilities (baseline)
+        
+    Returns:
+        Fitted PlattCalibrator
     """
-    y = np.asarray(y_cal, dtype=float).ravel()
-    z = _to_logit(np.asarray(p_cal, dtype=float)).reshape(-1, 1)
-    lr = LogisticRegression(solver="lbfgs")
-    lr.fit(z, y)
-    a = float(lr.coef_[0, 0])
-    b = float(lr.intercept_[0])
-    return PlattCalibrator(a=a, b=b)
+    z_raw, z_mkt = _to_logit(p_cal), _to_logit(p_mkt_cal)
+    r = z_raw - z_mkt
+    # Solve logistic regression of y ~ sigmoid(alpha*r + beta)
+    # Quick 2D grid (robust and sufficient):
+    alphas = np.linspace(0.6, 1.4, 41)   # slope around 1
+    betas  = np.linspace(-0.15, 0.15, 61)
+    best_a, best_b, best_ll = 1.0, 0.0, 1e9
+    for a in alphas:
+        z = a*r  # beta will be added inside loop
+        for b in betas:
+            p = sigmoid(z + b + z_mkt)   # recombine into absolute logit space
+            ll = log_loss(y_cal, p)
+            if ll < best_ll:
+                best_a, best_b, best_ll = a, b, ll
+    return PlattCalibrator(a=best_a, b=best_b)
 
-def fit_temperature(y_cal: np.ndarray, p_cal: np.ndarray) -> TemperatureCalibrator:
+def fit_temperature(y_cal: np.ndarray, p_cal: np.ndarray, p_mkt_cal: np.ndarray) -> TemperatureCalibrator:
+    """
+    Fit temperature scaling on residual logits.
+    
+    Args:
+        y_cal: True labels
+        p_cal: Raw model predictions
+        p_mkt_cal: Market probabilities (baseline)
+        
+    Returns:
+        Fitted TemperatureCalibrator
+    """
     y = np.asarray(y_cal, dtype=float).ravel()
     p = _clip_probs(np.asarray(p_cal, dtype=float).ravel())
+    p_mkt = _clip_probs(np.asarray(p_mkt_cal, dtype=float).ravel())
+    
+    # Compute residuals
+    z_raw = _to_logit(p)
+    z_mkt = _to_logit(p_mkt)
+    r = z_raw - z_mkt
 
     def nll_for_logT(logT_array: np.ndarray) -> float:
-        logT = logT_array[0]
+        logT = float(logT_array[0])
         T = np.exp(logT)
-        z = _to_logit(p) / T
+        # Scale residual and recombine
+        r_scaled = r / T
+        z = z_mkt + r_scaled
         pT = 1.0 / (1.0 + np.exp(-z))
-        return log_loss(y, _clip_probs(pT))
+        return float(log_loss(y, _clip_probs(pT)))
     
     logT_starts = np.linspace(np.log(0.05), np.log(10.0), 10)
     best_result = None
@@ -317,7 +391,10 @@ def fit_temperature(y_cal: np.ndarray, p_cal: np.ndarray) -> TemperatureCalibrat
             best_nll = result.fun
             best_result = result
 
-    optimal_temperature = np.exp(best_result.x[0])
+    if best_result is None:
+        raise RuntimeError("Temperature calibration optimization failed")
+    
+    optimal_temperature = float(np.exp(best_result.x[0]))
     
     return TemperatureCalibrator(T=optimal_temperature)
     
@@ -339,13 +416,15 @@ def select_and_fit_calibrator(
     y_cal: np.ndarray,
     p_cal: np.ndarray,
     *,
-    methods: Iterable[Literal["platt", "isotonic"]] = ("platt", "isotonic"),
+    p_mkt_cal: Optional[np.ndarray] = None,
+    methods: Iterable[Literal["platt", "isotonic", "temperature"]] = ("platt", "isotonic"),
     selection_metric: Literal["ece", "brier", "logloss"] = "ece",
     n_bins: int = 10,
     strategy: Literal["uniform", "quantile"] = "quantile",
     min_bin_size: Optional[int] = None,
     y_eval: Optional[np.ndarray] = None,
     p_eval_raw: Optional[np.ndarray] = None,
+    p_mkt_eval: Optional[np.ndarray] = None,
 ) -> Tuple[BaseCalibrator, Dict[str, Dict[str, float]]]:
     """
     Fit candidate calibrators on (y_cal, p_cal), evaluate on either:
@@ -355,27 +434,41 @@ def select_and_fit_calibrator(
 
     per_method_metrics[method] includes {'ece','brier','logloss'}.
     If min_bin_size is provided, ECE calculation will merge adjacent bins below this threshold.
+    
+    Args:
+        p_mkt_cal: Market probabilities for calibration set (required for Platt/Temperature)
+        p_mkt_eval: Market probabilities for evaluation set (required for Platt/Temperature if y_eval provided)
     """
     y_cal = np.asarray(y_cal, dtype=float)
     p_cal = np.asarray(p_cal, dtype=float)
 
     fitted = {}
     if "platt" in methods:
-        fitted["platt"] = fit_platt(y_cal, p_cal)
+        if p_mkt_cal is None:
+            raise ValueError("p_mkt_cal is required for Platt calibration in residual model")
+        fitted["platt"] = fit_platt(y_cal, p_cal, p_mkt_cal)
     if "isotonic" in methods:
         fitted["isotonic"] = fit_isotonic(y_cal, p_cal)
     if "temperature" in methods:
-        fitted["temperature"] = fit_temperature(y_cal, p_cal)
+        if p_mkt_cal is None:
+            raise ValueError("p_mkt_cal is required for Temperature calibration in residual model")
+        fitted["temperature"] = fit_temperature(y_cal, p_cal, p_mkt_cal)
 
     if y_eval is not None and p_eval_raw is not None:
         y_eval = np.asarray(y_eval, dtype=float)
         p_eval_raw = np.asarray(p_eval_raw, dtype=float)
         eval_y = y_eval
         def eval_probs(cal: BaseCalibrator) -> np.ndarray:
+            if isinstance(cal, (PlattCalibrator, TemperatureCalibrator)):
+                if p_mkt_eval is None:
+                    raise ValueError("p_mkt_eval is required for Platt/Temperature calibration evaluation")
+                return cal.transform(p_eval_raw, p_mkt_eval)
             return cal.transform(p_eval_raw)
     else:
         eval_y = y_cal
         def eval_probs(cal: BaseCalibrator) -> np.ndarray:
+            if isinstance(cal, (PlattCalibrator, TemperatureCalibrator)):
+                return cal.transform(p_cal, p_mkt_cal)
             return cal.transform(p_cal)
 
     metrics = {}
@@ -392,10 +485,20 @@ def select_and_fit_calibrator(
     return fitted[best_name], metrics
 
 
-def apply_calibration(calibrator: BaseCalibrator, p_raw: np.ndarray) -> np.ndarray:
+def apply_calibration(calibrator: BaseCalibrator, p_raw: np.ndarray, 
+                     p_mkt: Optional[np.ndarray] = None) -> np.ndarray:
     """
     Apply a fitted calibrator to raw probabilities.
+    
+    Args:
+        calibrator: Fitted calibrator
+        p_raw: Raw model predictions
+        p_mkt: Market probabilities (required for PlattCalibrator and TemperatureCalibrator)
     """
+    if isinstance(calibrator, (PlattCalibrator, TemperatureCalibrator)):
+        if p_mkt is None:
+            raise ValueError("p_mkt is required for PlattCalibrator and TemperatureCalibrator")
+        return calibrator.transform(p_raw, p_mkt)
     return calibrator.transform(p_raw)
 
 

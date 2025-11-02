@@ -1,5 +1,6 @@
 from pandas.core.api import DataFrame as DataFrame
 from dotenv import load_dotenv
+import matplotlib.pyplot as plt
 import argparse
 import numpy as np
 
@@ -14,74 +15,117 @@ LOG_DIR = PROJECT_ROOT / "src" / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "expected_return.log"
 
-"""
-COMPUTE EXPECTED RETURN FOR BETTING $1 ON THE HIGHEST POSITIVE EXPECTED VALUE MONEYLINE ON 2025 SEASON
-
-1. Call PreProcessing().preprocess_feats to get model data and odds data
-    - model data will contain 2025 data
-2. Initialize XGBoostModel with model_data
-4. Call model.predict to predict on test set
-    - output DataFrame/series? will be phome
-5. Add paway = 1 - phome to each row of the predictions
-6. For each sportsbook for each game, compute EV
-7. Once all EV for each sportsbook has been calucated, pick highest EV
-8. Once all picks are done, compare with what actually happened in the game to determine return over that period
-    - If correct, add decimal odds d to total
-    - If incorrect, subtract 1 from total
-
-First implement a simple policy - Max non zero EV, then do more complex ones - https://chatgpt.com/g/g-p-6840b1d0b0f881918a6ece0e66a78da9-baseball-bet-predictor/c/68e98ee3-9ac4-8324-8803-095187f952a6?model=gpt-5-thinking
-
-EV calculation: EV = (pred_prob / implied_prob) - 1
-
-"""
-
 class ExpectedReturn:
-    def __init__(self, model_data: DataFrame, odds_data: DataFrame) -> None:
+    def __init__(self, model_data: DataFrame, odds_data: DataFrame, logger) -> None:
         self.data = model_data
         self.odds_data = odds_data
+        self.logger = logger
 
     def roi_calculation(self):
         """
         Orchestrates the ROI on the test set for $1 bets on a given policy.
         """
-        pred = self._setup_model()
+        pred_df = self._setup_model()
+        roi = self._evaluate_bets(pred_df)
+        self.logger.info(f" ROI: {roi}")
 
     @staticmethod
-    def calc_ev(pred_prob):
+    def calc_ev(pred_prob, mkt_prob):
         """
         Function is applied to a each row of the predictions and added as a new column
         New columns: ev_home, ev_away
         """
-        pass
+        return (pred_prob / mkt_prob) - 1
 
-    def _setup_model(self) -> np.ndarray:
+    def _setup_model(self) -> DataFrame:
         """
         Initializes, loads in, and predicts on the test set of an existing model  
         """
         model = XGBoostModel(model_args=None, all_data=self.data)
         pred = model.predict()
 
-        print(pred.max())
-        print(self.data['y_test'])
+        df = DataFrame(self.data['y_test']).copy()
+        df['p_home'] = pred
+        df['p_away'] = 1 - df['p_home']
+        return df
+
     
-    def _simple_policy():
+    def _simple_policy(self, max_ev_df: DataFrame):
         """
         This policy bets on the maximum non-zero EV for a game. If there are no non-zero EV, then no bet will occur.
         Flags each row with True or False in new to_bet column
         """
-        pass
+        max_ev_df['to_bet'] = np.where(max_ev_df['max_ev'] > 0, True, False)
+        return max_ev_df
 
-    def _evaluate_bets():
+    def _evaluate_bets(self, pred_df: DataFrame):
         """
         Calcuates the total return on the test set for a given policy
         """
-        pass
+        start_date = pred_df.index[0][1]
+        odds_df = self.odds_data.copy()
+
+        group_cols = ['game_date', 'dh', 'home_team', 'away_team', 'game_id']
+
+        odds = odds_df[odds_df.index.get_level_values('game_date') >= start_date]
+
+        odds_with_pred = pred_df.merge(
+            odds,
+            on=group_cols,
+            how='right',
+            validate='1:m'
+        )
+
+        odds_with_pred['ev_home'] = ExpectedReturn.calc_ev(odds_with_pred['p_home'], odds_with_pred['home_opening_prob_raw'])
+        odds_with_pred['ev_away'] = ExpectedReturn.calc_ev(odds_with_pred['p_away'], odds_with_pred['away_opening_prob_raw'])
+        odds_with_pred['max_ev'] = odds_with_pred[['ev_home', 'ev_away']].max(axis=1)
+
+        odds_with_pred['max_ev_side'] = np.where(odds_with_pred['max_ev'] == odds_with_pred['ev_home'], 'home', 'away')
+        
+        max_ev_rows = (
+            odds_with_pred.sort_values('max_ev', ascending=False)
+            .reset_index()
+            .drop_duplicates(subset=group_cols, keep='first')
+            .set_index(group_cols)
+        )
+
+        def plot_max_ev_distribution(max_ev_rows: DataFrame, bins: int = 30, show: bool = True):
+            if max_ev_rows.empty:
+                raise ValueError("max_ev_rows is empty; nothing to plot.")
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.hist(max_ev_rows['max_ev'], bins=bins, alpha=0.7, color='steelblue', edgecolor='black')
+            ax.axvline(max_ev_rows['max_ev'].mean(), color='red', linestyle='--', label='Mean')
+            ax.set_xlabel('Max Expected Value')
+            ax.set_ylabel('Frequency')
+            ax.set_title('Distribution of Max EV per Game')
+            ax.legend()
+            fig.tight_layout()
+            if show:
+                plt.show()
+            return ax
+        
+        max_ev_metrics = f"\
+                      Mean: {max_ev_rows['max_ev'].mean()}\n\
+                      Min: {max_ev_rows['max_ev'].min()}\n\
+                      Max: {max_ev_rows['max_ev'].max()}\n\
+                      Std: {max_ev_rows['max_ev'].std()}"
+        
+        self.logger.info(f" Max EV Metrics: \n{max_ev_metrics}")
+   
+        bet_decisions = self._simple_policy(max_ev_rows)
+        bet_decisions = bet_decisions[bet_decisions['to_bet']]
+
+        d_sel = np.where(bet_decisions['max_ev_side'] == 'home', bet_decisions['home_opening_prob_raw'], bet_decisions['away_opening_prob_raw'])
+        y_sel = np.where(bet_decisions['max_ev_side'] == 'home', bet_decisions['is_winner_home'], 1 - bet_decisions['is_winner_home'])
+
+        total_profit = (y_sel*(1.0/d_sel - 1.0) - (1 - y_sel)).sum()
+        total_stake = float(len(bet_decisions))
+
+        roi = total_profit / total_stake
+        return roi
 
 def create_args():
-    """Parse command line arguments"""
     parser = argparse.ArgumentParser(description="Expected return on bets runner")
-    # parser.add_argument("--force-recreate", action="store_true", help="Recreate rolling features, even if cached file exists")
-    # parser.add_argument("--force-recreate-preprocessing", action="store_true", help="Recreate preprocessed datasets, even if cached file exists")
     parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
@@ -95,8 +139,7 @@ def main():
             is_xgboost=True
     )
 
-    exp_ret = ExpectedReturn(model_data=model_data, odds_data=odds_data)
-    exp_ret.logger = logger
+    exp_ret = ExpectedReturn(model_data=model_data, odds_data=odds_data, logger=logger)
 
     exp_ret.roi_calculation()
 

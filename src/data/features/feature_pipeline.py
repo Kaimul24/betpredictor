@@ -152,7 +152,6 @@ class FeaturePipeline:
               if any(s in c for s in ['_season', '_ewm_h3', '_ewm_h10', '_ewm_h25']) or
               c == 'team_frv_per_9']
 
-        assert len(value_cols) == 61
 
         league_medians = batting_features[value_cols].median()
         lineups_with_stats[value_cols] = lineups_with_stats[value_cols].fillna(league_medians)
@@ -405,7 +404,7 @@ class FeaturePipeline:
             'p_open_away_min_nv', 'p_open_home_median_nv', 'p_open_home_mean_nv', 
             'p_open_home_std_nv', 'p_open_away_median_nv', 'p_open_away_mean_nv', 
             'p_open_away_std_nv', 'p_open_mean_nv_diff', 'p_open_med_nv_diff', 
-            'p_open_max_nv_diff', 'p_open_min_nv_diff'
+            'p_open_max_nv_diff', 'p_open_min_nv_diff', 'num_books', 'logit_prob_home_std_nv'
         ]
         
         existing_metadata_cols = [col for col in game_metadata_cols if col in merged_games.columns]
@@ -428,7 +427,7 @@ class FeaturePipeline:
 
         self.logger.debug("="*50 + "\n")
         self.logger.debug(" Resulting DataFrame after matching schedule")       
-        self.logger.debug(final_result.to_string())
+        self.logger.debug(final_result.head().to_string())
         self.logger.debug("="*50 + "\n")
         
         return final_result, all_odds_data
@@ -801,8 +800,9 @@ def main():
     feat_pipe = FeaturePipeline(2021, logger)
 
     features, raw_odds_data = feat_pipe.start_pipeline(args.force_recreate, args.clear_log)
-    with open("raw_odds_data.txt", "w") as f:
-        f.write(raw_odds_data.to_string())
+
+    # with open("raw_odds_data.txt", "w") as f:
+    #     f.write(raw_odds_data.to_string())
 
 if __name__ == "__main__":
     main()

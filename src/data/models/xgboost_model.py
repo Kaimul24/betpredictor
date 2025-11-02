@@ -6,7 +6,6 @@ import optuna
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import log_loss, roc_auc_score, brier_score_loss, roc_curve, auc
-from sklearn.calibration import calibration_curve
 from sklearn.model_selection import TimeSeriesSplit
 from typing import Dict
 from tqdm import tqdm
@@ -64,8 +63,20 @@ class XGBoostModel:
         X_test = all_data['X_test']
         y_test = all_data['y_test']
 
-        dtrain = xgb.DMatrix(X_train, label=y_train)
-        dtest = xgb.DMatrix(X_test, label=y_test)
+        p_mkt_train = X_train["p_open_home_median_nv"].to_numpy()
+        p_mkt_test = X_test["p_open_home_median_nv"].to_numpy()
+        p_mkt_val = X_val["p_open_home_median_nv"].to_numpy()
+
+        self.p_mkt_train = p_mkt_train
+        self.p_mkt_val   = p_mkt_val
+        self.p_mkt_test  = p_mkt_test
+
+        X_train.drop(columns=["p_open_home_median_nv"], inplace=True)
+        X_val.drop(columns=["p_open_home_median_nv"], inplace=True)
+        X_test.drop(columns=["p_open_home_median_nv"], inplace=True)
+
+        dtrain = xgb.DMatrix(X_train, label=y_train, base_margin=XGBoostModel.logit(p_mkt_train))
+        dtest = xgb.DMatrix(X_test, label=y_test, base_margin=XGBoostModel.logit(p_mkt_test))
 
         self.X_train = X_train
         self.y_train = y_train
@@ -83,11 +94,15 @@ class XGBoostModel:
         cutoff = int(0.5 * n_val)
 
         self.val_cutoff = cutoff
-        self.dval_es = xgb.DMatrix(self.X_val[:cutoff], label=self.y_val[:cutoff])
-        self.dcal    = xgb.DMatrix(self.X_val[cutoff:], label=self.y_val[cutoff:])
+        self.dval_es = xgb.DMatrix(self.X_val[:cutoff], label=self.y_val[:cutoff], base_margin=XGBoostModel.logit(p_mkt_val[:cutoff]))
+        self.dcal    = xgb.DMatrix(self.X_val[cutoff:], label=self.y_val[cutoff:], base_margin=XGBoostModel.logit(p_mkt_val[cutoff:]))
         self.y_cal   = self.y_val[cutoff:]
         self.y_val_es = self.y_val[:cutoff]
-        
+    
+    @staticmethod
+    def logit(p, eps=1e-6):
+        p = np.clip(p, eps, 1-eps)
+        return np.log(p/(1-p))
 
     def train_and_eval_model(self):
         """
@@ -129,11 +144,11 @@ class XGBoostModel:
                     'eval_metric': 'logloss',
                     "booster": trial.suggest_categorical("booster", ["gbtree", "dart"]),
                     'seed': 42,
-                    'nthread': 12, 
-                    'max_depth': trial.suggest_int('max_depth', 2, 8),
+                    'nthread': 6, 
+                    'max_depth': trial.suggest_int('max_depth', 2, 10),
                     'learning_rate': trial.suggest_float('learning_rate', 0.001, 0.1),
-                    'subsample': trial.suggest_float('subsample', 0.4, 1.0),
-                    'colsample_bytree': trial.suggest_float('colsample_bytree', 0.3, 1),
+                    'subsample': trial.suggest_float('subsample', 0.1, 1.0),
+                    'colsample_bytree': trial.suggest_float('colsample_bytree', 0.1, 1),
                     'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
                     'reg_alpha': trial.suggest_float('reg_alpha', 0, 1),
                     'reg_lambda': trial.suggest_float('reg_lambda', 1, 10),
@@ -147,9 +162,9 @@ class XGBoostModel:
                 params['sample_type'] = trial.suggest_categorical("sample_type", ["uniform", "weighted"])
                 params['rate_drop'] = trial.suggest_float('rate_drop', 1e-5, 1.0)
                 params['skip_drop']= trial.suggest_float('skip_drop', 1e-5, 1.0)
-            
+
             dtrain = self.dtrain
-            tscv = TimeSeriesSplit(n_splits=3)
+            tscv = TimeSeriesSplit(n_splits=4)
 
             folds = list(tscv.split(np.arange(len(self.X_train))))
             
@@ -162,7 +177,7 @@ class XGBoostModel:
                 bst = xgb.train(
                     params,
                     dtr,
-                    num_boost_round=2000,
+                    num_boost_round=4000,
                     evals=[(dtr, 'train'), (dvl, 'eval')],
                     early_stopping_rounds = 50,
                     verbose_eval=False
@@ -186,14 +201,73 @@ class XGBoostModel:
         self.logger.info(f" Best Trial: {trial.value}")
         self.logger.info(f" Best params:  {trial.params.items()}")
 
-
-        #self._vis_hpo(study)
-
         return study.best_params
+
+    def analyze_feature_importance(self, bst, X_train):
+        importance = bst.get_score(importance_type='gain')
+        importance_df = pd.DataFrame({
+            'feature': importance.keys(),
+            'gain': importance.values()
+        }).sort_values('gain', ascending=False)
+        
+        self.logger.info(f" Top 20 Features by Gain:\n{importance_df.head(20)}")
+        
+        total_gain = importance_df['gain'].sum()
+        importance_df['gain_pct'] = (importance_df['gain'] / total_gain) * 100
+        self.logger.info(f" \nTop feature contributes: {importance_df.iloc[0]['gain_pct']:.1f}%")
+        self.logger.info(f" Top 5 features contribute: {importance_df.head(5)['gain_pct'].sum():.1f}%")
+        
+        self.logger.info(f" \nTotal features used: {len(importance)} / {X_train.shape[1]}")
+        
+        return importance_df
     
-    # def _vis_hpo(self, study):
-    #     optuna.visualization.plot_optimization_history(study)
-    #     optuna.visualization.plot_param_importances(study)
+    def _percentile_summary(self, p_hat: np.ndarray, label: str):
+        q = np.percentile(p_hat, [1,5,25,50,75,95,99])
+        self.logger.info(
+            f" [{label}] pred percentiles -> "
+            f" p1={q[0]:.3f}, p5={q[1]:.3f}, p25={q[2]:.3f}, "
+            f" p50={q[3]:.3f}, p75={q[4]:.3f}, p95={q[5]:.3f}, p99={q[6]:.3f}"
+        )
+        tails_low = np.mean(p_hat < 0.30) * 100
+        tails_high = np.mean(p_hat > 0.70) * 100
+        self.logger.info(f"[{label}] tail mass -> <0.30: {tails_low:.2f}% | >0.70: {tails_high:.2f}%")
+
+    def _plot_logit_delta(self, p_hat: np.ndarray, p_mkt: np.ndarray, split: str):
+        """
+        Plot (1) histogram of delta_logit = logit(p_hat) - logit(p_mkt)
+             (2) scatter of delta_logit vs logit(p_mkt).
+        """
+        z_hat = XGBoostModel.logit(p_hat)
+        z_mkt = XGBoostModel.logit(p_mkt)
+        delta = z_hat - z_mkt
+
+        # 1) histogram
+        plt.figure(figsize=(6,4))
+        plt.hist(delta, bins=50, edgecolor="k", alpha=0.8)
+        plt.xlabel("logit(pred) - logit(p_mkt)")
+        plt.ylabel("Count")
+        plt.title(f"Delta-Logit Histogram ({split})")
+        out = PLOTS_DIR / f"delta_logit_hist_{split}.png"
+        plt.tight_layout(); plt.savefig(out, dpi=120); plt.close()
+        self.logger.info(f" Saved delta-logit histogram to {out}")
+
+        # 2) scatter vs baseline logit
+        plt.figure(figsize=(6,4))
+        plt.scatter(z_mkt, delta, s=6, alpha=0.5)
+        plt.axhline(0, color="k", linestyle="--", linewidth=0.8)
+        plt.xlabel("logit(p_mkt)")
+        plt.ylabel("logit(pred) - logit(p_mkt)")
+        plt.title(f"Delta-Logit vs Market ({split})")
+        out = PLOTS_DIR / f"delta_logit_scatter_{split}.png"
+        plt.tight_layout(); plt.savefig(out, dpi=120); plt.close()
+        self.logger.info(f" Saved delta-logit scatter to {out}")
+
+        # quick numeric summary
+        self.logger.info(
+            f" [{split}] delta logit mean={delta.mean():.4f}, std={delta.std():.4f}, "
+            f" p5={np.percentile(delta,5):.4f}, p95={np.percentile(delta,95):.4f}"
+        )
+
 
     def _plot_roc(self, y_true, y_proba, split: str):
         """Plot and save ROC curve."""
@@ -235,6 +309,7 @@ class XGBoostModel:
         return out
 
     def train(self, hyperparams: Dict = None):
+        
         BASE_PARAMS = {
                     'objective': 'binary:logistic',
                     'device': "cpu",
@@ -251,18 +326,20 @@ class XGBoostModel:
         bst = xgb.train(
             all_params,
             self.dtrain,
-            num_boost_round=1000,
+            num_boost_round=4000,
             evals=[(self.dtrain, 'train'), (self.dval_es, 'eval')],
             verbose_eval=10,
             early_stopping_rounds=50
         )
 
         self.logger.info(f" Early stopping scores...")
-        p_es = bst.predict(self.dval_es, iteration_range=(0, bst.best_iteration + 1))
+        p_es = bst.predict(self.dval_es, iteration_range=(0, bst.best_iteration + 1), training=True)
         
         ll_es    = log_loss(self.y_val_es, p_es)
         auc_es   = roc_auc_score(self.y_val_es, p_es)
         brier_es = brier_score_loss(self.y_val_es, p_es)
+
+        p_acc = np.where(p_es > 0.5, 1, 0)
         
         self.logger.info(f" Val(ES) Log Loss: {ll_es}")
         self.logger.info(f" Val(ES) ROC AUC: {auc_es}")
@@ -271,6 +348,9 @@ class XGBoostModel:
         filepath = PLOTS_DIR / 'xgboost_calibration_es'
         out_path_curve = plot_calibration(self.y_val_es, p_es, split="val_es", filepath=filepath, n_bins=25)
         self.logger.info(f" Saved calibration curve (\"val_es\") to {out_path_curve}")
+
+        self._percentile_summary(p_es, label="val_es (pre-cal)")
+        self._plot_logit_delta(p_es, self.p_mkt_val[:self.val_cutoff], split="val_es")
 
         self.logger.info(" Predictions on calibration set...")
         p_cal_raw = bst.predict(self.dcal, iteration_range=(0, bst.best_iteration + 1))
@@ -283,6 +363,9 @@ class XGBoostModel:
         self.logger.info(f" Val(CAL) Pre-Calibration ROC AUC: {auc_cal_pre}")
         self.logger.info(f" Val(CAL) Pre-Calibration Brier:   {brier_cal_pre}")
 
+        self._percentile_summary(p_cal_raw, label="val_cal (pre-cal)")
+        self._plot_logit_delta(p_cal_raw, self.p_mkt_val[self.val_cutoff:], split="val_cal_pre")
+
         min_bin_size = 100
         filepath = PLOTS_DIR / 'xgboost_calibration'
         out_path_curve = plot_calibration(self.y_cal, p_cal_raw, split="pre_cal", filepath=filepath, n_bins=25, min_bin_size=min_bin_size)
@@ -290,7 +373,8 @@ class XGBoostModel:
         calibrator, metrics = select_and_fit_calibrator(
             y_cal=self.y_cal,
             p_cal=p_cal_raw,
-            methods=("platt",'temperature'),
+            p_mkt_cal=self.p_mkt_val[self.val_cutoff:],
+            methods=("platt", "temperature"),
             selection_metric="logloss",
             min_bin_size=min_bin_size,
             n_bins=25,
@@ -302,7 +386,7 @@ class XGBoostModel:
         save_calibrator(calibrator, str(CAL_DIR / "xgb_calibrator.json"))
 
         self.logger.info(" Evaluating calibrated predictions on calibration set...")
-        p_cal_calibrated = apply_calibration(calibrator, p_cal_raw)
+        p_cal_calibrated = apply_calibration(calibrator, p_cal_raw, self.p_mkt_val[self.val_cutoff:])
         
         ll_cal_after = log_loss(self.y_cal, p_cal_calibrated)
         auc_cal_after = roc_auc_score(self.y_cal, p_cal_calibrated)
@@ -323,6 +407,11 @@ class XGBoostModel:
         out_path_curve = plot_calibration(self.y_cal, p_cal_calibrated, split="cal_after", filepath=filepath, n_bins=25, min_bin_size=min_bin_size)
 
         self.logger.info(f" Saved calibration curve (\"cal_after\") to {out_path_curve}")
+
+        self._percentile_summary(p_cal_calibrated, label="val_cal (post-cal)")
+        self._plot_logit_delta(p_cal_calibrated, self.p_mkt_val[self.val_cutoff:], split="val_cal_post")
+
+        _ = self.analyze_feature_importance(bst, self.X_train)
 
         return bst
     
@@ -351,7 +440,7 @@ class XGBoostModel:
         self.logger.info(f" Raw predictions before calibration: Min: {p_test_raw.min()}, Max: {p_test_raw.max()}, Std: {p_test_raw.std()}")
         try:
             cal = load_calibrator(str(CAL_DIR / "xgb_calibrator.json"))
-            p_test = apply_calibration(cal, p_test_raw)
+            p_test = apply_calibration(cal, p_test_raw, self.p_mkt_test)
             self.logger.info(" Applied calibrator to test predictions.")
             self.logger.info(f" Predictions after calibartion: Min: {p_test.min()}, Max: {p_test.max()}, Std: {p_test.std()}")
         except FileNotFoundError:
@@ -361,6 +450,7 @@ class XGBoostModel:
         test_log_loss = log_loss(self.y_test, p_test)
         test_roc_auc  = roc_auc_score(self.y_test, p_test)
         test_brier    = brier_score_loss(self.y_test, p_test)
+        p_acc = np.where(p_test > 0.5, 1, 0)
 
         self.logger.info(f" Test Log Loss: {test_log_loss}")
         self.logger.info(f" Test ROC AUC: {test_roc_auc}")
@@ -372,6 +462,9 @@ class XGBoostModel:
         out_path_curve = plot_calibration(self.y_test, p_test, split="test", filepath=filepath, n_bins=25, min_bin_size=100)
         self.logger.info(f" Saved calibration curve (\"test\") to {out_path_curve}")
 
+        self._percentile_summary(p_test, label="test (post-cal)")
+        self._plot_logit_delta(p_test, self.p_mkt_test, split="test")
+
         return p_test
     
     def _save_model(self, model: xgb.Booster) -> None:
@@ -381,8 +474,7 @@ class XGBoostModel:
 
         self.logger.info(f" Succesfully saved XGBoost model to {xgboost_model_path}")
 
-    
-    def load_model(self) -> xgb:
+    def load_model(self) -> xgb.Booster:
         model_path = SAVED_MODEL_DIR / "saved_xgboost.json"
         if model_path.exists():
             bst = xgb.Booster()
@@ -408,7 +500,6 @@ def main():
     model = XGBoostModel(model_args, model_data, logger)
     model.train_and_eval_model()
     test_pred = model.predict()
-    
 
 if __name__ == "__main__":
     main()
