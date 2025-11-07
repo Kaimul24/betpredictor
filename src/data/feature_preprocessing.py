@@ -81,10 +81,14 @@ class PreProcessing():
     def _feature_scaling(self, dfs: List[DataFrame]) -> Dict[str, Union[DataFrame, StandardScaler | None]]:
         filtered_dfs = [df[[col for col in df.columns if col not in self.exclude_columns]] for df in dfs]
         
-        train_dfs = filtered_dfs[:3]
+        train_dfs = filtered_dfs[:4]
 
-        val_df = filtered_dfs[-2].reset_index()
-        test_df = filtered_dfs[-1].reset_index()
+        test_val_df = filtered_dfs[-1].reset_index()
+
+        cutoff = int(len(test_val_df) / 2)
+
+        val_df = test_val_df[:cutoff]
+        test_df = test_val_df[:cutoff]
 
         val_df = val_df.set_index(['season', 'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id']).sort_index()
         test_df = test_df.set_index(['season', 'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id']).sort_index()
@@ -303,7 +307,7 @@ def main():
     
     logger = setup_logging("feature_preprocessing", LOG_FILE, args=args)
     
-    pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='xgboost', mkt_only=True)
+    pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='xgboost', mkt_only=False)
     pre_processor.logger = logger
     
     preprocessed_feats, odds_data = pre_processor.preprocess_feats(
@@ -314,8 +318,6 @@ def main():
 
     print(preprocessed_feats.keys())
 
-    with open('mkt_ppf.txt', 'w') as f:
-        f.write(preprocessed_feats['X_train'].to_string())
 
 
 

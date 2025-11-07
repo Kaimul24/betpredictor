@@ -136,9 +136,10 @@ def main():
     args = create_args()
     logger = setup_logging('expected_return', log_file=LOG_FILE, args=args)
 
-    model_data, odds_data = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='xgboost', mkt_only=True).preprocess_feats()
+    mkt_only = False
+    model_data, odds_data = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='xgboost', mkt_only=mkt_only).preprocess_feats()
 
-    exp_ret = ExpectedReturn(model_data=model_data, odds_data=odds_data, logger=logger, mkt_only=True)
+    exp_ret = ExpectedReturn(model_data=model_data, odds_data=odds_data, logger=logger, mkt_only=mkt_only)
 
     exp_ret.roi_calculation()
 
