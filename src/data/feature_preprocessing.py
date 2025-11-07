@@ -26,26 +26,29 @@ def create_args():
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
     return parser.parse_args()
 
-
-
 class PreProcessing():
 
-    def __init__(self, seasons: List[int]):
+    def __init__(self, seasons: List[int], model_type: str, mkt_only: bool = False):
+        if model_type not in ['xgboost', 'mlp']:
+            raise ValueError("Invalid model_type. Expected ['xgboost', 'mlp']")
+
+        self.model_type = model_type
         self.seasons = seasons
         self.seasons_str = "_".join(map(str, seasons))
+        self.mkt_only = mkt_only
 
         self.cache_dir = FEATURES_CACHE_PATH / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         self.cache_paths = {
-            'X_train': self.cache_dir / f"X_train_seasons_{self.seasons_str}.parquet",
-            'y_train': self.cache_dir / f"y_train_seasons_{self.seasons_str}.parquet", 
-            'X_val': self.cache_dir / f"X_val_seasons_{self.seasons_str}.parquet",
-            'y_val': self.cache_dir / f"y_val_seasons_{self.seasons_str}.parquet",
-            'X_test': self.cache_dir / f"X_test_seasons_{self.seasons_str}.parquet",
-            'y_test': self.cache_dir / f"y_test_seasons_{self.seasons_str}.parquet",
-            'odds_data': self.cache_dir / f"odds_data_seasons_{self.seasons_str}.parquet",
-            'scaler': self.cache_dir / f"scaler_seasons_{self.seasons_str}.pkl"
+            'X_train': self.cache_dir / f"X_train_seasons_{model_type}_{self.seasons_str}.parquet",
+            'y_train': self.cache_dir / f"y_train_seasons_{model_type}_{self.seasons_str}.parquet", 
+            'X_val': self.cache_dir / f"X_val_seasons_{model_type}_{self.seasons_str}.parquet",
+            'y_val': self.cache_dir / f"y_val_seasons_{model_type}_{self.seasons_str}.parquet",
+            'X_test': self.cache_dir / f"X_test_seasons_{model_type}_{self.seasons_str}.parquet",
+            'y_test': self.cache_dir / f"y_test_seasons_{model_type}_{self.seasons_str}.parquet",
+            'odds_data': self.cache_dir / f"odds_data_seasons_{model_type}_{self.seasons_str}.parquet",
+            'scaler': self.cache_dir / f"scaler_seasons_{model_type}_{self.seasons_str}.pkl"
         }
 
         self.target = ['is_winner_home']
@@ -63,6 +66,8 @@ class PreProcessing():
             'home_team_starter_id', 'away_starter_id','away_team_starter_id', 'away_team_starter_player_id', 'mlb_id', 'venue_id',
 
             'status', 'venue_name', 'venue_timezone', 'venue_gametime_offset'
+
+
         ]
 
     def _remove_early_games(self, dfs: List[DataFrame]) -> List:
@@ -73,16 +78,16 @@ class PreProcessing():
             removed_early.append(d)
         return removed_early
            
-    def _feature_scaling(self, dfs: List[DataFrame], is_xgboost: bool = False) -> Dict[str, Union[DataFrame, StandardScaler | None]]:
-
+    def _feature_scaling(self, dfs: List[DataFrame]) -> Dict[str, Union[DataFrame, StandardScaler | None]]:
         filtered_dfs = [df[[col for col in df.columns if col not in self.exclude_columns]] for df in dfs]
         
         train_dfs = filtered_dfs[:3]
+
         val_df = filtered_dfs[-2].reset_index()
         test_df = filtered_dfs[-1].reset_index()
 
-        val_df = val_df.set_index(['season', 'game_date', 'dh', 'home_team', 'away_team', 'game_id']).sort_index()
-        test_df = test_df.set_index(['season', 'game_date', 'dh', 'home_team', 'away_team', 'game_id']).sort_index()
+        val_df = val_df.set_index(['season', 'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id']).sort_index()
+        test_df = test_df.set_index(['season', 'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id']).sort_index()
 
         train_data = pd.concat(train_dfs)
         
@@ -120,7 +125,7 @@ class PreProcessing():
         self.logger.info(f" Object cols: {object_cols}")
         scaler = None
 
-        if not is_xgboost:
+        if self.model_type != 'xgboost':
             self.logger.info(f" Numeric columns to scale: {len(numeric_cols)}")
             scaler = StandardScaler()
 
@@ -166,19 +171,6 @@ class PreProcessing():
             'y_test': y_test,
             'scaler': scaler
         }
-
-    def _separate_odds_cols(self, dfs: List[DataFrame]) -> List[Tuple[DataFrame, DataFrame]]:
-        results = []
-
-        for df in dfs:
-            odds_cols = [col for col in df.columns if 'odds' in col]
-            
-            feat_df = df[[col for col in df.columns if col not in odds_cols]]
-            odds_df = df[odds_cols] if odds_cols else DataFrame(index=df.index)
-            
-            results.append((feat_df, odds_df))
-        
-        return results
         
     def _get_features(self, force_recreate: bool = False, clear_log: bool = False) -> Tuple[List[DataFrame], List[DataFrame]]:
         all_features = []
@@ -191,7 +183,7 @@ class PreProcessing():
 
         for year in self.seasons:
             feat_pipe = FeaturePipeline(year, logger=pipeline_logger)
-            season_feats, odds_data = feat_pipe.start_pipeline(force_recreate, clear_log)
+            season_feats, odds_data = feat_pipe.start_pipeline(force_recreate, self.mkt_only)
             all_features.append(season_feats)
             all_odds.append(odds_data)
 
@@ -262,7 +254,7 @@ class PreProcessing():
                 except Exception as e:
                     self.logger.error(f" Error removing cache file {cache_path}: {e}")
     
-    def preprocess_feats(self, force_recreate: bool = False, force_recreate_preprocessing: bool = False, clear_log: bool = False, is_xgboost: bool = False) -> Tuple[Dict, DataFrame]:
+    def preprocess_feats(self, force_recreate: bool = False, force_recreate_preprocessing: bool = False, clear_log: bool = False) -> Tuple[Dict, DataFrame]:
         """
         Main preprocessing method with caching functionality.
         
@@ -297,9 +289,8 @@ class PreProcessing():
         features, odds_data = self._get_features(force_recreate, clear_log)
 
         self.logger.info(f" Performing feature scaling and data splitting")
-        processed_data = self._feature_scaling(features, is_xgboost)
-
-        all_odds = pd.concat(odds_data)
+        processed_data = self._feature_scaling(features)
+        all_odds = pd.concat(odds_data) 
         
         self.logger.info(f" Caching processed data")
         self._save_cached_data(processed_data, all_odds)
@@ -312,7 +303,7 @@ def main():
     
     logger = setup_logging("feature_preprocessing", LOG_FILE, args=args)
     
-    pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025])
+    pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='xgboost', mkt_only=True)
     pre_processor.logger = logger
     
     preprocessed_feats, odds_data = pre_processor.preprocess_feats(
@@ -320,6 +311,11 @@ def main():
         force_recreate_preprocessing=args.force_recreate_preprocessing,
         clear_log=args.clear_log
     )
+
+    print(preprocessed_feats.keys())
+
+    with open('mkt_ppf.txt', 'w') as f:
+        f.write(preprocessed_feats['X_train'].to_string())
 
 
 

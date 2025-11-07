@@ -18,9 +18,10 @@ logger = logging.getLogger(__name__)
 
 class Odds(BaseFeatures):
 
-    def __init__(self, data: DataFrame, season: int) -> None:
+    def __init__(self, data: DataFrame, season: int, mkt_only: bool = False) -> None:
         super().__init__(season, data)
 
+        self.mkt_only = mkt_only
         self.base_odds_cols = ['away_opening_odds', 'home_opening_odds']
 
     def load_features(self):
@@ -45,9 +46,28 @@ class Odds(BaseFeatures):
         
         df = df.drop(columns=['home_opening_logit_temp'])
         prob_medians_nv = g[['home_opening_prob_nv', 'away_opening_prob_nv']].transform('median')
-
         df['p_open_home_median_nv'] = prob_medians_nv['home_opening_prob_nv']
-    
+
+        if self.mkt_only:
+            prob_medians_raw = g[['home_opening_prob_raw', 'away_opening_prob_raw']].transform('median')
+            prob_means_raw = g[['home_opening_prob_raw', 'away_opening_prob_raw']].transform('mean')
+            prob_std_raw = g[['home_opening_prob_raw', 'away_opening_prob_raw']].transform('std')
+
+            df['p_open_home_median'] = prob_medians_raw['home_opening_prob_raw']
+            df['p_open_home_mean'] = prob_means_raw['home_opening_prob_raw']
+            df['p_open_home_std'] = prob_std_raw['home_opening_prob_raw'].fillna(0.0)
+
+            prob_means_nv = g[['home_opening_prob_nv', 'away_opening_prob_nv']].transform('mean')
+            prob_std_nv = g[['home_opening_prob_nv', 'away_opening_prob_nv']].transform('std')
+
+            df['p_open_home_max_nv'] = g['home_opening_prob_nv'].transform('max')
+            df['p_open_home_min_nv'] = g['home_opening_prob_nv'].transform('min')
+
+            df['p_open_home_median_nv'] = prob_medians_nv['home_opening_prob_nv']
+            df['p_open_home_mean_nv'] = prob_means_nv['home_opening_prob_nv']
+            df['p_open_home_std_nv'] = prob_std_nv['home_opening_prob_nv'].fillna(0.0)
+
+
         return df
 
     def _concat_all_odds_per_game(self, df: DataFrame) -> DataFrame:

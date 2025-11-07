@@ -16,10 +16,11 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "expected_return.log"
 
 class ExpectedReturn:
-    def __init__(self, model_data: DataFrame, odds_data: DataFrame, logger) -> None:
+    def __init__(self, model_data: DataFrame, odds_data: DataFrame, logger, mkt_only: bool = False) -> None:
         self.data = model_data
         self.odds_data = odds_data
         self.logger = logger
+        self.mkt_only = mkt_only
 
     def roi_calculation(self):
         """
@@ -41,7 +42,7 @@ class ExpectedReturn:
         """
         Initializes, loads in, and predicts on the test set of an existing model  
         """
-        model = XGBoostModel(model_args=None, all_data=self.data)
+        model = XGBoostModel(model_args=None, all_data=self.data, mkt_only=self.mkt_only)
         pred = model.predict()
 
         df = DataFrame(self.data['y_test']).copy()
@@ -135,11 +136,9 @@ def main():
     args = create_args()
     logger = setup_logging('expected_return', log_file=LOG_FILE, args=args)
 
-    model_data, odds_data = PreProcessing([2021, 2022, 2023, 2024, 2025]).preprocess_feats(
-            is_xgboost=True
-    )
+    model_data, odds_data = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='xgboost', mkt_only=True).preprocess_feats()
 
-    exp_ret = ExpectedReturn(model_data=model_data, odds_data=odds_data, logger=logger)
+    exp_ret = ExpectedReturn(model_data=model_data, odds_data=odds_data, logger=logger, mkt_only=True)
 
     exp_ret.roi_calculation()
 

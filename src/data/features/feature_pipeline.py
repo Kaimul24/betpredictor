@@ -531,7 +531,7 @@ class FeaturePipeline:
         else:
             return DataFrame()
         
-    def start_pipeline(self, force_recreate: bool = False, clear_log: bool = False) -> Tuple[DataFrame, DataFrame]:
+    def start_pipeline(self, force_recreate: bool = False, mkt_only: bool = False) -> Tuple[DataFrame, DataFrame] | DataFrame:
         self.logger.info("="*60)
         self.logger.info(f" Starting feature pipeline...")
         self.logger.info("="*60 + "\n")
@@ -545,10 +545,25 @@ class FeaturePipeline:
         schedule_data = schedule_data.drop(far_future_games.index)
 
         odds_data = self._load_odds_data()
-        odds_feats = Odds(odds_data, self.season).load_features()
+        odds_feats = Odds(odds_data, self.season, mkt_only).load_features()
         odds_sch_matched, raw_odds_data = self._match_schedule_to_odds(schedule_data, odds_feats)
 
         transformed_schedule = self._transform_schedule(odds_sch_matched)
+
+        if mkt_only:
+            home_only = transformed_schedule[transformed_schedule['is_home'] == True]
+            assert len(home_only) * 2 == len(transformed_schedule)
+
+            cols = ['day_night_game', 'venue_name', 'venue_id', 'venue_elevation', 'venue_timezone', 'venue_gametime_offset', 'status', 'away_starter_normalized',
+                    'home_starter_normalized', 'wind', 'condition', 'temp', 'winning_team', 'losing_team', 'is_home', 'starter_normalized', 'opposing_starter_normalized',
+                     'team_score' , 'opposing_team_score']
+
+            home_only = home_only.drop(columns=cols).reset_index()
+            home_only.rename(columns={'team': 'home_team', 'opposing_team': 'away_team', 'is_winner': 'is_winner_home'}, inplace=True)
+            home_only.set_index(['game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id', 'season'], inplace=True)
+
+            return home_only, raw_odds_data
+        
         batting_features = self._get_batting_features(transformed_schedule, force_recreate)
         
         context_features = GameContextFeatures(self.season, schedule_data).load_features()
@@ -666,7 +681,7 @@ class FeaturePipeline:
                                                     col in ['wind', 'condition'] or 
                                                     col.endswith('_to_drop')])
         
-        final_features = final_features.set_index(['season', 'game_date', 'dh', 'team', 'opposing_team', 'game_id'])
+        final_features = final_features.set_index(['season', 'game_date', 'dh', 'game_datetime', 'team', 'opposing_team', 'game_id'])
 
         assert final_features.index.get_level_values('game_date').is_monotonic_increasing, "final_features game_date not globally sorted"
 
@@ -733,6 +748,8 @@ class FeaturePipeline:
         from_away_cols = [col for col in final_df.columns if col.endswith('_drop_away')]
         final_df = final_df.drop(columns=from_away_cols)
         final_df = final_df.rename(columns={'is_winner': 'is_winner_home'})
+
+        
         
         return final_df
 
@@ -799,10 +816,10 @@ def main():
     
     feat_pipe = FeaturePipeline(2021, logger)
 
-    features, raw_odds_data = feat_pipe.start_pipeline(args.force_recreate, args.clear_log)
+    features = feat_pipe.start_pipeline(args.force_recreate, mkt_only=True)
 
-    # with open("raw_odds_data.txt", "w") as f:
-    #     f.write(raw_odds_data.to_string())
+    with open("mkt_feats.txt", "w") as f:
+        f.write(features.to_string())
 
 if __name__ == "__main__":
     main()

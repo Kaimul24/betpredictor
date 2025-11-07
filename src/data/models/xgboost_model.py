@@ -44,8 +44,10 @@ def create_args():
 
 class XGBoostModel:
 
-    def __init__(self, model_args, all_data: Dict, logger=None):
+    def __init__(self, model_args, all_data: Dict, logger=None, mkt_only: bool = False):
         self.model_args = model_args
+        self.mkt_only = mkt_only
+
         if logger == None:
             self.logger = setup_logging("xgboost_model", LOG_FILE)
         else:
@@ -71,13 +73,6 @@ class XGBoostModel:
         self.p_mkt_val   = p_mkt_val
         self.p_mkt_test  = p_mkt_test
 
-        X_train.drop(columns=["p_open_home_median_nv"], inplace=True)
-        X_val.drop(columns=["p_open_home_median_nv"], inplace=True)
-        X_test.drop(columns=["p_open_home_median_nv"], inplace=True)
-
-        dtrain = xgb.DMatrix(X_train, label=y_train, base_margin=XGBoostModel.logit(p_mkt_train))
-        dtest = xgb.DMatrix(X_test, label=y_test, base_margin=XGBoostModel.logit(p_mkt_test))
-
         self.X_train = X_train
         self.y_train = y_train
 
@@ -87,17 +82,38 @@ class XGBoostModel:
         self.X_test = X_test
         self.y_test = y_test
 
-        self.dtrain = dtrain
-        self.dtest = dtest
-
         n_val = len(self.y_val)
         cutoff = int(0.5 * n_val)
 
         self.val_cutoff = cutoff
-        self.dval_es = xgb.DMatrix(self.X_val[:cutoff], label=self.y_val[:cutoff], base_margin=XGBoostModel.logit(p_mkt_val[:cutoff]))
-        self.dcal    = xgb.DMatrix(self.X_val[cutoff:], label=self.y_val[cutoff:], base_margin=XGBoostModel.logit(p_mkt_val[cutoff:]))
+        
         self.y_cal   = self.y_val[cutoff:]
         self.y_val_es = self.y_val[:cutoff]
+
+        if not self.mkt_only:
+            X_train.drop(columns=["p_open_home_median_nv"], inplace=True)
+            X_val.drop(columns=["p_open_home_median_nv"], inplace=True)
+            X_test.drop(columns=["p_open_home_median_nv"], inplace=True)
+
+            dtrain = xgb.DMatrix(X_train, label=y_train, base_margin=XGBoostModel.logit(p_mkt_train))
+            dtest = xgb.DMatrix(X_test, label=y_test, base_margin=XGBoostModel.logit(p_mkt_test))
+
+            dval_es = xgb.DMatrix(self.X_val[:cutoff], label=self.y_val[:cutoff], base_margin=XGBoostModel.logit(p_mkt_val[:cutoff]))
+            dcal = xgb.DMatrix(self.X_val[cutoff:], label=self.y_val[cutoff:], base_margin=XGBoostModel.logit(p_mkt_val[cutoff:]))
+        else:
+            
+            dtrain = xgb.DMatrix(X_train, label=y_train)
+            dtest = xgb.DMatrix(X_test, label=y_test)
+            dval_es = xgb.DMatrix(self.X_val[:cutoff], label=self.y_val[:cutoff])
+            dcal = xgb.DMatrix(self.X_val[cutoff:], label=self.y_val[cutoff:])
+
+        self.dtrain = dtrain
+        self.dtest = dtest
+
+        self.dval_es = dval_es
+        self.dcal = dcal
+
+        
     
     @staticmethod
     def logit(p, eps=1e-6):
@@ -286,28 +302,6 @@ class XGBoostModel:
         plt.close()
         self.logger.info(f" Saved ROC curve ({split}) to {out_path}")
 
-    def _game_level_margin(self, df: DataFrame, margins: np.ndarray, labels: pd.Series) -> DataFrame:
-        temp_df = df.copy()
-
-        temp_df['margins'] = margins
-        temp_df['labels'] = labels
-
-        pivoted_df = temp_df.pivot_table(index='game_id',
-                               columns='is_home',
-                               values='margins',
-                               aggfunc='first')
-        
-        pivoted_df = pivoted_df.rename(columns={1: "z_home", 0: "z_away"}).dropna()
-        d = (pivoted_df["z_home"] - pivoted_df["z_away"]).rename("d")
-        
-        y_home = (temp_df[temp_df['is_home'] == 1]
-                .reset_index()
-                .set_index('game_id')['labels']
-                .reindex(d.index))
-        
-        out = pd.DataFrame({ "d": d, "y_home": y_home })
-        return out
-
     def train(self, hyperparams: Dict = None):
         
         BASE_PARAMS = {
@@ -338,8 +332,6 @@ class XGBoostModel:
         ll_es    = log_loss(self.y_val_es, p_es)
         auc_es   = roc_auc_score(self.y_val_es, p_es)
         brier_es = brier_score_loss(self.y_val_es, p_es)
-
-        p_acc = np.where(p_es > 0.5, 1, 0)
         
         self.logger.info(f" Val(ES) Log Loss: {ll_es}")
         self.logger.info(f" Val(ES) ROC AUC: {auc_es}")
@@ -450,7 +442,6 @@ class XGBoostModel:
         test_log_loss = log_loss(self.y_test, p_test)
         test_roc_auc  = roc_auc_score(self.y_test, p_test)
         test_brier    = brier_score_loss(self.y_test, p_test)
-        p_acc = np.where(p_test > 0.5, 1, 0)
 
         self.logger.info(f" Test Log Loss: {test_log_loss}")
         self.logger.info(f" Test ROC AUC: {test_roc_auc}")
@@ -489,15 +480,16 @@ def main():
     model_args = create_args()
     logger = setup_logging("xgboost_model", LOG_FILE, args=model_args)
     logger.info("="*75 + "XGBOOST MODEL" + "="*75)
+
+    mkt_only = False
     
-    model_data, odds_data = PreProcessing([2021, 2022, 2023, 2024, 2025]).preprocess_feats(
+    model_data, odds_data = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='xgboost', mkt_only=mkt_only).preprocess_feats(
             force_recreate=model_args.force_recreate,
             force_recreate_preprocessing=model_args.force_recreate_preprocessing,
             clear_log=model_args.clear_log,
-            is_xgboost=True
-        )
+    )
     
-    model = XGBoostModel(model_args, model_data, logger)
+    model = XGBoostModel(model_args, model_data, logger, mkt_only=mkt_only)
     model.train_and_eval_model()
     test_pred = model.predict()
 
