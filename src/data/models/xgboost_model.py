@@ -113,8 +113,6 @@ class XGBoostModel:
         self.dval_es = dval_es
         self.dcal = dcal
 
-        
-    
     @staticmethod
     def logit(p, eps=1e-6):
         p = np.clip(p, eps, 1-eps)
@@ -431,7 +429,7 @@ class XGBoostModel:
         if self.hyperparam_path.exists():
             return json.loads(self.hyperparam_path.read_text())
         
-        self.logger.warning(f"No hyperparameters found at {self.hyperparam_path}")
+        self.logger.warning(f" No hyperparameters found at {self.hyperparam_path}")
         return {}
 
     def predict(self, model: xgb.Booster = None):

@@ -142,6 +142,7 @@ venv.bak/
 *.txt
 *.pkl
 *.png
+*.pt
 # DS_store
 .DS_store
 
