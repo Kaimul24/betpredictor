@@ -1,4 +1,5 @@
 from pandas.core.api import DataFrame as DataFrame
+import pandas as pd
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 import argparse
@@ -63,12 +64,14 @@ class ExpectedReturn:
         """
         Calcuates the total return on the test set for a given policy
         """
-        start_date = pred_df.index[0][1]
         odds_df = self.odds_data.copy()
 
         group_cols = ['game_date', 'dh', 'home_team', 'away_team', 'game_id']
 
-        odds = odds_df[odds_df.index.get_level_values('game_date') >= start_date]
+        cutoff_idx = int(len(pred_df) / 2)
+        cutoff_date = pred_df.index.get_level_values('game_date')[cutoff_idx]
+
+        odds = odds_df[odds_df.index.get_level_values('game_date') >= cutoff_date]
 
         odds_with_pred = pred_df.merge(
             odds,

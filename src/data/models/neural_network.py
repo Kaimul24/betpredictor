@@ -59,10 +59,9 @@ class NNWrapper():
             p = torch.clamp(p, eps, 1 - eps)
             return torch.log(p) - torch.log1p(-p)
 
-        model_data, _ = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='mlp').preprocess_feats(
-                force_recreate=False,
-                force_recreate_preprocessing=False,
-                clear_log=False,
+        model_data, _ = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='mlp', mkt_only=False ).preprocess_feats(
+                force_recreate=True,
+                force_recreate_preprocessing=True,
         )
 
         p_mkt_train = model_data["X_train"]["p_open_home_median_nv"].to_numpy()

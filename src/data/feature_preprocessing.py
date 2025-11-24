@@ -83,15 +83,19 @@ class PreProcessing():
         
         train_dfs = filtered_dfs[:4]
 
-        test_val_df = filtered_dfs[-1].reset_index()
+        test_val_df = filtered_dfs[-1]
 
-        cutoff = int(len(test_val_df) / 2)
+        cutoff_idx = int(len(test_val_df) / 2)
+        cutoff_date = test_val_df.index.get_level_values('game_date')[cutoff_idx]
 
-        val_df = test_val_df[:cutoff]
-        test_df = test_val_df[:cutoff]
+        val_df = test_val_df[test_val_df.index.get_level_values('game_date') <= cutoff_date]
+        test_df = test_val_df[test_val_df.index.get_level_values('game_date') > cutoff_date]
 
-        val_df = val_df.set_index(['season', 'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id']).sort_index()
-        test_df = test_df.set_index(['season', 'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id']).sort_index()
+        self.logger.debug(f" Val length{len(val_df)}")
+        self.logger.debug(f" Test length{len(test_df)}")
+
+        val_df = val_df.reset_index().set_index(['season', 'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id']).sort_index()
+        test_df = test_df.reset_index().set_index(['season', 'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id']).sort_index()
 
         train_data = pd.concat(train_dfs)
         

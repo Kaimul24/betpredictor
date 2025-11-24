@@ -73,22 +73,10 @@ class XGBoostModel:
         self.p_mkt_val   = p_mkt_val
         self.p_mkt_test  = p_mkt_test
 
-        self.X_train = X_train
-        self.y_train = y_train
-
-        self.X_val = X_val
-        self.y_val = y_val
-
-        self.X_test = X_test
-        self.y_test = y_test
-
-        n_val = len(self.y_val)
+        n_val = len(y_val)
         cutoff = int(0.5 * n_val)
 
         self.val_cutoff = cutoff
-        
-        self.y_cal   = self.y_val[cutoff:]
-        self.y_val_es = self.y_val[:cutoff]
 
         if not self.mkt_only:
             X_train.drop(columns=["p_open_home_median_nv"], inplace=True)
@@ -98,14 +86,26 @@ class XGBoostModel:
             dtrain = xgb.DMatrix(X_train, label=y_train, base_margin=XGBoostModel.logit(p_mkt_train))
             dtest = xgb.DMatrix(X_test, label=y_test, base_margin=XGBoostModel.logit(p_mkt_test))
 
-            dval_es = xgb.DMatrix(self.X_val[:cutoff], label=self.y_val[:cutoff], base_margin=XGBoostModel.logit(p_mkt_val[:cutoff]))
-            dcal = xgb.DMatrix(self.X_val[cutoff:], label=self.y_val[cutoff:], base_margin=XGBoostModel.logit(p_mkt_val[cutoff:]))
+            dval_es = xgb.DMatrix(X_val[:cutoff], label=y_val[:cutoff], base_margin=XGBoostModel.logit(p_mkt_val[:cutoff]))
+            dcal = xgb.DMatrix(X_val[cutoff:], label=y_val[cutoff:], base_margin=XGBoostModel.logit(p_mkt_val[cutoff:]))
         else:
             
             dtrain = xgb.DMatrix(X_train, label=y_train)
             dtest = xgb.DMatrix(X_test, label=y_test)
-            dval_es = xgb.DMatrix(self.X_val[:cutoff], label=self.y_val[:cutoff])
-            dcal = xgb.DMatrix(self.X_val[cutoff:], label=self.y_val[cutoff:])
+            dval_es = xgb.DMatrix(X_val[:cutoff], label=y_val[:cutoff])
+            dcal = xgb.DMatrix(X_val[cutoff:], label=y_val[cutoff:])
+
+        self.X_train = X_train
+        self.y_train = y_train
+
+        self.X_val = X_val
+        self.y_val = y_val
+
+        self.X_test = X_test
+        self.y_test = y_test
+        
+        self.y_cal   = self.y_val[cutoff:]
+        self.y_val_es = self.y_val[:cutoff]
 
         self.dtrain = dtrain
         self.dtest = dtest
@@ -329,8 +329,8 @@ class XGBoostModel:
         self.logger.info(f" Early stopping scores...")
         p_es = bst.predict(self.dval_es, iteration_range=(0, bst.best_iteration + 1), training=True)
         
-        ll_es    = log_loss(self.y_val_es, p_es)
-        auc_es   = roc_auc_score(self.y_val_es, p_es)
+        ll_es = log_loss(self.y_val_es, p_es)
+        auc_es = roc_auc_score(self.y_val_es, p_es)
         brier_es = brier_score_loss(self.y_val_es, p_es)
         
         self.logger.info(f" Val(ES) Log Loss: {ll_es}")
@@ -393,8 +393,6 @@ class XGBoostModel:
         self.logger.info(f" Log Loss improvement: {ll_improvement:.4f}")
         self.logger.info(f" Brier Score improvement: {brier_improvement:.4f}")
 
-        self._save_model(bst)
-
         self._plot_roc(self.y_cal, p_cal_calibrated, split="cal")
         out_path_curve = plot_calibration(self.y_cal, p_cal_calibrated, split="cal_after", filepath=filepath, n_bins=25, min_bin_size=min_bin_size)
 
@@ -403,9 +401,26 @@ class XGBoostModel:
         self._percentile_summary(p_cal_calibrated, label="val_cal (post-cal)")
         self._plot_logit_delta(p_cal_calibrated, self.p_mkt_val[self.val_cutoff:], split="val_cal_post")
 
-        _ = self.analyze_feature_importance(bst, self.X_train)
+        combined_X_train = pd.concat([self.X_train, self.X_val])
+        combined_y_train = pd.concat([self.y_train, self.y_val])
+        combined_p_mkt = pd.concat([pd.Series(self.p_mkt_train), pd.Series(self.p_mkt_val)])
 
-        return bst
+        combined_dtrain = xgb.DMatrix(data=combined_X_train, label=combined_y_train, base_margin=XGBoostModel.logit(combined_p_mkt))
+        self.best_interation = bst.best_iteration
+        
+        final_bst = xgb.train(
+            all_params,
+            combined_dtrain,
+            num_boost_round=self.best_interation,
+            verbose_eval=10,
+        )
+
+        self.logger.info(" Retrained on train + val data.")
+        _ = self.analyze_feature_importance(final_bst, self.X_train)
+
+        self._save_model(final_bst)
+
+        return final_bst
     
 
     def _save_hyperparams(self, params: Dict) -> None:
@@ -428,13 +443,14 @@ class XGBoostModel:
             return
         
         self.logger.info(f" Predicting on test set")
-        p_test_raw = model.predict(self.dtest, iteration_range=(0, model.best_iteration + 1), training=False)
+        p_test_raw = model.predict(self.dtest, training=False)
         self.logger.info(f" Raw predictions before calibration: Min: {p_test_raw.min()}, Max: {p_test_raw.max()}, Std: {p_test_raw.std()}")
+        
         try:
             cal = load_calibrator(str(CAL_DIR / "xgb_calibrator.json"))
             p_test = apply_calibration(cal, p_test_raw, self.p_mkt_test)
             self.logger.info(" Applied calibrator to test predictions.")
-            self.logger.info(f" Predictions after calibartion: Min: {p_test.min()}, Max: {p_test.max()}, Std: {p_test.std()}")
+            self.logger.info(f" Predictions after calibration: Min: {p_test.min()}, Max: {p_test.max()}, Std: {p_test.std()}")
         except FileNotFoundError:
             p_test = p_test_raw
             self.logger.info(" No calibrator found; using raw probabilities.")
