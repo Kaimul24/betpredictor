@@ -75,7 +75,6 @@ def prepare_mlp_data(model_data: Dict[str, DataFrame] | None = None, force_recre
         'test_dl': test_dl
     }
 
-
 class NeuralNetwork(nn.Module):
     def __init__(self, in_dim):
         super().__init__()
@@ -93,7 +92,6 @@ class NeuralNetwork(nn.Module):
 
         nn.init.zeros_(self.net[-1].weight)
         nn.init.zeros_(self.net[-1].bias)
-
 
     def forward(self, x):
         mkt_adjustment = self.net(x)
@@ -168,7 +166,7 @@ class NNWrapper():
         return all_preds
     
     def train_and_eval_model(self, optimizer = None, loss_fn = None):
-        retune = model_args.retune
+        retune = self.model_args.retune
 
         if loss_fn is None:
             self.loss_fn = nn.BCEWithLogitsLoss()
@@ -203,18 +201,18 @@ class NNWrapper():
         return self.model
     
     def tune_hyperparameters(self):
-        pbar = tqdm(total=200, desc="Optuna HPO")
+        pbar = tqdm(total=50, desc="Optuna HPO")
 
         def tqdm_callback(study, trial):
             pbar.update(1)
 
         def define_model(trial):
-            n_layers = trial.suggest_int("n_layers", 1, 5)
+            n_layers = trial.suggest_int("n_layers", 1, 4)
             layers = []
             
             in_feats = self.in_dim
             for i in range(n_layers):
-                out_layer = trial.suggest_int("n_units_l{}".format(i), 64, 512)
+                out_layer = trial.suggest_int("n_units_l{}".format(i), 32, 128)
                 layers.append(nn.Linear(in_feats, out_layer))
                 layers.append(nn.ReLU())
                 dropout_layer = trial.suggest_float("dropout_l{}".format(i), 0.2, 0.5)
@@ -231,11 +229,18 @@ class NNWrapper():
         def objective(trial):
             model = define_model(trial).to(self.device)
 
-            optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "RMSprop", "SGD"])
+            # optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "RMSprop", "SGD"])
             lr = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
-            optimizer = getattr(optim, optimizer_name)(model.parameters(), lr=lr)  
+            weight_decay = trial.suggest_float("weight_decay", 1e-4, 0.1, log=True)
+            optimizer = optim.AdamW(
+                model.parameters(),
+                lr=lr,
+                weight_decay=weight_decay
+            )
 
-            for epoch in range(100):
+            # optimizer = getattr(optim, optimizer_name)(model.parameters(), lr=lr)  
+
+            for epoch in range(350):
                 model.train()
 
                 for batch, (X, base_logit, y) in enumerate(self.train_dl):
@@ -268,7 +273,7 @@ class NNWrapper():
             return val_loss
                 
         study = optuna.create_study(direction='minimize')
-        study.optimize(objective, n_trials=200, callbacks=[tqdm_callback])
+        study.optimize(objective, n_trials=50, callbacks=[tqdm_callback])
         pbar.close()
 
         print(f"Number of finished trials: {len(study.trials)}")
@@ -339,6 +344,6 @@ if __name__ == "__main__":
     mlp = NNWrapper(model_args=model_args, in_dim=data['in_dim'], train_dl=data['train_dl'], val_dl=data['val_dl'], test_dl=data['test_dl'])
     mlp.train_and_eval_model()
 
-    preds = mlp.predict_proba(mlp.test_dl)
+    # preds = mlp.predict_proba(mlp.test_dl)
 
 
