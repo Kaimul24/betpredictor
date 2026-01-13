@@ -34,6 +34,48 @@ def create_args():
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
     return parser.parse_args()
 
+def prepare_mlp_data(model_data: Dict[str, DataFrame] | None = None, force_recreate: bool = False, force_recreate_preprocessing: bool = False) -> Dict[str, int | DataLoader]:
+    def to_tensor(x: DataFrame) -> torch.Tensor:
+        return torch.tensor(x.values, dtype=torch.float32)
+    
+    def logit(p, eps=1e-6):
+        p = torch.clamp(p, eps, 1 - eps)
+        return torch.log(p) - torch.log1p(-p)
+    
+    if not model_data:
+        model_data, _ = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='mlp', mkt_only=False).preprocess_feats(
+                    force_recreate=force_recreate,
+                    force_recreate_preprocessing=force_recreate_preprocessing,
+            )
+
+    p_mkt_train = model_data["X_train"]["p_open_home_median_nv"].to_numpy()
+    p_mkt_test = model_data["X_test"]["p_open_home_median_nv"].to_numpy()
+    p_mkt_val = model_data["X_val"]["p_open_home_median_nv"].to_numpy()
+
+    base_train = logit(torch.tensor(p_mkt_train, dtype=torch.float32)).unsqueeze(1)
+    base_val = logit(torch.tensor(p_mkt_val, dtype=torch.float32)).unsqueeze(1)
+    base_test = logit(torch.tensor(p_mkt_test, dtype=torch.float32)).unsqueeze(1)
+
+    model_data['X_train'].drop(columns=["p_open_home_median_nv"], inplace=True)
+    model_data['X_val'].drop(columns=["p_open_home_median_nv"], inplace=True)
+    model_data['X_test'].drop(columns=["p_open_home_median_nv"], inplace=True)
+
+    train_ds = TensorDataset(to_tensor(model_data['X_train']), base_train, to_tensor(model_data['y_train']))
+    val_ds = TensorDataset(to_tensor(model_data['X_val']), base_val, to_tensor(model_data['y_val']))
+    test_ds = TensorDataset(to_tensor(model_data['X_test']), base_test, to_tensor(model_data['y_test']))
+
+    train_dl = DataLoader(train_ds, batch_size=1024, shuffle=True, pin_memory=False, num_workers=2)
+    val_dl = DataLoader(val_ds, batch_size=8192, shuffle=False, pin_memory=False, num_workers=2)
+    test_dl = DataLoader(test_ds, batch_size=8192, shuffle=False, pin_memory=False, num_workers=2)
+
+    return {
+        'in_dim': model_data["X_train"].shape[1],
+        'train_dl': train_dl,
+        'val_dl': val_dl,
+        'test_dl': test_dl
+    }
+
+
 class NeuralNetwork(nn.Module):
     def __init__(self, in_dim):
         super().__init__()
@@ -58,50 +100,13 @@ class NeuralNetwork(nn.Module):
         return mkt_adjustment    
 
 class NNWrapper():
-    def __init__(self, model_args, epochs: int = 100):
+    def __init__(self, model_args, in_dim: int, train_dl: DataLoader, val_dl: DataLoader, test_dl: DataLoader, epochs: int = 100):
         self.device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
         self.epochs = epochs
         self.model_args = model_args
-        self.prepare_mlp_data()
         self.hyperparam_path = HYPERPARAM_DIR / "nn_hyperparams.json"
         
-    def prepare_mlp_data(self) -> None:
-        def to_tensor(x: DataFrame) -> torch.Tensor:
-            return torch.tensor(x.values, dtype=torch.float32)
-        
-        def logit(p, eps=1e-6):
-            p = torch.clamp(p, eps, 1 - eps)
-            return torch.log(p) - torch.log1p(-p)
-        
-        force_recreate = self.model_args.force_recreate
-        force_recreate_preprocessing = self.model_args.force_recreate_preprocessing
-
-        model_data, _ = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='mlp', mkt_only=False ).preprocess_feats(
-                force_recreate=force_recreate,
-                force_recreate_preprocessing=force_recreate_preprocessing,
-        )
-
-        p_mkt_train = model_data["X_train"]["p_open_home_median_nv"].to_numpy()
-        p_mkt_test = model_data["X_test"]["p_open_home_median_nv"].to_numpy()
-        p_mkt_val = model_data["X_val"]["p_open_home_median_nv"].to_numpy()
-
-        base_train = logit(torch.tensor(p_mkt_train, dtype=torch.float32)).unsqueeze(1)
-        base_val = logit(torch.tensor(p_mkt_val, dtype=torch.float32)).unsqueeze(1)
-        base_test = logit(torch.tensor(p_mkt_test, dtype=torch.float32)).unsqueeze(1)
-
-        model_data['X_train'].drop(columns=["p_open_home_median_nv"], inplace=True)
-        model_data['X_val'].drop(columns=["p_open_home_median_nv"], inplace=True)
-        model_data['X_test'].drop(columns=["p_open_home_median_nv"], inplace=True)
-
-        train_ds = TensorDataset(to_tensor(model_data['X_train']), base_train, to_tensor(model_data['y_train']))
-        val_ds = TensorDataset(to_tensor(model_data['X_val']), base_val, to_tensor(model_data['y_val']))
-        test_ds = TensorDataset(to_tensor(model_data['X_test']), base_test, to_tensor(model_data['y_test']))
-
-        train_dl = DataLoader(train_ds, batch_size=1024, shuffle=True, pin_memory=False, num_workers=2)
-        val_dl = DataLoader(val_ds, batch_size=8192, shuffle=False, pin_memory=False, num_workers=2)
-        test_dl = DataLoader(test_ds, batch_size=8192, shuffle=False, pin_memory=False, num_workers=2)
-
-        self.in_dim = model_data['X_train'].shape[1]
+        self.in_dim = in_dim
         self.train_dl = train_dl
         self.val_dl = val_dl
         self.test_dl = test_dl
@@ -328,8 +333,10 @@ class NNWrapper():
 
 if __name__ == "__main__":
     model_args = create_args()
+
+    data = prepare_mlp_data(model_args.force_recreate, model_args.force_recreate_preprocessing)
     
-    mlp = NNWrapper(model_args=model_args)
+    mlp = NNWrapper(model_args=model_args, in_dim=data['in_dim'], train_dl=data['train_dl'], val_dl=data['val_dl'], test_dl=data['test_dl'])
     mlp.train_and_eval_model()
 
     preds = mlp.predict_proba(mlp.test_dl)

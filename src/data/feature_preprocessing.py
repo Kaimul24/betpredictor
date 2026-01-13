@@ -320,7 +320,7 @@ def main():
         clear_log=args.clear_log
     )
 
-    print(preprocessed_feats.keys())
+    print(preprocessed_feats["X_train"].shape)
 
 
 
