@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS odds (
 );
 
 CREATE TABLE IF NOT EXISTS players (
-  player_id TEXT PRIMARY KEY,      
+  player_id INTEGER PRIMARY KEY,      
   mlb_id    INTEGER,
   name      TEXT,
   normalized_player_name TEXT,
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS players (
 );
 
 CREATE TABLE IF NOT EXISTS batting_stats (
-  player_id       TEXT,
+  player_id       INTEGER,
   mlb_id          INTEGER,
   name            TEXT,
   normalized_player_name TEXT, 
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS batting_stats (
 );
 
 CREATE TABLE IF NOT EXISTS pitching_stats (
-  player_id       TEXT,
+  player_id       INTEGER,
   mlb_id          INTEGER,
   name            TEXT,
   normalized_player_name TEXT,
@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS lineup_players (
   opposing_team_id INTEGER,
   opposing_team TEXT,
   dh            INTEGER NOT NULL,
-  player_id     TEXT NOT NULL,
+  player_id     INTEGER NOT NULL,
   position      TEXT NOT NULL,
   batting_order INTEGER,
   season        INTEGER NOT NULL,
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS lineup_players (
 CREATE TABLE IF NOT EXISTS fielding (
   name            TEXT NOT NULL,
   normalized_player_name TEXT,
-  player_id       TEXT NOT NULL,
+  player_id       INTEGER NOT NULL,
   season          INTEGER NOT NULL,
   month           INTEGER,
   frv             REAL,
@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS rosters (
   season        TEXT,
   team          TEXT NOT NULL,
   player_name   TEXT NOT NULL,
-  player_id     TEXT,
+  player_id     INTEGER,
   normalized_player_name TEXT,
   position      TEXT NOT NULL,
   status        TEXT NOT NULL,

@@ -204,7 +204,7 @@ CREATE TABLE IF NOT EXISTS lineup_players (
   opposing_team_id INTEGER,
   opposing_team TEXT,
   dh            INTEGER NOT NULL,
-  player_id     TEXT NOT NULL,
+  player_id     INTEGER NOT NULL,
   position      TEXT NOT NULL,
   batting_order INTEGER,
   season          INTEGER NOT NULL,
