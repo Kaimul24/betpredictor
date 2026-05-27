@@ -818,9 +818,6 @@ def main():
 
     features = feat_pipe.start_pipeline(args.force_recreate, mkt_only=True)
 
-    with open("mkt_feats.txt", "w") as f:
-        f.write(features.to_string())
-
 if __name__ == "__main__":
     main()
     

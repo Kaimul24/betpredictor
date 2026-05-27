@@ -125,8 +125,14 @@ class PreProcessing():
         X_test = test_df.drop(columns=self.target)
         y_test = test_df[self.target]
 
+        market_probability_cols = [
+            col for col in ["p_open_home_median_nv"] if col in X_train.columns
+        ]
         bool_cols = X_train.select_dtypes(include=['bool']).columns.tolist()
-        numeric_cols = X_train.select_dtypes(exclude=['bool']).columns.tolist()
+        numeric_cols = [
+            col for col in X_train.select_dtypes(exclude=['bool']).columns.tolist()
+            if col not in market_probability_cols
+        ]
         object_cols = X_train.select_dtypes(include=['object']).columns.tolist()
         
         self.logger.info(f" Boolean columns: {bool_cols}")
@@ -137,32 +143,32 @@ class PreProcessing():
             self.logger.info(f" Numeric columns to scale: {len(numeric_cols)}")
             scaler = StandardScaler()
 
-            if bool_cols:
-                X_train_numeric_scaled = pd.DataFrame(
-                    scaler.fit_transform(X_train[numeric_cols]),
-                    columns=numeric_cols,
-                    index=X_train.index
-                )
-                
-                X_train_bool = X_train[bool_cols].astype('int')
-                
-                X_train = pd.concat([X_train_numeric_scaled, X_train_bool], axis=1)
-                
-                X_val_numeric_scaled = pd.DataFrame(
-                    scaler.transform(X_val[numeric_cols]),
-                    columns=numeric_cols,
-                    index=X_val.index
-                )
-                X_val_bool = X_val[bool_cols].astype('int')
-                X_val = pd.concat([X_val_numeric_scaled, X_val_bool], axis=1)
-                
-                X_test_numeric_scaled = pd.DataFrame(
-                    scaler.transform(X_test[numeric_cols]),
-                    columns=numeric_cols,
-                    index=X_test.index
-                )
-                X_test_bool = X_test[bool_cols].astype('int')
-                X_test = pd.concat([X_test_numeric_scaled, X_test_bool], axis=1)
+            X_train_numeric_scaled = pd.DataFrame(
+                scaler.fit_transform(X_train[numeric_cols]),
+                columns=numeric_cols,
+                index=X_train.index
+            )
+            X_train_bool = X_train[bool_cols].astype('int')
+            X_train_market = X_train[market_probability_cols]
+            X_train = pd.concat([X_train_numeric_scaled, X_train_bool, X_train_market], axis=1)
+
+            X_val_numeric_scaled = pd.DataFrame(
+                scaler.transform(X_val[numeric_cols]),
+                columns=numeric_cols,
+                index=X_val.index
+            )
+            X_val_bool = X_val[bool_cols].astype('int')
+            X_val_market = X_val[market_probability_cols]
+            X_val = pd.concat([X_val_numeric_scaled, X_val_bool, X_val_market], axis=1)
+
+            X_test_numeric_scaled = pd.DataFrame(
+                scaler.transform(X_test[numeric_cols]),
+                columns=numeric_cols,
+                index=X_test.index
+            )
+            X_test_bool = X_test[bool_cols].astype('int')
+            X_test_market = X_test[market_probability_cols]
+            X_test = pd.concat([X_test_numeric_scaled, X_test_bool, X_test_market], axis=1)
 
         self.logger.debug(f" Dtypes\n{X_train.dtypes.value_counts()}")
         self.logger.debug(f" Final X_train head\n{X_train.head(3).to_string()}")
@@ -311,7 +317,7 @@ def main():
     
     logger = setup_logging("feature_preprocessing", LOG_FILE, args=args)
     
-    pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='xgboost', mkt_only=False)
+    pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='mlp', mkt_only=False)
     pre_processor.logger = logger
     
     preprocessed_feats, odds_data = pre_processor.preprocess_feats(
@@ -319,6 +325,7 @@ def main():
         force_recreate_preprocessing=args.force_recreate_preprocessing,
         clear_log=args.clear_log
     )
+    print(preprocessed_feats)
 
     print(preprocessed_feats["X_train"].shape)
 

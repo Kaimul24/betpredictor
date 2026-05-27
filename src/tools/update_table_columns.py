@@ -156,16 +156,14 @@ class SchemaColumnUpdater:
         existing_columns = {}
         
         with self.db_manager.get_reader_connection() as conn:
-            cursor = conn.cursor()
-            
             # Get all table names
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tables = [row[0] for row in cursor.fetchall()]
+            result = conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in result.fetchall()]
             
             # Get columns for each table
             for table in tables:
-                cursor.execute(f"PRAGMA table_info({table})")
-                columns = {row[1] for row in cursor.fetchall()}  # row[1] is column name
+                result = conn.exec_driver_sql(f"PRAGMA table_info({table})")
+                columns = {row[1] for row in result.fetchall()}  # row[1] is column name
                 existing_columns[table] = columns
                 
         logger.info(f"Found {len(existing_columns)} existing tables in database")
@@ -252,8 +250,6 @@ class SchemaColumnUpdater:
             logger.info("DRY RUN MODE - No changes will be made")
         
         with self.db_manager.get_writer_connection(auto_commit=False) as conn:
-            cursor = conn.cursor()
-            
             try:
                 for table_name, column_definitions in missing_columns.items():
                     logger.info(f"Updating table '{table_name}' with {len(column_definitions)} missing columns")
@@ -271,17 +267,15 @@ class SchemaColumnUpdater:
                             logger.info(f"Would execute: {alter_sql}")
                         else:
                             logger.info(f"Adding column '{col_name}' to table '{table_name}'")
-                            cursor.execute(alter_sql)
+                            conn.exec_driver_sql(alter_sql)
                 
-                if not dry_run:
-                    conn.commit()
-                    logger.info("All missing columns added successfully")
-                else:
+                if dry_run:
                     logger.info("Dry run completed - no changes made")
+                else:
+                    logger.info("All missing columns added successfully")
                     
             except Exception as e:
                 if not dry_run:
-                    conn.rollback()
                     logger.error(f"Error adding columns: {e}")
                 raise
     
@@ -422,4 +416,3 @@ def main():
 
 if __name__ == "__main__":
     exit(main())
-

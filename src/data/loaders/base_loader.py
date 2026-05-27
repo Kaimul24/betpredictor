@@ -47,7 +47,7 @@ class BaseDataLoader(ABC):
         try:
             results = self.db_manager.execute_read_query(query, tuple(params or []))
             if results:
-                df = DataFrame([dict(row) for row in results])
+                df = DataFrame([dict(row._mapping) for row in results])
                 return df
             else:
                 return DataFrame()

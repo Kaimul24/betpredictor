@@ -1,537 +1,320 @@
 """
-Database interface module for MLB stats database.
+SQLAlchemy-backed database interface for the MLB stats database.
 
-This module provides a centralized, thread-safe interface for all database
-operations in the betpredictor project. It handles connection management,
-transaction control, schema management, and ensures proper concurrency
-with multiple readers and single writer pattern.
-
-Classes:
-    DatabaseManager: Main database interface with connection pooling and transaction management
-    ReadOnlyConnection: Context manager for read-only database operations
-    WriterConnection: Context manager for write operations with exclusive access
+This module keeps the existing DatabaseManager API used throughout the project
+while delegating SQLite connection pooling and transaction handling to
+SQLAlchemy Core.
 """
 
-import sqlite3
-import threading
-import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, List, Tuple, Any, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import logging
-from concurrent.futures import ThreadPoolExecutor
-import queue
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Connection, Engine, Row
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
+from sqlalchemy.pool import QueuePool
+
 logger = logging.getLogger(__name__)
 
 
 class DatabaseError(Exception):
     """Base exception for database operations."""
-    pass
 
 
 class ConnectionPoolError(DatabaseError):
     """Exception raised when connection pool operations fail."""
-    pass
 
 
 class TransactionError(DatabaseError):
     """Exception raised when transaction operations fail."""
-    pass
 
 
 class DatabaseManager:
     """
-    Thread-safe database manager with connection pooling and transaction management.
-    
-    Implements a multiple-reader, single-writer pattern:
-    - Multiple concurrent read operations are allowed
-    - Only one write operation at a time
-    - Read operations are blocked during write operations
+    Database manager backed by a SQLAlchemy Core Engine.
+
+    Public methods intentionally mirror the previous sqlite3 wrapper so callers
+    can continue using raw SQL strings and positional "?" parameters.
     """
-    
-    def __init__(self, db_path: Union[str, Path], schema_path: Union[str, Path], 
-                 max_connections: int = 10, connection_timeout: float = 30.0):
-        """
-        Initialize database manager.
-        
-        Args:
-            db_path: Path to SQLite database file
-            schema_path: Path to SQL schema file
-            max_connections: Maximum number of connections in pool
-            connection_timeout: Timeout for acquiring connections (seconds)
-        """
+
+    def __init__(
+        self,
+        db_path: Union[str, Path],
+        schema_path: Union[str, Path],
+        max_connections: int = 10,
+        connection_timeout: float = 30.0,
+    ):
         self.db_path = Path(db_path)
         self.schema_path = Path(schema_path)
         self.max_connections = max_connections
         self.connection_timeout = connection_timeout
-        
-        self._lock = threading.RLock()
-        self._reader_writer_lock = threading.RLock()
-        self._active_readers = 0
-        self._writer_active = False
-        self._writer_waiting = False
-        
-        self._connection_pool: queue.Queue = queue.Queue(maxsize=max_connections)
-        self._active_connections: Dict[int, sqlite3.Connection] = {}
-        
-        self._ensure_database_exists()
-        self._initialize_connection_pool()
-        
-        logger.info(f"DatabaseManager initialized with {max_connections} max connections")
-    
-    def _ensure_database_exists(self) -> None:
-        """Ensure database directory exists and create database if needed."""
+
+        self._ensure_database_directory()
+        self.engine = self._create_engine()
+
+        logger.info("DatabaseManager initialized with SQLAlchemy engine")
+
+    def _ensure_database_directory(self) -> None:
+        """Ensure the SQLite database directory exists."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        if not self.db_path.exists():
-            logger.info(f"Creating new database at {self.db_path}")
-            conn = sqlite3.connect(str(self.db_path))
-            conn.close()
-    
-    def _initialize_connection_pool(self) -> None:
-        """Initialize the connection pool with configured connections."""
-        for _ in range(self.max_connections):
-            conn = self._create_connection()
-            self._connection_pool.put(conn)
-    
-    def _create_connection(self) -> sqlite3.Connection:
-        """
-        Create a new database connection with optimal settings.
-        
-        Returns:
-            Configured SQLite connection
-        """
-        conn = sqlite3.connect(
-            str(self.db_path),
-            check_same_thread=False,
-            timeout=self.connection_timeout
+
+    def _create_engine(self) -> Engine:
+        """Create a SQLite SQLAlchemy engine with the project's PRAGMAs."""
+        engine = create_engine(
+            f"sqlite:///{self.db_path}",
+            future=True,
+            poolclass=QueuePool,
+            pool_size=self.max_connections,
+            max_overflow=0,
+            pool_timeout=self.connection_timeout,
+            connect_args={
+                "check_same_thread": False,
+                "timeout": self.connection_timeout,
+            },
         )
-        
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA synchronous = NORMAL")
-        conn.execute("PRAGMA cache_size = -64000")
-        conn.execute("PRAGMA temp_store = MEMORY")
-        conn.execute("PRAGMA mmap_size = 268435456") 
-        
-        conn.row_factory = sqlite3.Row
-        
-        return conn
-    
-    def _get_connection(self) -> sqlite3.Connection:
-        """
-        Get a connection from the pool.
-        
-        Returns:
-            Database connection
-            
-        Raises:
-            ConnectionPoolError: If no connection available within timeout
-        """
-        try:
-            conn = self._connection_pool.get(timeout=self.connection_timeout)
-            thread_id = threading.get_ident()
-            self._active_connections[thread_id] = conn
-            return conn
-        except queue.Empty:
-            raise ConnectionPoolError(f"No connection available within {self.connection_timeout} seconds")
-    
-    def _return_connection(self, conn: sqlite3.Connection) -> None:
-        """
-        Return a connection to the pool.
-        
-        Args:
-            conn: Connection to return
-        """
-        thread_id = threading.get_ident()
-        if thread_id in self._active_connections:
-            del self._active_connections[thread_id]
-        
-        try:
-            conn.rollback()
-            self._connection_pool.put(conn, block=False)
-        except queue.Full:
-            conn.close()
-    
-    def _acquire_reader_lock(self) -> None:
-        """Acquire reader lock (multiple readers allowed)."""
-        with self._lock:
-            while self._writer_active or self._writer_waiting:
-                time.sleep(0.001)
-            
-            self._active_readers += 1
-            logger.debug(f"Reader acquired lock. Active readers: {self._active_readers}")
-    
-    def _release_reader_lock(self) -> None:
-        """Release reader lock."""
-        with self._lock:
-            self._active_readers -= 1
-            logger.debug(f"Reader released lock. Active readers: {self._active_readers}")
-    
-    def _acquire_writer_lock(self) -> None:
-        """Acquire writer lock (exclusive access)."""
-        with self._lock:
-            self._writer_waiting = True
-            
-            while self._active_readers > 0 or self._writer_active:
-                time.sleep(0.001)
-            
-            self._writer_active = True
-            self._writer_waiting = False
-            logger.debug("Writer acquired exclusive lock")
-    
-    def _release_writer_lock(self) -> None:
-        """Release writer lock."""
-        with self._lock:
-            self._writer_active = False
-            logger.debug("Writer released exclusive lock")
-    
+
+        @event.listens_for(engine, "connect")
+        def _set_sqlite_pragmas(dbapi_connection, _connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA foreign_keys = ON")
+                cursor.execute("PRAGMA journal_mode = WAL")
+                cursor.execute("PRAGMA synchronous = NORMAL")
+                cursor.execute("PRAGMA cache_size = -64000")
+                cursor.execute("PRAGMA temp_store = MEMORY")
+                cursor.execute("PRAGMA mmap_size = 268435456")
+            finally:
+                cursor.close()
+
+        return engine
+
+    @staticmethod
+    def _normalize_params(params: Tuple | List | None) -> Tuple:
+        if params is None:
+            return ()
+        if isinstance(params, tuple):
+            return params
+        return tuple(params)
+
     @contextmanager
     def get_reader_connection(self):
         """
-        Context manager for read-only database operations.
-        
+        Context manager for read database operations.
+
         Yields:
-            sqlite3.Connection: Read-only database connection
-            
-        Example:
-            with db_manager.get_reader_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT * FROM players")
-                results = cursor.fetchall()
+            sqlalchemy.engine.Connection
         """
-        self._acquire_reader_lock()
-        conn = None
         try:
-            conn = self._get_connection()
-            yield conn
-        finally:
-            if conn:
-                self._return_connection(conn)
-            self._release_reader_lock()
-    
+            with self.engine.connect() as conn:
+                yield conn
+        except SQLAlchemyTimeoutError as e:
+            raise ConnectionPoolError(
+                f"No connection available within {self.connection_timeout} seconds"
+            ) from e
+
     @contextmanager
     def get_writer_connection(self, auto_commit: bool = True):
         """
         Context manager for write database operations.
-        
+
         Args:
-            auto_commit: Whether to automatically commit transaction on success
-            
+            auto_commit: Whether to commit the transaction on success.
+
         Yields:
-            sqlite3.Connection: Database connection for writing
-            
-        Example:
-            with db_manager.get_writer_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("INSERT INTO players VALUES (?, ?)", (id, name))
+            sqlalchemy.engine.Connection
         """
-        self._acquire_writer_lock()
-        conn = None
         try:
-            conn = self._get_connection()
             if auto_commit:
-                conn.execute("BEGIN IMMEDIATE")
-            yield conn
-            if auto_commit:
-                conn.commit()
+                with self.engine.begin() as conn:
+                    yield conn
+            else:
+                with self.engine.connect() as conn:
+                    transaction = conn.begin()
+                    try:
+                        yield conn
+                    except Exception:
+                        transaction.rollback()
+                        raise
+                    else:
+                        transaction.commit()
+        except SQLAlchemyTimeoutError as e:
+            raise ConnectionPoolError(
+                f"No connection available within {self.connection_timeout} seconds"
+            ) from e
         except Exception as e:
-            if conn and auto_commit:
-                conn.rollback()
             raise TransactionError(f"Transaction failed: {e}") from e
-        finally:
-            if conn:
-                self._return_connection(conn)
-            self._release_writer_lock()
-    
-    def execute_read_query(self, query: str, params: Tuple = ()) -> List[sqlite3.Row]:
-        """
-        Execute a read-only query and return all results.
-        
-        Args:
-            query: SQL query string
-            params: Query parameters
-            
-        Returns:
-            List of query results
-        """
+
+    def execute_read_query(self, query: str, params: Tuple = ()) -> List[Row]:
+        """Execute a read query and return all rows."""
         with self.get_reader_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            return cursor.fetchall()
-    
-    def execute_read_query_one(self, query: str, params: Tuple = ()) -> Optional[sqlite3.Row]:
-        """
-        Execute a read-only query and return first result.
-        
-        Args:
-            query: SQL query string
-            params: Query parameters
-            
-        Returns:
-            First query result or None
-        """
+            result = conn.exec_driver_sql(query, self._normalize_params(params))
+            return result.fetchall()
+
+    def execute_read_query_one(self, query: str, params: Tuple = ()) -> Optional[Row]:
+        """Execute a read query and return the first row, if any."""
         with self.get_reader_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            return cursor.fetchone()
-    
+            result = conn.exec_driver_sql(query, self._normalize_params(params))
+            return result.fetchone()
+
     def execute_write_query(self, query: str, params: Tuple = ()) -> int:
-        """
-        Execute a write query and return affected rows.
-        
-        Args:
-            query: SQL query string
-            params: Query parameters
-            
-        Returns:
-            Number of affected rows
-        """
+        """Execute a write query and return the affected row count."""
         with self.get_writer_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            return cursor.rowcount
-    
+            result = conn.exec_driver_sql(query, self._normalize_params(params))
+            return result.rowcount
+
     def execute_many_write_queries(self, query: str, params_list: List[Tuple]) -> int:
-        """
-        Execute multiple write queries in a single transaction.
-        
-        Args:
-            query: SQL query string
-            params_list: List of parameter tuples
-            
-        Returns:
-            Number of affected rows
-        """
+        """Execute an executemany write query in one transaction."""
+        if not params_list:
+            return 0
+
         with self.get_writer_connection() as conn:
-            cursor = conn.cursor()
-            cursor.executemany(query, params_list)
-            return cursor.rowcount
-    
+            result = conn.exec_driver_sql(query, params_list)
+            return result.rowcount
+
     def initialize_schema(self, force_recreate: bool = False) -> None:
         """
-        Initialize or recreate database schema.
-        
+        Initialize or recreate the database schema from schema.sql.
+
         Args:
-            force_recreate: Whether to drop existing tables first
+            force_recreate: Whether to drop existing tables first.
         """
         if not self.schema_path.exists():
             raise DatabaseError(f"Schema file not found: {self.schema_path}")
-        
+
         schema_sql = self.schema_path.read_text()
-        
-        with self.get_writer_connection(auto_commit=False) as conn:
+
+        raw_conn = self.engine.raw_connection()
+        try:
+            cursor = raw_conn.cursor()
             try:
                 if force_recreate:
-                    # Get all table names and drop them
-                    cursor = conn.cursor()
                     cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
                     tables = [row[0] for row in cursor.fetchall()]
-                    
                     for table in tables:
                         cursor.execute(f"DROP TABLE IF EXISTS {table}")
-                    
                     logger.info("Dropped existing tables")
-                
-                
-                # Execute schema
-                conn.executescript(schema_sql)
-                conn.commit()
+
+                raw_conn.executescript(schema_sql)
+                raw_conn.commit()
                 logger.info("Schema initialized successfully")
-                
-            except Exception as e:
-                conn.rollback()
-                raise DatabaseError(f"Failed to initialize schema: {e}") from e
-    
-    # def _migrate_existing_schema(self, conn: sqlite3.Connection, tables_to_update: List[str]) -> None:
-    #     """
-    #     Migrate existing schema to add missing columns.
-        
-    #     Args:
-    #         conn: Database connection
-    #     """
-    #     cursor = conn.cursor()
-        
-    #     cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    #     existing_tables = [row[0] for row in cursor.fetchall()]
-        
-    #     # Tables that should have a season column
-    #     tables_to_update = [
-    #         'schedule', 'odds', 'batting_stats', 'pitching_stats', 
-    #         'lineups', 'lineup_players', 'fielding'
-    #     ]
-        
-    #     for table in tables_to_update:
-    #         if table in existing_tables:
-    #             # Check if season column exists
-    #             cursor.execute(f"PRAGMA table_info({table})")
-    #             columns = [col[1] for col in cursor.fetchall()]
-                
-    #             if 'season' not in columns:
-    #                 logger.info(f"Adding season column to {table}")
-    #                 try:
-    #                     # Add the season column
-    #                     cursor.execute(f"ALTER TABLE {table} ADD COLUMN season INTEGER")
-                        
-    #                     # Populate season from game_date if that column exists
-    #                     if 'game_date' in columns:
-    #                         cursor.execute(f"""
-    #                             UPDATE {table} 
-    #                             SET season = CAST(substr(game_date, 1, 4) AS INTEGER) 
-    #                             WHERE season IS NULL
-    #                         """)
-    #                         logger.info(f"Populated season column for {table}")
-    #                 except Exception as e:
-    #                     logger.warning(f"Failed to migrate {table}: {e}")
-    #                     # If the table doesn't exist in the new schema, it's okay to skip
-    #                     pass
-    
+            finally:
+                cursor.close()
+        except Exception as e:
+            raw_conn.rollback()
+            raise DatabaseError(f"Failed to initialize schema: {e}") from e
+        finally:
+            raw_conn.close()
+
     def create_indexes(self, index_queries: list[str]) -> None:
         """Create additional indexes for better query performance."""
         with self.get_writer_connection() as conn:
-            cursor = conn.cursor()
             for query in index_queries:
-                cursor.execute(query)
+                conn.exec_driver_sql(query)
             logger.info("Additional indexes created")
-    
+
     def vacuum_database(self) -> None:
         """Vacuum database to reclaim space and optimize performance."""
-        with self.get_writer_connection(auto_commit=False) as conn:
-            conn.execute("VACUUM")
+        with self.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            conn.exec_driver_sql("VACUUM")
             logger.info("Database vacuumed successfully")
-    
+
     def analyze_database(self) -> None:
         """Update database statistics for query optimization."""
         with self.get_writer_connection() as conn:
-            conn.execute("ANALYZE")
+            conn.exec_driver_sql("ANALYZE")
             logger.info("Database analyzed successfully")
-    
+
     def get_database_info(self) -> Dict[str, Any]:
-        """
-        Get database information and statistics.
-        
-        Returns:
-            Dictionary with database information
-        """
+        """Get database information and table row counts."""
         with self.get_reader_connection() as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tables = [row[0] for row in cursor.fetchall()]
-            
-            cursor.execute("PRAGMA page_count")
-            page_count = cursor.fetchone()[0]
-            cursor.execute("PRAGMA page_size")
-            page_size = cursor.fetchone()[0]
+            result = conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in result.fetchall()]
+
+            page_count = conn.exec_driver_sql("PRAGMA page_count").fetchone()[0]
+            page_size = conn.exec_driver_sql("PRAGMA page_size").fetchone()[0]
             db_size = page_count * page_size
-            
+
             table_counts = {}
             for table in tables:
-                cursor.execute(f"SELECT COUNT(*) FROM {table}")
-                table_counts[table] = cursor.fetchone()[0]
-            
+                table_counts[table] = conn.exec_driver_sql(
+                    f"SELECT COUNT(*) FROM {table}"
+                ).fetchone()[0]
+
+            pool = self.engine.pool
             return {
                 "database_path": str(self.db_path),
                 "database_size_bytes": db_size,
                 "database_size_mb": round(db_size / (1024 * 1024), 2),
                 "tables": tables,
                 "table_row_counts": table_counts,
-                "active_readers": self._active_readers,
-                "writer_active": self._writer_active,
-                "connection_pool_size": self._connection_pool.qsize(),
-                "active_connections": len(self._active_connections)
+                "pool_size": pool.size() if hasattr(pool, "size") else None,
+                "checked_in_connections": (
+                    pool.checkedin() if hasattr(pool, "checkedin") else None
+                ),
+                "checked_out_connections": (
+                    pool.checkedout() if hasattr(pool, "checkedout") else None
+                ),
             }
-    
+
     def check_connection_health(self) -> bool:
-        """
-        Check if database connections are healthy.
-        
-        Returns:
-            True if connections are healthy, False otherwise
-        """
+        """Return True if the engine can execute a simple query."""
         try:
             with self.get_reader_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT 1")
-                result = cursor.fetchone()
+                result = conn.exec_driver_sql("SELECT 1").fetchone()
                 return result[0] == 1
         except Exception as e:
             logger.error(f"Database health check failed: {e}")
             return False
-    
+
     def close_all_connections(self) -> None:
-        """Close all connections in the pool. Call this when shutting down."""
-        logger.info("Closing all database connections")
-        
-        for conn in self._active_connections.values():
-            try:
-                conn.close()
-            except Exception as e:
-                logger.warning(f"Error closing active connection: {e}")
-        self._active_connections.clear()
-        
-        while not self._connection_pool.empty():
-            try:
-                conn = self._connection_pool.get_nowait()
-                conn.close()
-            except (queue.Empty, Exception) as e:
-                if not isinstance(e, queue.Empty):
-                    logger.warning(f"Error closing pooled connection: {e}")
-                break
-        
-        logger.info("All database connections closed")
+        """Dispose of all pooled SQLAlchemy connections."""
+        logger.info("Disposing database engine")
+        self.engine.dispose()
 
 
-# Global database manager instance
 _db_manager: Optional[DatabaseManager] = None
 
 
-def get_database_manager(db_path: Union[str, Path] = None, 
-                        schema_path: Union[str, Path] = None,
-                        max_connections: int = 10) -> DatabaseManager:
+def get_database_manager(
+    db_path: Union[str, Path] = None,
+    schema_path: Union[str, Path] = None,
+    max_connections: int = 10,
+) -> DatabaseManager:
     """
     Get or create the global database manager instance.
-    
+
     Args:
-        db_path: Path to database file (only used on first call)
-        schema_path: Path to schema file (only used on first call)
-        max_connections: Maximum connections in pool (only used on first call)
-        
-    Returns:
-        DatabaseManager instance
+        db_path: Path to database file, only used on first call.
+        schema_path: Path to SQL schema file, only used on first call.
+        max_connections: Engine pool size, only used on first call.
     """
     global _db_manager
-    
+
     if _db_manager is None:
         if db_path is None or schema_path is None:
             try:
                 from src.config import DATABASE_PATH, SCHEMA_PATH
+
                 db_path = db_path or DATABASE_PATH
                 schema_path = schema_path or SCHEMA_PATH
             except ImportError:
                 raise DatabaseError("Database paths must be provided on first call")
-        
+
         _db_manager = DatabaseManager(db_path, schema_path, max_connections)
-    
+
     return _db_manager
 
 
 def initialize_database(force_recreate: bool = False) -> None:
-    """
-    Initialize the database schema.
-    
-    Args:
-        force_recreate: Whether to recreate all tables
-    """
+    """Initialize the database schema."""
     db_manager = get_database_manager()
     db_manager.initialize_schema(force_recreate)
 
 
 def close_database_connections() -> None:
-    """Close all database connections."""
+    """Close all database connections and reset the global manager."""
     global _db_manager
     if _db_manager:
         _db_manager.close_all_connections()
@@ -542,12 +325,8 @@ def close_database_connections() -> None:
 def get_db_connection(readonly: bool = True):
     """
     Convenience context manager for database connections.
-    
-    Args:
-        readonly: Whether connection is read-only
-        
-    Yields:
-        Database connection
+
+    Yields a SQLAlchemy Connection.
     """
     db_manager = get_database_manager()
     if readonly:
@@ -558,35 +337,19 @@ def get_db_connection(readonly: bool = True):
             yield conn
 
 
-def execute_query(query: str, params: Tuple = (), readonly: bool = True) -> Union[List[sqlite3.Row], int]:
+def execute_query(query: str, params: Tuple = (), readonly: bool = True) -> Union[List[Row], int]:
     """
     Execute a database query.
-    
-    Args:
-        query: SQL query
-        params: Query parameters
-        readonly: Whether query is read-only
-        
-    Returns:
-        Query results (list) for read queries, affected rows (int) for write queries
+
+    Returns query rows for read queries and affected row count for writes.
     """
     db_manager = get_database_manager()
     if readonly:
         return db_manager.execute_read_query(query, params)
-    else:
-        return db_manager.execute_write_query(query, params)
+    return db_manager.execute_write_query(query, params)
 
 
-def execute_query_one(query: str, params: Tuple = ()) -> Optional[sqlite3.Row]:
-    """
-    Execute a query and return first result.
-    
-    Args:
-        query: SQL query
-        params: Query parameters
-        
-    Returns:
-        First result or None
-    """
+def execute_query_one(query: str, params: Tuple = ()) -> Optional[Row]:
+    """Execute a query and return the first row."""
     db_manager = get_database_manager()
     return db_manager.execute_read_query_one(query, params)

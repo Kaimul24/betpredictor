@@ -19,6 +19,8 @@ dependencies = [
     "torchvision>=0.24.0",
     "torchaudio>=2.9.0",
     "pandas>=2.3.3",
+    "python-dotenv>=1.2.1",
+    "sqlalchemy>=2.0",
 ]
 
 [project.optional-dependencies]

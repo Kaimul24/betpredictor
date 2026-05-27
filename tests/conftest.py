@@ -5,7 +5,6 @@ This module provides test fixtures for setting up isolated test databases
 and helper functions for seeding test data.
 """
 
-import sqlite3
 import tempfile
 import pathlib
 from datetime import date, datetime
@@ -67,11 +66,10 @@ def clean_db(synthetic_db):
     ]
     
     with synthetic_db.get_writer_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA foreign_keys = OFF")
+        conn.exec_driver_sql("PRAGMA foreign_keys = OFF")
         for table in tables:
-            cursor.execute(f"DELETE FROM {table}")
-        cursor.execute("PRAGMA foreign_keys = ON")
+            conn.exec_driver_sql(f"DELETE FROM {table}")
+        conn.exec_driver_sql("PRAGMA foreign_keys = ON")
     
     return synthetic_db
 
@@ -143,12 +141,22 @@ def insert_batting_stats(dbm, stats: List[Tuple]) -> None:
         stats: List of tuples with batting data
                (player_id, game_date, team, dh, ab, pa, bip, ops, wrc_plus, season)
     """
+    normalized_stats = []
+    for stat in stats:
+        if len(stat) == 9:
+            player_id, game_date, team, dh, ab, pa, ops, wrc_plus, season = stat
+            normalized_stats.append(
+                (player_id, game_date, team, dh, ab, pa, None, ops, wrc_plus, season)
+            )
+        else:
+            normalized_stats.append(stat)
+
     query = """
     INSERT INTO batting_stats (
         player_id, game_date, team, dh, ab, pa, bip, ops, wrc_plus, season
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
-    dbm.execute_many_write_queries(query, stats)
+    dbm.execute_many_write_queries(query, normalized_stats)
 
 
 def insert_pitching_stats(dbm, stats: List[Tuple]) -> None:

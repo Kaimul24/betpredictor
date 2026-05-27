@@ -1,12 +1,13 @@
 from pandas.core.api import DataFrame as DataFrame
 import pandas as pd
-from typing import Dict
+from typing import Dict, List
 import optuna, json, argparse
 from tqdm import tqdm
 import torch.nn as nn
 import torch.optim as optim
 import torch
 from torch.utils.data import DataLoader, TensorDataset
+import matplotlib.pyplot as plt
 
 from src.data.models.calibration import select_and_fit_calibrator, save_calibrator, load_calibrator, apply_calibration, plot_calibration
 from src.data.feature_preprocessing import PreProcessing
@@ -23,10 +24,20 @@ LOG_DIR = PROJECT_ROOT / "src" / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "neural_network_log.log"
 
+PLOTS_DIR = PROJECT_ROOT / "src" / "data" / "plots"
+PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+
 def create_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description="Neural Network Model Pipeline")
     parser.add_argument("--retune", action='store_true', help='Retune hyperparameters')
+    parser.add_argument("--use-hyperparams", action=argparse.BooleanOptionalAction, help='Use existing hyperparameters')
+    parser.add_argument("--base-hidden-size", type=int, default=256, help="Base hidden units per layer")
+    parser.add_argument("--max-residual", type=float, default=0.5, help="Max market adjustment")
+    parser.add_argument("--alpha", type=float, default=0.7, help="Adjustment scaling factor")
+    parser.add_argument("--p-drop", type=float, default=0.2, help="Dropout Probability")
+    parser.add_argument("--train-batch", type=int, default=1024, help="Training Batch Size")
+    parser.add_argument("--val-batch", type=int, default=8192, help="Val Batch Size")
     parser.add_argument("--force-recreate", action="store_true", help="Recreate rolling features, even if cached file exists")
     parser.add_argument("--force-recreate-preprocessing", action="store_true", help="Recreate preprocessed datasets, even if cached file exists")
     parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
@@ -34,7 +45,14 @@ def create_args():
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
     return parser.parse_args()
 
-def prepare_mlp_data(model_data: Dict[str, DataFrame] | None = None, force_recreate: bool = False, force_recreate_preprocessing: bool = False) -> Dict[str, int | DataLoader]:
+def prepare_mlp_data(
+        model_data: Dict[str, DataFrame] | None = None, 
+        force_recreate: bool = False, 
+        force_recreate_preprocessing: bool = False,
+        train_batch_size: int = 1024,
+        val_batch_size: int = 8192
+    ) -> Dict[str, int | DataLoader]:
+
     def to_tensor(x: DataFrame) -> torch.Tensor:
         return torch.tensor(x.values, dtype=torch.float32)
     
@@ -52,6 +70,17 @@ def prepare_mlp_data(model_data: Dict[str, DataFrame] | None = None, force_recre
     p_mkt_test = model_data["X_test"]["p_open_home_median_nv"].to_numpy()
     p_mkt_val = model_data["X_val"]["p_open_home_median_nv"].to_numpy()
 
+    for split, p_mkt in {
+        "train": p_mkt_train,
+        "val": p_mkt_val,
+        "test": p_mkt_test,
+    }.items():
+        if ((p_mkt < 0) | (p_mkt > 1)).any():
+            raise ValueError(
+                f"p_open_home_median_nv contains values outside [0, 1] in the {split} split. "
+                "Rebuild the MLP preprocessing cache with --force-recreate-preprocessing."
+            )
+
     base_train = logit(torch.tensor(p_mkt_train, dtype=torch.float32)).unsqueeze(1)
     base_val = logit(torch.tensor(p_mkt_val, dtype=torch.float32)).unsqueeze(1)
     base_test = logit(torch.tensor(p_mkt_test, dtype=torch.float32)).unsqueeze(1)
@@ -64,9 +93,9 @@ def prepare_mlp_data(model_data: Dict[str, DataFrame] | None = None, force_recre
     val_ds = TensorDataset(to_tensor(model_data['X_val']), base_val, to_tensor(model_data['y_val']))
     test_ds = TensorDataset(to_tensor(model_data['X_test']), base_test, to_tensor(model_data['y_test']))
 
-    train_dl = DataLoader(train_ds, batch_size=1024, shuffle=True, pin_memory=False, num_workers=2)
-    val_dl = DataLoader(val_ds, batch_size=8192, shuffle=False, pin_memory=False, num_workers=2)
-    test_dl = DataLoader(test_ds, batch_size=8192, shuffle=False, pin_memory=False, num_workers=2)
+    train_dl = DataLoader(train_ds, batch_size=train_batch_size, shuffle=True, pin_memory=False, num_workers=2)
+    val_dl = DataLoader(val_ds, batch_size=val_batch_size, shuffle=False, pin_memory=False, num_workers=2)
+    test_dl = DataLoader(test_ds, batch_size=val_batch_size, shuffle=False, pin_memory=False, num_workers=2)
 
     return {
         'in_dim': model_data["X_train"].shape[1],
@@ -76,31 +105,72 @@ def prepare_mlp_data(model_data: Dict[str, DataFrame] | None = None, force_recre
     }
 
 class NeuralNetwork(nn.Module):
-    def __init__(self, in_dim):
+    def __init__(self, in_dim: int, base_hidden_size: int = 256, p_drop: float = 0.2, max_residual: float = 0.5):
         super().__init__()
+        self.max_residual = max_residual
+
         self.net = nn.Sequential(
-            nn.Linear(in_dim, 256),
+            nn.Linear(in_dim, base_hidden_size),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, 128),
+            
+            nn.Linear(base_hidden_size, base_hidden_size * 2),
+            nn.Dropout(p_drop),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 64),
+
+            nn.Linear(base_hidden_size * 2, base_hidden_size * 2),
+            nn.Dropout(p_drop),
             nn.ReLU(),
-            nn.Linear(64, 1)
+
+            nn.Linear(base_hidden_size * 2, base_hidden_size),
+            nn.Dropout(p_drop),
+            nn.ReLU(),
+
+            nn.Linear(base_hidden_size, base_hidden_size // 2),
+            nn.Dropout(p_drop),
+            nn.ReLU(),
+            
+            nn.Linear(base_hidden_size // 2, 1),
+        )
+
+        self.small_net = nn.Sequential(
+            nn.Linear(in_dim, 64),
+            nn.Dropout(p_drop),
+            nn.ReLU(),
+
+            nn.Linear(64, 16),
+            nn.Dropout(p_drop),
+            nn.ReLU(),
+
+            nn.Linear(16, 1),
+            nn.Dropout(p_drop),
         )
 
         nn.init.zeros_(self.net[-1].weight)
         nn.init.zeros_(self.net[-1].bias)
 
     def forward(self, x):
-        mkt_adjustment = self.net(x)
+        raw_adjustment = self.net(x)
+        mkt_adjustment = self.max_residual * torch.tanh(raw_adjustment)
         return mkt_adjustment    
 
 class NNWrapper():
-    def __init__(self, model_args, in_dim: int, train_dl: DataLoader, val_dl: DataLoader, test_dl: DataLoader, epochs: int = 100):
+    def __init__(
+            self, 
+            model_args, 
+            in_dim: int, 
+            train_dl: DataLoader, 
+            val_dl: DataLoader, 
+            test_dl: DataLoader,
+            max_residual: float = 0.5, 
+            alpha: float = 0.7,
+            epochs: int = 100):
+        
         self.device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
         self.epochs = epochs
+        self.max_residual = max_residual
+        self.alpha = alpha
+        self.base_hidden_size = model_args.base_hidden_size if model_args.base_hidden_size is not None else 256
+        self.p_drop = model_args.p_drop if model_args.p_drop is not None else 0.2
         self.model_args = model_args
         self.hyperparam_path = HYPERPARAM_DIR / "nn_hyperparams.json"
         
@@ -109,27 +179,32 @@ class NNWrapper():
         self.val_dl = val_dl
         self.test_dl = test_dl
         
-    def train_loop(self):
+    def train_loop(self) -> float:
         size = len(self.train_dl.dataset)
         self.model.train()
+        total_loss = 0.0
+        num_batches = len(self.train_dl)
 
         for batch, (X, base_logit, y) in enumerate(self.train_dl):
             X, base_logit, y = X.to(self.device), base_logit.to(self.device), y.to(self.device)
 
             mkt_adjustment = self.model(X)
-            pred = base_logit + mkt_adjustment
+            pred = base_logit + self.alpha * mkt_adjustment
 
             loss = self.loss_fn(pred, y)
+            residual_loss = 0.1 * mkt_adjustment.pow(2).mean()
+            loss += residual_loss
 
             loss.backward()
             self.optimizer.step()
             self.optimizer.zero_grad()
 
-            if batch % 100 == 0:
-                loss, current = loss.item(), (batch + 1) * len(X)
-                print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+            total_loss += loss.item()
+        
+        avg_train_loss = total_loss / num_batches
+        return avg_train_loss
 
-    def val_loop(self, dataloader):
+    def val_loop(self, dataloader) -> float:
         self.model.eval()
         num_batches = len(dataloader)
         val_loss = 0
@@ -138,11 +213,11 @@ class NNWrapper():
             for X, base_logit, y in dataloader:
                 X, base_logit, y = X.to(self.device), base_logit.to(self.device), y.to(self.device)
                 mkt_adjustment = self.model(X)
-                pred = base_logit + mkt_adjustment
+                pred = base_logit + self.alpha * mkt_adjustment
                 val_loss += self.loss_fn(pred, y).item()
 
         val_loss /= num_batches
-        print(f"Val Error: Avg loss: {val_loss:>8f} \n")
+        return val_loss
         
 
     def predict_proba(self, dataloader):
@@ -156,7 +231,7 @@ class NNWrapper():
                 X, base_logit, y = X.to(self.device), base_logit.to(self.device), y.to(self.device)
                 
                 mkt_adjustment = self.model(X)
-                pred = base_logit + mkt_adjustment
+                pred = base_logit + self.alpha * mkt_adjustment
 
                 all_preds.extend(torch.sigmoid(pred.squeeze().detach().cpu()).numpy())
                 test_loss += self.loss_fn(pred, y).item()
@@ -171,15 +246,18 @@ class NNWrapper():
         if loss_fn is None:
             self.loss_fn = nn.BCEWithLogitsLoss()
 
+        params = {}
+
         if retune:
             params = self.tune_hyperparameters()
             self._save_hyperparams(params)
-        else:
+
+        if self.model_args.use_hyperparams:
             print(f" Loading existing hyperparameters")
             try:
                 params = self._load_hyperparams()
             except:
-                params = {}
+                raise RuntimeError("No hyperparameter Found!")
                 
         if params:
             self.model = self._build_model_from_hparams(params).to(self.device)
@@ -187,15 +265,30 @@ class NNWrapper():
             lr = params.get("lr", 1e-3)
             self.optimizer = getattr(optim, optimizer_name)(self.model.parameters(), lr=lr)
         else:
-            self.model = NeuralNetwork(self.in_dim).to(self.device)
+            self.model = NeuralNetwork(
+                            self.in_dim, 
+                            base_hidden_size=self.base_hidden_size,
+                            p_drop=self.p_drop,
+                            max_residual=self.max_residual).to(self.device)
+            
             if optimizer is None:
-                self.optimizer = optim.AdamW(self.model.parameters())
+                self.optimizer = optim.AdamW(self.model.parameters(), weight_decay=0.03, lr=1e-4)
+            
+
+        train_losses = []
+        val_losses = []
 
         for e in range(self.epochs):
             print(f"Epoch {e+1}\n-------------------------------")
-            self.train_loop()
-            self.val_loop(self.val_dl)
-        
+            train_loss = self.train_loop()
+            val_loss = self.val_loop(self.val_dl)
+            train_losses.append(train_loss)
+            val_losses.append(val_loss)
+
+            print(f"train loss: {train_loss}")
+            print(f"val loss: {val_loss}")
+
+        self._plot_loss(train_losses, val_losses)
         self._save_model()
         
         return self.model
@@ -231,13 +324,12 @@ class NNWrapper():
 
             # optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "RMSprop", "SGD"])
             lr = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
-            weight_decay = trial.suggest_float("weight_decay", 1e-4, 0.1, log=True)
+            weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-2, log=True)
             optimizer = optim.AdamW(
                 model.parameters(),
                 lr=lr,
                 weight_decay=weight_decay
             )
-
             # optimizer = getattr(optim, optimizer_name)(model.parameters(), lr=lr)  
 
             for epoch in range(350):
@@ -257,6 +349,7 @@ class NNWrapper():
 
                 model.eval()
                 val_loss = 0
+
                 with torch.no_grad():
                     for X, base_logit, y in self.val_dl:
                         X, base_logit, y = X.to(self.device), base_logit.to(self.device), y.to(self.device)
@@ -284,6 +377,38 @@ class NNWrapper():
 
         return study.best_params
 
+    def _plot_loss(self, train_losses: List[float], val_losses: List[float]) -> None:
+        """Plot training and validation loss curves across epochs.
+        
+        Args:
+            train_losses: List of average training losses per epoch
+            val_losses: List of validation losses per epoch
+            plot_live: Display the loss curves live instead of saving a figure
+            plot_interval: Epoch interval for live plot updates
+        """
+        if len(train_losses) != len(val_losses):
+            raise ValueError("train_losses and val_losses must have the same length")
+        
+        if not train_losses:
+            return
+        epochs = range(1, len(train_losses) + 1)
+
+        plt.figure("Training Loss Curves", figsize=(10, 6))
+        plt.clf()
+        plt.plot(epochs, train_losses, 'b-', label='Training Loss', linewidth=2)
+        plt.plot(epochs, val_losses, 'r-', label='Validation Loss', linewidth=2)
+        plt.xlabel('Epoch', fontsize=12)
+        plt.ylabel('Loss', fontsize=12)
+        plt.title('Training and Validation Loss Curves', fontsize=14)
+        plt.legend(loc='upper right', fontsize=10)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        
+        plot_path = PLOTS_DIR / "loss_curves.png"
+        plt.savefig(plot_path, dpi=150)
+        plt.close()
+        print(f" Loss curves saved to {plot_path}")
+
     def _build_model_from_hparams(self, hparams: Dict) -> nn.Module:
         """Build model architecture from hyperparameters"""
         n_layers = hparams.get("n_layers", 3)
@@ -294,8 +419,8 @@ class NNWrapper():
             out_layer = hparams.get(f"n_units_l{i}", 128)
             layers.append(nn.Linear(in_feats, out_layer))
             layers.append(nn.ReLU())
-            dropout = hparams.get(f"dropout_l{i}", 0.2)
-            layers.append(nn.Dropout(dropout))
+            # dropout = hparams.get(f"dropout_l{i}", 0.2)
+            # layers.append(nn.Dropout(dropout))
             in_feats = out_layer
 
         layers.append(nn.Linear(in_feats, 1))
@@ -339,11 +464,20 @@ class NNWrapper():
 if __name__ == "__main__":
     model_args = create_args()
 
-    data = prepare_mlp_data(model_args.force_recreate, model_args.force_recreate_preprocessing)
+    data = prepare_mlp_data(
+        force_recreate=model_args.force_recreate, 
+        force_recreate_preprocessing=model_args.force_recreate_preprocessing,
+        train_batch_size=model_args.train_batch,
+        val_batch_size=model_args.val_batch)
     
-    mlp = NNWrapper(model_args=model_args, in_dim=data['in_dim'], train_dl=data['train_dl'], val_dl=data['val_dl'], test_dl=data['test_dl'])
+    mlp = NNWrapper(
+        model_args=model_args, 
+        in_dim=data['in_dim'], 
+        train_dl=data['train_dl'], 
+        val_dl=data['val_dl'], 
+        test_dl=data['test_dl'],
+        max_residual=model_args.max_residual
+    )
     mlp.train_and_eval_model()
 
     # preds = mlp.predict_proba(mlp.test_dl)
-
-
