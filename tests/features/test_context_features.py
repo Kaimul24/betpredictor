@@ -86,13 +86,6 @@ class TestGameContextFeatures:
         assert hasattr(context_features, 'park_factor_data')
         assert not context_features.park_factor_data.empty
 
-    def test_load_data(self, context_features):
-        """Test load_data returns the original data."""
-        original_data = context_features.data.copy()
-        loaded_data = context_features.load_data()
-        
-        pd.testing.assert_frame_equal(loaded_data, original_data)
-
     def test_day_night_encoding(self, context_features):
         """Test binary encoding of day/night games."""
         day_night_encoded = context_features._day_night_game()
@@ -231,8 +224,8 @@ class TestGameContextFeatures:
         
         assert_dataframe_not_empty(features)
         
-        essential_cols = ['game_id', 'game_date', 'game_datetime', 'away_team', 
-                         'home_team', 'dh', 'park_factor', 'venue_elevation']
+        essential_cols = ['game_id', 'game_date', 'away_team', 'home_team', 
+                          'dh', 'park_factor', 'venue_elevation']
         assert_dataframe_schema(features, essential_cols)
         
         assert 'temp' in features.columns

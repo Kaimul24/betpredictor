@@ -5,23 +5,38 @@ one run game win percentage, bullpen statuss
 """
 from src.data.features.base_feature import BaseFeatures
 from pandas.core.api import DataFrame as DataFrame
-from typing import Optional
+from typing import List
 import logging
 import pandas as pd
 import numpy as np
 
 class TeamFeatures(BaseFeatures):
 
-    def __init__(self, season: int, data: DataFrame):
-        super().__init__(season, data)
+    REQUIRED_COLUMNS = [
+        'game_id', 'game_date', 'dh', 'game_datetime',
+        'home_team', 'away_team', 'home_score', 'away_score', 'winning_team',
+    ]
 
-        if 'team' not in self.data.index.names:
-            raise RuntimeError("_transform_schedule() in feature_pipeline.py is meant to be called before any method in TeamFeatures is used.")
-        
+    METRIC_COLS = [
+        'win_pct_season', 'win_pct_ewm_h3', 'win_pct_ewm_h8', 'win_pct_ewm_h20',
+        'pyth_expectation_season', 'pyth_expectation_ewm_h3', 'pyth_expectation_ewm_h8', 'pyth_expectation_ewm_h20',
+        'run_diff_season', 'run_diff_ewm_h3', 'run_diff_ewm_h8', 'run_diff_ewm_h20',
+        'one_run_win_pct_season', 'one_run_win_pct_ewm_h3', 'one_run_win_pct_ewm_h8', 'one_run_win_pct_ewm_h20',
+    ]
+
+    SIDE_COLS = METRIC_COLS + ['team_gp']
+
+    OUTPUT_INDEX = ['game_id', 'game_date', 'home_team', 'away_team', 'dh']
+
+    def __init__(self, season: int, schedule_data: DataFrame):
+        super().__init__(season, schedule_data)
+
     def load_features(self) -> DataFrame:
-        win_pct = self.calc_rolling_win_pct()
-        run_diff = self.calc_run_diff_metrics()
-        one_run_games = self.calc_one_run_win_pct()
+        team_log = self._build_team_game_log()
+
+        win_pct = self._calc_rolling_win_pct(team_log)
+        run_diff = self._calc_run_diff_metrics(team_log)
+        one_run_games = self._calc_one_run_win_pct(team_log)
 
         result = pd.merge(
             win_pct,
@@ -40,24 +55,90 @@ class TeamFeatures(BaseFeatures):
         )
 
         result = self._team_games_played(result)
+        result = self._collapse_to_game_level(result)
 
         return result
-    
+
+    def _build_team_game_log(self) -> DataFrame:
+        """
+        Builds the internal long per-team game log from the one row per game schedule.
+        Each game becomes a home row and an away row so rolling team metrics can be
+        computed across a team's full chronological history (home and away games).
+        """
+        df = self.data.reset_index().copy()
+        common_cols = ['game_id', 'game_date', 'dh', 'game_datetime']
+
+        away_df = df[common_cols].assign(
+            is_home=False,
+            team=df['away_team'],
+            opposing_team=df['home_team'],
+            team_score=df['away_score'],
+            opposing_team_score=df['home_score'],
+            is_winner=np.where(df['winning_team'] == df['away_team'], 1, 0),
+        )
+
+        home_df = df[common_cols].assign(
+            is_home=True,
+            team=df['home_team'],
+            opposing_team=df['away_team'],
+            team_score=df['home_score'],
+            opposing_team_score=df['away_score'],
+            is_winner=np.where(df['winning_team'] == df['home_team'], 1, 0),
+        )
+
+        log = pd.concat([away_df, home_df], ignore_index=True)
+        log = log.sort_values(['game_date', 'dh', 'game_datetime', 'team']).reset_index(drop=True)
+
+        return log
+
     def _team_games_played(self, df: DataFrame) -> DataFrame:
-        
+
         df = df.copy().reset_index()
         df.sort_values(['game_date', 'dh', 'game_datetime', 'game_id'], inplace=True)
 
         df['team_gp'] = df.groupby('team').cumcount()
-        df['opposing_team_gp'] = df.groupby('opposing_team').cumcount()
-        df.set_index(keys=['game_date', 'dh', 'game_datetime', 'game_id', 'team', 'opposing_team'], inplace=True)
+        df.set_index(keys=['game_id', 'team', 'opposing_team', 'game_date', 'dh', 'game_datetime'], inplace=True)
         df.sort_index(level=['game_date', 'dh', 'game_datetime', 'team'], ascending=[True, True, True, True], inplace=True)
 
         return df
-    
-    def calc_rolling_win_pct(self) -> DataFrame:
-        df = self.data.reset_index().copy()
-        df.sort_values(['game_date', 'dh', 'team'], inplace=True)
+
+    def _collapse_to_game_level(self, df: DataFrame) -> DataFrame:
+        """
+        Collapses the team-indexed rolling stats into one row per game with
+        home/away suffixed feature columns.
+        """
+        df = df.reset_index().copy()
+
+        keys = ['game_id', 'game_date', 'dh', 'game_datetime']
+
+        home_rows = df[df['is_home']].copy()
+        away_rows = df[~df['is_home']].copy()
+
+        home_rows = home_rows.rename(columns={col: f'home_{col}' for col in self.SIDE_COLS})
+        away_rows = away_rows.rename(columns={col: f'away_{col}' for col in self.SIDE_COLS})
+
+        home_rows = home_rows.rename(columns={'team': 'home_team'})
+        away_rows = away_rows.rename(columns={'team': 'away_team'})
+
+        home_keep = keys + ['home_team'] + [f'home_{col}' for col in self.SIDE_COLS]
+        away_keep = keys + ['away_team'] + [f'away_{col}' for col in self.SIDE_COLS]
+
+        merged = pd.merge(
+            home_rows[home_keep],
+            away_rows[away_keep],
+            on=keys,
+            how='inner',
+        )
+
+        merged = merged.set_index(self.OUTPUT_INDEX)
+        merged = merged.drop(columns=['game_datetime'], errors='ignore')
+        merged = merged.sort_index(level=['game_date', 'dh', ])
+
+        return merged
+
+    def _calc_rolling_win_pct(self, team_log: DataFrame) -> DataFrame:
+        df = team_log.copy()
+        df.sort_values(['game_date', 'dh', 'game_datetime', 'team'], inplace=True)
         df['gp'] = 1
 
         prior_specs = {
@@ -69,11 +150,10 @@ class TeamFeatures(BaseFeatures):
         ewm_cols = {
             'win_pct': ('is_winner', 'gp', 'win_pct_prior', 10, True)
         }
-    
-        preserve_cols = ['game_id', 'game_date', 'dh', 'game_datetime', 'team', 'opposing_team']
-        
+
+        preserve_cols = ['game_id', 'game_date', 'dh', 'game_datetime', 'team', 'opposing_team', 'is_home']
         team_grouping = df['team']
-        
+
         result, _ = BaseFeatures.compute_rolling_stats(
             df,
             prior_specs=prior_specs,
@@ -85,22 +165,24 @@ class TeamFeatures(BaseFeatures):
         )
 
         result = result.set_index(['game_id', 'team', 'opposing_team', 'game_date', 'dh', 'game_datetime'])
-        result.drop(columns=['last_app_date'], inplace=True)
+
+        if 'last_app_date' in result.columns:
+            result.drop(columns=['last_app_date'], inplace=True)
 
         return result
-        
 
-    def calc_h2h_pct(self) -> DataFrame:
+    # UNUSED
+    def calc_h2h_pct(self, team_log: DataFrame) -> DataFrame:
         """Calculates the Head-to-Head winning percentage for each team vs. their opponents in a season"""
-        df = self.data.reset_index().copy()
+        df = team_log.copy()
         df.sort_values(['game_date', 'dh', 'team'], inplace=True)
-        
+
         df['gp_vs_opp'] = 1
 
         prior_specs = {
             'h2h_win_pct_prior': ('is_winner', 'gp_vs_opp')
         }
-        
+
         shrinkage_weights_cols = ['gp_vs_opp']
 
         ewm_cols = {
@@ -109,7 +191,7 @@ class TeamFeatures(BaseFeatures):
 
         preserve_cols = ['game_id', 'game_date', 'dh', 'game_datetime', 'team', 'opposing_team']
         team_opp_grouping = pd.MultiIndex.from_arrays([df['team'], df['opposing_team']])
-    
+
         result, _ = BaseFeatures.compute_rolling_stats(
             df,
             prior_specs=prior_specs,
@@ -119,19 +201,19 @@ class TeamFeatures(BaseFeatures):
             by=team_opp_grouping,
             halflives=()
         )
-        
+
         result = result.set_index(['game_id', 'team', 'game_date', 'dh', 'game_datetime'])
-        
+
         h2h_cols = [col for col in result.columns if col.startswith('h2h_win_pct_season')]
         result = result[h2h_cols]
-        
+
         if 'last_app_date' in result.columns:
             result.drop(columns=['last_app_date'], inplace=True)
-        
+
         return result
-    
-    def calc_one_run_win_pct(self) -> DataFrame:
-        df = self.data.reset_index().copy()
+
+    def _calc_one_run_win_pct(self, team_log: DataFrame) -> DataFrame:
+        df = team_log.copy()
 
         df.sort_values(['game_date', 'dh', 'team'], inplace=True)
         df['gp'] = 1
@@ -139,24 +221,21 @@ class TeamFeatures(BaseFeatures):
         # Create indicator for one-run games
         one_run_game = np.where(abs(df['team_score'] - df['opposing_team_score']) == 1, 1, 0)
         df['one_run_game'] = one_run_game
-        
+
         # Create indicator for one-run wins (team wins AND it's a one-run game)
         df['one_run_win'] = np.where((df['is_winner'] == 1) & (df['one_run_game'] == 1), 1, 0)
-
         prior_specs = {
             'one_run_win_pct_prior': ('one_run_win', 'one_run_game')
         }
 
         shrinkage_weights_cols = ['one_run_game']
-
         ewm_cols = {
             'one_run_win_pct': ('one_run_win', 'one_run_game', 'one_run_win_pct_prior', 5, True)
         }
 
         preserve_cols = ['game_id', 'game_date', 'dh', 'game_datetime', 'team', 'opposing_team']
-        
         team_grouping = df['team']
-        
+
         result, _ = self.compute_rolling_stats(
             df,
             prior_specs=prior_specs,
@@ -168,14 +247,13 @@ class TeamFeatures(BaseFeatures):
         )
 
         result = result.set_index(['game_id', 'team', 'opposing_team', 'game_date', 'dh', 'game_datetime'])
-        
         if 'last_app_date' in result.columns:
             result.drop(columns=['last_app_date'], inplace=True)
 
         return result
-    
-    def calc_run_diff_metrics(self) -> DataFrame:
-        df = self.data.reset_index().copy()
+
+    def _calc_run_diff_metrics(self, team_log: DataFrame) -> DataFrame:
+        df = team_log.copy()
         df.sort_values(['game_date', 'dh', 'team'], inplace=True)
         df['gp'] = 1
 
@@ -238,20 +316,10 @@ def main():
     game_loader = GameLoader()
     data = game_loader.load_for_season(2021)
 
-    from src.data.features.feature_pipeline import FeaturePipeline
-    feat_pipe = FeaturePipeline(2021, logger = logging.getLogger("team features"))
-
-    transformed_data = feat_pipe._transform_schedule(data)
-
-    team_feats = TeamFeatures(2021, transformed_data)
+    team_feats = TeamFeatures(2021, data)
     team_feats = team_feats.load_features()
     print(team_feats.index.names)
     print(team_feats.columns)
-    # win_pct = team_feats.calc_win_pct()
-    # print(win_pct.tail())
-
-    # h2h_pct = team_feats.calc_h2h_pct()
-    # print(h2h_pct.tail(8))
 
 if __name__ == "__main__":
     main()

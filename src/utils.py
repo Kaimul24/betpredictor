@@ -6,6 +6,24 @@ import re
 from pathlib import Path
 from typing import List, Optional, Union
 
+def _coerce_log_level(level: Union[int, str], arg_name: str = "log level") -> int:
+    """Normalize a logging level supplied as an int or CLI string."""
+    if isinstance(level, int):
+        return level
+
+    level_map = {
+        "debug": logging.DEBUG,
+        "info": logging.INFO,
+        "warning": logging.WARNING,
+        "error": logging.ERROR,
+        "critical": logging.CRITICAL,
+    }
+
+    try:
+        return level_map[level.lower()]
+    except (AttributeError, KeyError) as e:
+        valid = ", ".join(level_map)
+        raise ValueError(f"Invalid {arg_name}: {level}. Must be one of: {valid}.") from e
 
 def setup_logging(
     logger_name: str,
@@ -31,12 +49,20 @@ def setup_logging(
     Returns:
         Configured logger instance.
     """
+    if args is not None and getattr(args, "log_level", None) is not None:
+        console_level = getattr(args, "log_level")
+    if args is not None and getattr(args, "file_log_level", None) is not None:
+        file_level = getattr(args, "file_log_level")
+
+    console_level = _coerce_log_level(console_level, "console log level")
+    file_level = _coerce_log_level(file_level, "file log level")
+
     logger = logging.getLogger(logger_name)
 
     if base_logger is logger:
         base_logger = None
 
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(min(console_level, file_level))
     logger.propagate = propagate
     logger.handlers.clear()
 
@@ -70,6 +96,10 @@ def setup_logging(
 
     for handler in handlers:
         logger.addHandler(handler)
+
+    handler_levels = [handler.level for handler in handlers if handler.level != logging.NOTSET]
+    if handler_levels:
+        logger.setLevel(min(handler_levels))
 
     for message in log_messages:
         logger.info(message)

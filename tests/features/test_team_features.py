@@ -6,210 +6,129 @@ from tests.conftest import assert_dataframe_schema, assert_dataframe_not_empty
 
 
 class TestTeamFeatures:
-    """Test suite for TeamFeatures aligned with current feature calculations."""
+    """Test suite for the game-level (one row per game) home/away TeamFeatures contract."""
+
+    PROB_BASES = ['win_pct', 'pyth_expectation', 'one_run_win_pct']
+    METRIC_SUFFIXES = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
 
     @pytest.fixture
     def sample_schedule_df(self):
         columns = [
-            'game_id', 'game_date', 'dh', 'team', 'game_datetime',
-            'opposing_team', 'is_winner', 'team_score', 'opposing_team_score'
+            'game_id', 'game_date', 'game_datetime', 'dh',
+            'home_team', 'away_team', 'home_score', 'away_score', 'winning_team',
         ]
         games = [
-            ('g1', '2021-04-01', 0, 'SFG', '2021-04-01 19:05', 'LAD', 1, 3, 2),
-            ('g1', '2021-04-01', 0, 'LAD', '2021-04-01 19:05', 'SFG', 0, 2, 3),
-            ('g2', '2021-04-02', 0, 'SFG', '2021-04-02 19:05', 'LAD', 0, 1, 4),
-            ('g2', '2021-04-02', 0, 'LAD', '2021-04-02 19:05', 'SFG', 1, 4, 1),
-            ('g3', '2021-04-03', 0, 'SFG', '2021-04-03 19:05', 'NYM', 1, 5, 2),
-            ('g3', '2021-04-03', 0, 'NYM', '2021-04-03 19:05', 'SFG', 0, 2, 5),
-            ('g4', '2021-04-04', 0, 'SFG', '2021-04-04 19:05', 'NYM', 0, 2, 3),
-            ('g4', '2021-04-04', 0, 'NYM', '2021-04-04 19:05', 'SFG', 1, 3, 2),
-            ('g5', '2021-04-05', 0, 'LAD', '2021-04-05 19:05', 'NYM', 1, 6, 1),
-            ('g5', '2021-04-05', 0, 'NYM', '2021-04-05 19:05', 'LAD', 0, 1, 6),
+            ('g1', '2021-04-01', '2021-04-01 19:05', 0, 'SFG', 'LAD', 3, 2, 'SFG'),
+            ('g2', '2021-04-02', '2021-04-02 19:05', 0, 'LAD', 'SFG', 4, 1, 'LAD'),
+            ('g3', '2021-04-03', '2021-04-03 19:05', 0, 'SFG', 'NYM', 5, 2, 'SFG'),
+            ('g4', '2021-04-04', '2021-04-04 19:05', 0, 'NYM', 'SFG', 3, 2, 'NYM'),
+            ('g5', '2021-04-05', '2021-04-05 19:05', 0, 'LAD', 'NYM', 6, 1, 'LAD'),
         ]
 
         df = pd.DataFrame(games, columns=columns)
         df['game_date'] = pd.to_datetime(df['game_date'])
         df['game_datetime'] = pd.to_datetime(df['game_datetime'])
-
-        df = df.set_index(['game_date', 'dh', 'team', 'game_datetime'])
         return df
 
     @pytest.fixture
     def team_features(self, sample_schedule_df):
         return TeamFeatures(2021, sample_schedule_df)
 
-    def test_calc_rolling_win_pct_structure(self, team_features):
-        result = team_features.calc_rolling_win_pct()
+    @staticmethod
+    def _side_columns():
+        cols = []
+        for base in TeamFeatures.SIDE_COLS:
+            cols.append(f'home_{base}')
+            cols.append(f'away_{base}')
+        return cols
 
-        assert_dataframe_not_empty(result)
-
-        expected_columns = ['win_pct_season', 'win_pct_ewm_h3', 'win_pct_ewm_h8', 'win_pct_ewm_h20']
-        assert_dataframe_schema(result, expected_columns)
-        assert len(result) == len(team_features.data)
-        assert result.index.names == ['game_id', 'team', 'opposing_team', 'game_date', 'dh', 'game_datetime']
-
-        for team, group in result.groupby(level='team'):
-            ordered = group.sort_index(level=['game_date', 'dh', 'game_datetime'])
-            first_row = ordered.iloc[0]
-            assert first_row['win_pct_season'] == pytest.approx(0.5)
-
-        for column in expected_columns:
-            non_na = result[column].dropna()
-            assert ((non_na >= 0.0) & (non_na <= 1.0)).all()
-
-    def test_calc_one_run_win_pct(self, team_features):
-        result = team_features.calc_one_run_win_pct()
-
-        assert_dataframe_not_empty(result)
-
-        expected_columns = [
-            'one_run_win_pct_season',
-            'one_run_win_pct_ewm_h3',
-            'one_run_win_pct_ewm_h8',
-            'one_run_win_pct_ewm_h20',
-        ]
-        assert_dataframe_schema(result, expected_columns)
-
-        for team, group in result.groupby(level='team'):
-            ordered = group.sort_index(level=['game_date', 'dh', 'game_datetime'])
-            first_row = ordered.iloc[0]
-            assert first_row['one_run_win_pct_season'] == pytest.approx(0.5)
-
-        for column in expected_columns:
-            non_na = result[column].dropna()
-            assert ((non_na >= 0.0) & (non_na <= 1.0)).all()
-
-    def test_calc_run_diff_metrics(self, team_features):
-        result = team_features.calc_run_diff_metrics()
-
-        assert_dataframe_not_empty(result)
-
-        expected_columns = [
-            'pyth_expectation_season',
-            'pyth_expectation_ewm_h3',
-            'pyth_expectation_ewm_h8',
-            'pyth_expectation_ewm_h20',
-            'run_diff_season',
-            'run_diff_ewm_h3',
-            'run_diff_ewm_h8',
-            'run_diff_ewm_h20',
-        ]
-        assert_dataframe_schema(result, expected_columns)
-
-        first_by_team = result.groupby(level='team').first()
-        for team in first_by_team.index:
-            assert first_by_team.loc[team, 'pyth_expectation_season'] == pytest.approx(0.5)
-            assert first_by_team.loc[team, 'run_diff_season'] == pytest.approx(0.0)
-
-        for column in [c for c in expected_columns if c.startswith('pyth_expectation')]:
-            non_na = result[column].dropna()
-            assert ((non_na >= 0.0) & (non_na <= 1.0)).all()
-
-    # def test_calc_h2h_pct(self, team_features):
-    #     result = team_features.calc_h2h_pct()
-
-    #     assert_dataframe_not_empty(result)
-    #     assert_dataframe_schema(result, ['h2h_win_pct_season'])
-    #     assert result.index.names == ['game_id', 'team', 'game_date', 'dh', 'game_datetime']
-
-    #     sfg_vs_lad = result.xs(('SFG', 'LAD'), level=('team', 'opposing_team')).sort_index(
-    #         level=['game_date', 'dh', 'game_datetime']
-    #     )
-    #     assert sfg_vs_lad.iloc[0]['h2h_win_pct_season'] == pytest.approx(0.5)
-    #     assert sfg_vs_lad.iloc[-1]['h2h_win_pct_season'] > 0.5
-
-    def test_load_features_combines_all_metrics(self, team_features):
+    def test_load_features_is_one_row_per_game(self, team_features):
         result = team_features.load_features()
 
         assert_dataframe_not_empty(result)
+        assert len(result) == 5
+        assert result.index.names == ['game_id', 'game_date', 'home_team', 'away_team', 'dh']
+        assert not result.index.has_duplicates
 
-        expected_columns = [
-            'win_pct_season',
-            'win_pct_ewm_h3',
-            'win_pct_ewm_h8',
-            'win_pct_ewm_h20',
-            'pyth_expectation_season',
-            'pyth_expectation_ewm_h3',
-            'pyth_expectation_ewm_h8',
-            'pyth_expectation_ewm_h20',
-            'run_diff_season',
-            'run_diff_ewm_h3',
-            'run_diff_ewm_h8',
-            'run_diff_ewm_h20',
-            'one_run_win_pct_season',
-            'one_run_win_pct_ewm_h3',
-            'one_run_win_pct_ewm_h8',
-            'one_run_win_pct_ewm_h20',
-            'team_gp',
-            'opposing_team_gp',
+    def test_load_features_has_home_away_columns(self, team_features):
+        result = team_features.load_features()
+
+        assert_dataframe_schema(result, self._side_columns())
+
+        # No leftover team-perspective helper columns remain.
+        for leftover in ['team', 'opposing_team', 'is_home', 'game_datetime', 'opposing_team_gp']:
+            assert leftover not in result.columns
+            assert leftover not in result.index.names
+
+    def test_first_game_priors(self, team_features):
+        result = team_features.load_features()
+
+        # g1 is the first game for both SFG (home) and LAD (away).
+        g1 = result.xs('g1', level='game_id').iloc[0]
+
+        assert g1['home_win_pct_season'] == pytest.approx(0.5)
+        assert g1['away_win_pct_season'] == pytest.approx(0.5)
+        assert g1['home_pyth_expectation_season'] == pytest.approx(0.5)
+        assert g1['away_pyth_expectation_season'] == pytest.approx(0.5)
+        assert g1['home_run_diff_season'] == pytest.approx(0.0)
+        assert g1['away_run_diff_season'] == pytest.approx(0.0)
+
+    def test_probability_columns_bounded(self, team_features):
+        result = team_features.load_features()
+
+        prob_cols = [
+            f'{side}_{base}_{suffix}'
+            for base in self.PROB_BASES
+            for suffix in self.METRIC_SUFFIXES
+            for side in ('home', 'away')
         ]
-        assert_dataframe_schema(result, expected_columns)
 
-        ordered = result.reset_index().sort_values(
-            ['game_date', 'dh', 'game_datetime', 'game_id', 'team']
-        )
+        for column in prob_cols:
+            non_na = result[column].dropna()
+            assert ((non_na >= 0.0) & (non_na <= 1.0)).all()
 
-        for team, group in ordered.groupby('team'):
-            assert list(group['team_gp']) == list(range(len(group)))
+    def test_team_games_played_counts(self, team_features):
+        result = team_features.load_features().reset_index()
 
-        for opponent, group in ordered.groupby('opposing_team'):
-            assert list(group['opposing_team_gp']) == list(range(len(group)))
+        def gp(game_id, side):
+            row = result[result['game_id'] == game_id].iloc[0]
+            return row[f'{side}_team_gp']
 
-    def test_initialization_validation(self, sample_schedule_df):
-        invalid_data = sample_schedule_df.reset_index('team')
-
-        with pytest.raises(RuntimeError, match="_transform_schedule\(\).+TeamFeatures"):
-            TeamFeatures(2021, invalid_data)
+        # g1: both teams in their first game.
+        assert gp('g1', 'home') == 0  # SFG
+        assert gp('g1', 'away') == 0  # LAD
+        # g2: LAD (home) and SFG (away) have each played one prior game.
+        assert gp('g2', 'home') == 1  # LAD
+        assert gp('g2', 'away') == 1  # SFG
+        # g3: SFG (home) has played g1, g2; NYM (away) is in its first game.
+        assert gp('g3', 'home') == 2  # SFG
+        assert gp('g3', 'away') == 0  # NYM
+        # g4: NYM (home) played g3; SFG (away) played g1, g2, g3.
+        assert gp('g4', 'home') == 1  # NYM
+        assert gp('g4', 'away') == 3  # SFG
+        # g5: LAD (home) played g1, g2; NYM (away) played g3, g4.
+        assert gp('g5', 'home') == 2  # LAD
+        assert gp('g5', 'away') == 2  # NYM
 
     @pytest.fixture
     def empty_schedule_data(self):
-        df = pd.DataFrame({
+        return pd.DataFrame({
             'game_id': pd.Series(dtype='object'),
-            'opposing_team': pd.Series(dtype='object'),
-            'is_winner': pd.Series(dtype='int64'),
-            'team_score': pd.Series(dtype='int64'),
-            'opposing_team_score': pd.Series(dtype='int64'),
+            'game_date': pd.Series(dtype='datetime64[ns]'),
+            'game_datetime': pd.Series(dtype='datetime64[ns]'),
+            'dh': pd.Series(dtype='int64'),
+            'home_team': pd.Series(dtype='object'),
+            'away_team': pd.Series(dtype='object'),
+            'home_score': pd.Series(dtype='int64'),
+            'away_score': pd.Series(dtype='int64'),
+            'winning_team': pd.Series(dtype='object'),
         })
-
-        df.index = pd.MultiIndex.from_arrays(
-            [
-                pd.Index([], dtype='datetime64[ns]'),
-                pd.Index([], dtype='int64'),
-                pd.Index([], dtype='object'),
-                pd.Index([], dtype='datetime64[ns]'),
-            ],
-            names=['game_date', 'dh', 'team', 'game_datetime']
-        )
-
-        return df
 
     def test_empty_data_handling(self, empty_schedule_data):
         team_features = TeamFeatures(2021, empty_schedule_data)
 
-        rolling = team_features.calc_rolling_win_pct()
-        run_diff = team_features.calc_run_diff_metrics()
-        one_run = team_features.calc_one_run_win_pct()
-        merged = team_features.load_features()
+        result = team_features.load_features()
 
-        assert len(rolling) == 0
-        assert len(run_diff) == 0
-        assert len(one_run) == 0
-        assert len(merged) == 0
-
-        assert_dataframe_schema(rolling, ['win_pct_season', 'win_pct_ewm_h3', 'win_pct_ewm_h8', 'win_pct_ewm_h20'])
-        assert_dataframe_schema(run_diff, [
-            'pyth_expectation_season', 'pyth_expectation_ewm_h3', 'pyth_expectation_ewm_h8',
-            'pyth_expectation_ewm_h20', 'run_diff_season', 'run_diff_ewm_h3', 'run_diff_ewm_h8',
-            'run_diff_ewm_h20'
-        ])
-        assert_dataframe_schema(one_run, [
-            'one_run_win_pct_season', 'one_run_win_pct_ewm_h3', 'one_run_win_pct_ewm_h8',
-            'one_run_win_pct_ewm_h20'
-        ])
-        assert_dataframe_schema(merged, [
-            'win_pct_season', 'win_pct_ewm_h3', 'win_pct_ewm_h8', 'win_pct_ewm_h20',
-            'pyth_expectation_season', 'pyth_expectation_ewm_h3', 'pyth_expectation_ewm_h8',
-            'pyth_expectation_ewm_h20', 'run_diff_season', 'run_diff_ewm_h3', 'run_diff_ewm_h8',
-            'run_diff_ewm_h20', 'one_run_win_pct_season', 'one_run_win_pct_ewm_h3',
-            'one_run_win_pct_ewm_h8', 'one_run_win_pct_ewm_h20', 'team_gp', 'opposing_team_gp'
-        ])
+        assert len(result) == 0
+        assert result.index.names == ['game_id', 'game_date', 'home_team', 'away_team', 'dh']
+        assert_dataframe_schema(result, self._side_columns())

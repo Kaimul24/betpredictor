@@ -16,6 +16,7 @@ import numpy as np
 from datetime import date, timedelta
 from unittest.mock import patch
 
+from src.data.features.base_feature import BaseFeatures
 from src.data.features.feature_pipeline import FeaturePipeline
 from src.data.features.game_features.odds import Odds
 from tests.conftest import (
@@ -291,7 +292,7 @@ class TestFeaturePipeline:
         """Sample odds data for testing."""
         odds = [
             # Matching odds for games
-            ('2024-04-01', '2024-04-01T19:05:00', 'NYY', 'BOS', 'Cole, G', 'Whitlock, K',
+            ('2024-04-01', '2024-04-01T19:05:00', 'NYY', 'BOS', 'Cole, G', 'Bello, B',
              'DraftKings', -150, 130, -145, 125, 2024),
             ('2024-04-02', '2024-04-02T19:10:00', 'TB', 'NYY', 'Glasnow, T', 'Cortes, N',
              'DraftKings', 110, -120, 115, -125, 2024),
@@ -320,13 +321,13 @@ class TestFeaturePipeline:
         base_date = date(2024, 3, 25)
         stats = []
         
-        for player_id in ['player1', 'player2', 'player3', 'player4']:
+        for player_id in [1, 2, 3, 4]:
             for i in range(7):
                 game_date = base_date + timedelta(days=i)
                 stats.append((
                     player_id,
                     game_date.strftime('%Y-%m-%d'),
-                    'NYY' if player_id == 'player1' else ('BOS' if player_id == 'player2' else 'TB'),
+                    'NYY' if player_id == 1 else ('BOS' if player_id == 2 else 'TB'),
                     0,  # dh
                     4,  # ab
                     4,  # pa
@@ -343,29 +344,29 @@ class TestFeaturePipeline:
         """Sample lineup data."""
         lineups = [
             # Game 1: NYY vs BOS
-            ('2024-04-01', 1, 'NYY', 0, 2, 'BOS', 'player1', 2024),
-            ('2024-04-01', 2, 'BOS', 0, 1, 'NYY', 'player2', 2024),
+            ('2024-04-01', 1, 'NYY', 0, 2, 'BOS', 1, 2024),
+            ('2024-04-01', 2, 'BOS', 0, 1, 'NYY', 2, 2024),
             # Game 2: TB vs NYY  
-            ('2024-04-02', 3, 'TBR', 0, 1, 'NYY', 'player3', 2024),
-            ('2024-04-02', 1, 'NYY', 0, 3, 'TBR', 'player1', 2024),
+            ('2024-04-02', 3, 'TBR', 0, 1, 'NYY', 3, 2024),
+            ('2024-04-02', 1, 'NYY', 0, 3, 'TBR', 1, 2024),
             # Game 3a: BOS vs TB (first game of doubleheader)
-            ('2024-04-03', 2, 'BOS', 1, 3, 'TBR', 'player2', 2024),
-            ('2024-04-03', 3, 'TBR', 1, 2, 'BOS', 'player3', 2024),
+            ('2024-04-03', 2, 'BOS', 1, 3, 'TBR', 2, 2024),
+            ('2024-04-03', 3, 'TBR', 1, 2, 'BOS', 3, 2024),
         ]
         
         insert_lineups(clean_db, lineups)
         
         lineup_players = [
             # Game 1 lineups
-            ('2024-04-01', 1, 'NYY', 2, 'BOS', 0, 'player1', 'OF', 3, 2024),
-            ('2024-04-01', 2, 'BOS', 1, 'NYY', 0, 'player2', 'IF', 4, 2024),
+            ('2024-04-01', 1, 'NYY', 2, 'BOS', 0, 1, 'OF', 3, 2024),
+            ('2024-04-01', 2, 'BOS', 1, 'NYY', 0, 2, 'IF', 4, 2024),
             # Game 2 lineups
-            ('2024-04-02', 3, 'TBR', 1, 'NYY', 0, 'player3', 'IF', 2, 2024),
-            ('2024-04-02', 1, 'NYY', 3, 'TBR', 0, 'player1', 'OF', 3, 2024),
+            ('2024-04-02', 3, 'TBR', 1, 'NYY', 0, 3, 'IF', 2, 2024),
+            ('2024-04-02', 1, 'NYY', 3, 'TBR', 0, 1, 'OF', 3, 2024),
             # Game 3a lineups
-            ('2024-04-03', 2, 'BOS', 3, 'TBR', 0, 'player2', 'IF', 4, 2024),
-            ('2024-04-03', 3, 'TBR', 2, 'BOS', 0, 'player3', 'IF', 2, 2024),
-            ('2024-04-03', 3, 'TBR', 2, 'BOS', 0, 'player4', 'IF', 5, 2024),
+            ('2024-04-03', 2, 'BOS', 3, 'TBR', 0, 2, 'IF', 4, 2024),
+            ('2024-04-03', 3, 'TBR', 2, 'BOS', 0, 3, 'IF', 2, 2024),
+            ('2024-04-03', 3, 'TBR', 2, 'BOS', 0, 4, 'IF', 5, 2024),
         ]
         
         insert_lineup_players(clean_db, lineup_players)
@@ -412,52 +413,9 @@ class TestFeaturePipeline:
         expected_columns = ['game_date', 'team', 'opposing_team', 'dh', 'player_id', 'position']
         assert_dataframe_schema(lineups_data, expected_columns)
 
-    def test_transform_schedule(self, feature_pipeline, sample_schedule_data):
-        """Test schedule transformation to team perspective."""
-        schedule_data = feature_pipeline._load_schedule_data()
-        transformed = feature_pipeline._transform_schedule(schedule_data)
-        
-        assert_dataframe_not_empty(transformed)
-        
-        assert len(transformed) == len(schedule_data) * 2
-        
-        assert 'team' in transformed.index.names
-        assert 'opposing_team' in transformed.columns
-        assert 'is_home' in transformed.columns
-        assert 'is_winner' in transformed.columns
-        
-        transformed_reset = transformed.reset_index()
-        
-        for _, game in schedule_data.iterrows():
-            game_id = game['game_id']
-            game_rows = transformed_reset[transformed_reset['game_id'] == game_id]
-            assert len(game_rows) == 2, f"Game {game_id} should appear twice"
-            
-            home_count = (game_rows['is_home'] == True).sum()
-            away_count = (game_rows['is_home'] == False).sum()
-            assert home_count == 1, f"Game {game_id} should have one home team"
-            assert away_count == 1, f"Game {game_id} should have one away team"
-
-    def test_transform_schedule_winner_logic(self, feature_pipeline, sample_schedule_data):
-        """Test that winner logic is correctly applied in schedule transformation."""
-        schedule_data = feature_pipeline._load_schedule_data()
-        transformed = feature_pipeline._transform_schedule(schedule_data)
-        transformed_reset = transformed.reset_index()
-
-        game1_rows = transformed_reset[transformed_reset['game_id'] == 'game1']
-        
-        nyy_row = game1_rows[game1_rows['team'] == 'NYY']
-        assert len(nyy_row) == 1
-        assert nyy_row.iloc[0]['is_winner'] == 1, "NYY should be marked as winner"
-        
-        bos_row = game1_rows[game1_rows['team'] == 'BOS']
-        assert len(bos_row) == 1
-        assert bos_row.iloc[0]['is_winner'] == 0, "BOS should be marked as loser"
-
-    def test_merge_schedule_with_batting_features_temporal_validation(self, feature_pipeline, sample_schedule_data, sample_players_and_stats, sample_lineups):
+    def test_merge_schedule_with_position_player_features_aggregates_home_away_lineups(self, feature_pipeline, sample_schedule_data, sample_players_and_stats, sample_lineups):
         """
-        Test temporal validation in batting features merging.
-        Ensures only historical batting data is used for each game.
+        Test matching game-level schedule rows to home/away lineups and averaging player features by side.
         """
         from src.data.database import get_database_manager
         db = get_database_manager()
@@ -467,12 +425,10 @@ class TestFeaturePipeline:
             db.execute_write_query(update_query, (0.5, 2024))
         
         schedule_data = feature_pipeline._load_schedule_data()
-        transformed_schedule = feature_pipeline._transform_schedule(schedule_data)
         lineups_data = feature_pipeline._load_lineups_data()
         
-        player_id_map = {'player1': 1, 'player2': 2, 'player3': 3, 'player4': 4}
         lineups_data = lineups_data.copy()
-        lineups_data['player_id'] = lineups_data['player_id'].map(player_id_map)
+        lineups_data['game_date'] = pd.to_datetime(lineups_data['game_date'])
         lineups_data[['team', 'opposing_team']] = lineups_data[['team', 'opposing_team']].replace('TBR', 'TB')
 
         batting_features_data = []
@@ -482,35 +438,47 @@ class TestFeaturePipeline:
                     'game_date': game_date,
                     'dh': 0,
                     'player_id': player_id,
+                    'mlb_id': player_id,
                     'team': team,
-                    'team_ops_season': 0.800,
-                    'team_ops_ewm_h3': 0.810,
-                    'team_ops_ewm_h10': 0.820,
-                    'team_ops_ewm_h25': 0.830,
-                    'team_wrc_plus_season': 120,
-                    'team_wrc_plus_ewm_h3': 121,
-                    'team_wrc_plus_ewm_h10': 122,
-                    'team_wrc_plus_ewm_h25': 123,
-                    'team_frv_per_9': 0.0,
+                    'season': 2024,
+                    'ops_season': 0.800 + (player_id / 100),
+                    'ops_ewm_h3': 0.810 + (player_id / 100),
+                    'ops_ewm_h10': 0.820 + (player_id / 100),
+                    'ops_ewm_h25': 0.830 + (player_id / 100),
+                    'wrc_plus_season': 120 + player_id,
+                    'wrc_plus_ewm_h3': 121 + player_id,
+                    'wrc_plus_ewm_h10': 122 + player_id,
+                    'wrc_plus_ewm_h25': 123 + player_id,
+                    'frv_per_9': player_id / 10,
                 })
 
         batting_features_df = pd.DataFrame(batting_features_data)
 
-        team_features = feature_pipeline._merge_schedule_with_batting_features(
-            transformed_schedule, lineups_data, batting_features_df
+        team_features = feature_pipeline._merge_schedule_with_position_player_features(
+            schedule_data, lineups_data, batting_features_df
         )
 
         assert_dataframe_not_empty(team_features)
 
         expected_cols = [
-            'team_ops_season',
-            'team_ops_ewm_h3',
-            'team_ops_ewm_h10',
-            'team_ops_ewm_h25',
-            'team_wrc_plus_season',
-            'team_frv_per_9',
+            'away_ops_season',
+            'away_ops_ewm_h3',
+            'away_ops_ewm_h10',
+            'away_ops_ewm_h25',
+            'away_wrc_plus_season',
+            'away_frv_per_9',
+            'home_ops_season',
+            'home_ops_ewm_h3',
+            'home_ops_ewm_h10',
+            'home_ops_ewm_h25',
+            'home_wrc_plus_season',
+            'home_frv_per_9',
         ]
         assert_dataframe_schema(team_features, expected_cols)
+
+        game1 = team_features.loc[('game1', pd.Timestamp('2024-04-01'), 'BOS', 'NYY', 0)]
+        assert game1['away_ops_season'] == pytest.approx(0.810)
+        assert game1['home_ops_season'] == pytest.approx(0.820)
 
     def test_add_opponent_features(self, feature_pipeline):
         """Test adding opponent features without data leakage."""
@@ -598,45 +566,62 @@ class TestFeaturePipeline:
         assert merged.reset_index().iloc[0]['game_id'] == 'game1'
 
     def test_doubleheader_handling_in_pipeline(self, feature_pipeline, sample_schedule_data, sample_lineups):
-        """Test that doubleheaders are properly handled throughout the pipeline."""
+        """Doubleheaders stay as distinct game-level rows with preserved dh values."""
         schedule_data = feature_pipeline._load_schedule_data()
-        transformed = feature_pipeline._transform_schedule(schedule_data)
+        dh_games = schedule_data[schedule_data['game_date'] == pd.Timestamp('2024-04-03')]
 
-        dh_games = transformed.reset_index()
-        dh_games = dh_games[dh_games['game_date'] == '2024-04-03']
-        
-        assert len(dh_games) == 4, "Doubleheader should create 4 rows (2 games × 2 teams)"
-        
-        dh_values = dh_games['dh'].unique()
-        assert 0 in dh_values, "Should have dh=0 games"
-        assert 1 in dh_values, "Should have dh=1 games"
+        assert len(dh_games) == 2
+        assert dh_games['dh'].tolist() == [0, 1]
+        assert dh_games['away_team'].tolist() == ['BOS', 'BOS']
+        assert dh_games['home_team'].tolist() == ['TB', 'TB']
+        assert dh_games['game_id'].tolist() == ['game3a', 'game3b']
+        assert dh_games['game_datetime'].nunique() == 2
 
-    def test_get_batting_features_integration(self, feature_pipeline, 
-                                            sample_schedule_data, sample_players_and_stats, sample_lineups):
-        """Test integration of batting features calculation."""
+        lineups_data = feature_pipeline._load_lineups_data().copy()
+        lineups_data['game_date'] = pd.to_datetime(lineups_data['game_date'])
+        lineups_data[['team', 'opposing_team']] = lineups_data[['team', 'opposing_team']].replace('TBR', 'TB')
+
+        batting_features = pd.DataFrame({
+            'game_date': pd.to_datetime(['2024-04-03'] * 2),
+            'dh': [0, 0],
+            'player_id': [2, 3],
+            'mlb_id': [2, 3],
+            'team': ['BOS', 'TB'],
+            'season': [2024, 2024],
+            'ops_season': [0.780, 0.760],
+            'ops_ewm_h3': [0.790, 0.770],
+            'frv_per_9': [0.2, 0.3],
+        })
+
+        result = feature_pipeline._merge_schedule_with_position_player_features(
+            dh_games, lineups_data, batting_features
+        )
+
+        assert result.index.get_level_values('dh').tolist() == [0, 1]
+
+    def test_get_position_player_features_integration(self, feature_pipeline,
+                                                      sample_schedule_data, sample_players_and_stats, sample_lineups):
+        """Position-player features are produced from game-level schedules with home/away columns."""
         mock_batting_features = pd.DataFrame({
             'game_date': pd.to_datetime(['2024-04-01'] * 4 + ['2024-04-02'] * 4 + ['2024-04-03'] * 4),
             'dh': [0] * 12,
             'player_id': [1, 2, 3, 4] * 3,
             'mlb_id': [1, 2, 3, 4] * 3,
             'team': ['NYY', 'BOS', 'TB', 'TB'] * 3,
-            'ops_season': [0.850, 0.780, 0.760, 0.740] * 3,
-            'ops_ewm_h3': [0.851, 0.781, 0.761, 0.741] * 3,
-            'ops_ewm_h10': [0.852, 0.782, 0.762, 0.742] * 3,
-            'ops_ewm_h25': [0.853, 0.783, 0.763, 0.743] * 3,
-            'wrc_plus_season': [125, 110, 105, 100] * 3,
-            'wrc_plus_ewm_h3': [126, 111, 106, 101] * 3,
-            'wrc_plus_ewm_h10': [127, 112, 107, 102] * 3,
-            'wrc_plus_ewm_h25': [128, 113, 108, 103] * 3,
+            'season': [2024] * 12,
         })
 
         batting_comp_cols = [
-            'woba', 'hard_hit', 'barrel_percent', 'bb_k', 'babip',
-            'ev', 'iso', 'baserunning', 'wpa'
+            'woba', 'wrc_plus', 'hard_hit', 'barrel_percent', 'bb_k', 'ops',
+            'babip', 'ev', 'iso', 'baserunning', 'wpa',
         ]
         for stat_idx, stat in enumerate(batting_comp_cols, start=1):
             for suffix_idx, suffix in enumerate(['season', 'ewm_h3', 'ewm_h10', 'ewm_h25'], start=1):
-                mock_batting_features[f'{stat}_{suffix}'] = 0.1 * stat_idx + 0.01 * suffix_idx
+                mock_batting_features[f'{stat}_{suffix}'] = (
+                    0.1 * stat_idx
+                    + 0.01 * suffix_idx
+                    + mock_batting_features['player_id'] / 1000
+                )
 
         mock_fielding_features = pd.DataFrame({
             'player_id': [1, 2, 3, 4],
@@ -650,28 +635,26 @@ class TestFeaturePipeline:
         })
 
         mock_lineups = feature_pipeline._load_lineups_data().copy()
-        mock_lineups['player_id'] = mock_lineups['player_id'].map({
-            'player1': 1, 'player2': 2, 'player3': 3, 'player4': 4
-        })
         mock_lineups[['team', 'opposing_team']] = mock_lineups[['team', 'opposing_team']].replace('TBR', 'TB')
-        
         schedule_data = feature_pipeline._load_schedule_data()
-        transformed_schedule = feature_pipeline._transform_schedule(schedule_data)
-        
+
         with patch.object(feature_pipeline, '_load_batting_data', return_value=mock_raw_batting), \
              patch.object(feature_pipeline, '_load_lineups_data', return_value=mock_lineups), \
              patch.object(feature_pipeline, '_load_fielding_data', return_value=pd.DataFrame()), \
              patch('src.data.features.feature_pipeline.BattingFeatures.load_features', return_value=mock_batting_features) as mock_batting_load, \
              patch('src.data.features.feature_pipeline.FieldingFeatures.load_features', return_value=mock_fielding_features) as mock_fielding_load:
-            team_features = feature_pipeline._get_batting_features(transformed_schedule)
+            team_features = feature_pipeline._get_position_player_features(schedule_data)
 
         mock_batting_load.assert_called_once()
         mock_fielding_load.assert_called_once()
-        
+
         assert isinstance(team_features, pd.DataFrame)
         assert_dataframe_not_empty(team_features)
-        assert 'opposing_team_ops_season' in team_features.columns
-        assert 'ops_season_diff' in team_features.columns
+        assert 'home_ops_season' in team_features.columns
+        assert 'away_ops_season' in team_features.columns
+        assert 'home_frv_per_9' in team_features.columns
+        assert 'away_frv_per_9' in team_features.columns
+        assert 'home_away_ops_season_diff' in team_features.columns
 
     def test_merge_batting_fielding_features_uses_normalized_months(self, feature_pipeline):
         """Fielding features are monthly and March/October batting rows map to regular-season months."""
@@ -699,16 +682,16 @@ class TestFeaturePipeline:
         assert np.isnan(merged.loc[merged['mlb_id'] == 3, 'frv_per_9'].iloc[0])
         assert not any(col.endswith('_fld') for col in merged.columns)
 
-    def test_merge_schedule_with_batting_features_averages_and_fills_missing_players(self, feature_pipeline):
-        """Lineup player features are averaged to team level, with missing stats filled by league medians."""
+    def test_merge_schedule_with_position_player_features_averages_and_fills_missing_players(self, feature_pipeline):
+        """Lineup player features are averaged by home/away side, with missing stats filled by league medians."""
         schedule_df = pd.DataFrame({
-            'game_id': ['game1', 'game1'],
-            'game_date': [pd.Timestamp('2024-04-01'), pd.Timestamp('2024-04-01')],
-            'dh': [0, 0],
-            'game_datetime': [pd.Timestamp('2024-04-01T19:05:00')] * 2,
-            'team': ['NYY', 'BOS'],
-            'opposing_team': ['BOS', 'NYY'],
-        }).set_index(['game_date', 'dh', 'game_datetime', 'team'])
+            'game_id': ['game1'],
+            'game_date': [pd.Timestamp('2024-04-01')],
+            'dh': [0],
+            'game_datetime': [pd.Timestamp('2024-04-01T19:05:00')],
+            'away_team': ['NYY'],
+            'home_team': ['BOS'],
+        })
         lineups_data = pd.DataFrame({
             'game_date': [pd.Timestamp('2024-04-01')] * 3,
             'team': ['NYY', 'NYY', 'BOS'],
@@ -717,28 +700,31 @@ class TestFeaturePipeline:
             'player_id': [1, 3, 2],
             'batting_order': [1, 2, 1],
             'position': ['OF', 'IF', 'IF'],
+            'season': [2024, 2024, 2024],
         })
         batting_features = pd.DataFrame({
             'game_date': [pd.Timestamp('2024-04-01'), pd.Timestamp('2024-04-01')],
             'dh': [0, 0],
             'player_id': [1, 2],
+            'mlb_id': [1, 2],
             'team': ['NYY', 'BOS'],
-            'team_ops_season': [0.800, 0.600],
-            'team_ops_ewm_h3': [0.900, 0.700],
-            'team_frv_per_9': [1.0, 3.0],
+            'season': [2024, 2024],
+            'ops_season': [0.800, 0.600],
+            'ops_ewm_h3': [0.900, 0.700],
+            'frv_per_9': [1.0, 3.0],
         })
 
-        result = feature_pipeline._merge_schedule_with_batting_features(
+        result = feature_pipeline._merge_schedule_with_position_player_features(
             schedule_df, lineups_data, batting_features
-        ).reset_index()
+        )
 
-        nyy = result[result['team'] == 'NYY'].iloc[0]
-        bos = result[result['team'] == 'BOS'].iloc[0]
-        assert nyy['team_ops_season'] == pytest.approx(0.75)
-        assert nyy['team_ops_ewm_h3'] == pytest.approx(0.85)
-        assert nyy['team_frv_per_9'] == pytest.approx(1.5)
-        assert bos['team_ops_season'] == pytest.approx(0.600)
-        assert bos['team_frv_per_9'] == pytest.approx(3.0)
+        assert len(result) == 1
+        game = result.loc[('game1', pd.Timestamp('2024-04-01'), 'BOS', 'NYY', 0)]
+        assert game['away_ops_season'] == pytest.approx(0.75)
+        assert game['away_ops_ewm_h3'] == pytest.approx(0.85)
+        assert game['away_frv_per_9'] == pytest.approx(1.5)
+        assert game['home_ops_season'] == pytest.approx(0.600)
+        assert game['home_frv_per_9'] == pytest.approx(3.0)
 
     def test_add_opponent_features_default_columns_and_missing_reciprocal(self, feature_pipeline):
         """Opponent alignment skips existing opponent columns and leaves missing reciprocal rows null."""
@@ -777,20 +763,20 @@ class TestFeaturePipeline:
 
     def test_matchup_diff_helpers_create_expected_values(self):
         df = pd.DataFrame({
-            'team_ops_season': [0.800],
-            'opposing_team_ops_season': [0.700],
-            'team_ops_ewm_h3': [0.820],
-            'opposing_team_ops_ewm_h3': [0.760],
-            'team_starter_fip_season': [3.5],
-            'opposing_team_woba_season': [0.320],
-            'team_starter_fip_ewm_h3': [3.2],
-            'opposing_team_woba_ewm_h10': [0.300],
+            'home_ops_season': [0.800],
+            'away_ops_season': [0.700],
+            'home_ops_ewm_h3': [0.820],
+            'away_ops_ewm_h3': [0.760],
+            'home_starter_fip_season': [3.5],
+            'away_woba_season': [0.320],
+            'home_starter_fip_ewm_h3': [3.2],
+            'away_woba_ewm_h10': [0.300],
         })
 
-        same_base = FeaturePipeline._add_matchup_cols_diff_same_base(
+        same_base = BaseFeatures._add_matchup_cols_diff_same_base(
             df, cols=['ops'], ewm_cols=['season', 'ewm_h3']
         )
-        cross_base = FeaturePipeline._add_matchup_cols_diff_base(
+        cross_base = BaseFeatures._add_matchup_cols_diff_base(
             df,
             col1=['starter_fip'],
             col2=['woba'],
@@ -798,16 +784,16 @@ class TestFeaturePipeline:
             col2_ewm_cols=['season', 'ewm_h10'],
         )
 
-        assert same_base['ops_season_diff'].iloc[0] == pytest.approx(0.100)
-        assert same_base['ops_ewm_h3_diff'].iloc[0] == pytest.approx(0.060)
-        assert cross_base['starter_fip_woba_season_diff'].iloc[0] == pytest.approx(3.180)
-        assert cross_base['starter_fip_woba_ewm_h3_diff'].iloc[0] == pytest.approx(2.900)
+        assert same_base['home_away_ops_season_diff'].iloc[0] == pytest.approx(0.100)
+        assert same_base['home_away_ops_ewm_h3_diff'].iloc[0] == pytest.approx(0.060)
+        assert cross_base['home_away_starter_fip_woba_season_diff'].iloc[0] == pytest.approx(3.180)
+        assert cross_base['home_away_starter_fip_woba_ewm_h3_diff'].iloc[0] == pytest.approx(2.900)
 
     def test_matchup_diff_base_rejects_mismatched_lengths(self):
         with pytest.raises(ValueError, match='same length'):
-            FeaturePipeline._add_matchup_cols_diff_base(
+            BaseFeatures._add_matchup_cols_diff_base(
                 pd.DataFrame(),
-                col1=['starter_fip', 'starter_k_percent'],
+                col1=['home_starter_fip', 'home_starter_k_percent'],
                 col2=['woba'],
                 col1_ewm_cols=['season'],
                 col2_ewm_cols=['season'],
@@ -873,109 +859,183 @@ class TestFeaturePipeline:
 
         assert merged.reset_index()['game_id'].tolist() == ['game2']
 
-    def test_start_pipeline_market_only_returns_home_away_games_and_drops_far_future(self, feature_pipeline):
+    def test_start_pipeline_builds_full_home_away_features_and_drops_far_future_games(self, feature_pipeline):
         schedule = self._pipeline_schedule(include_far_future=True)
+        second_game = schedule.iloc[0].copy()
+        second_game.update({
+            'game_id': 'game2',
+            'game_date': pd.Timestamp('2024-04-02'),
+            'game_datetime': pd.Timestamp('2024-04-02T19:10:00'),
+            'away_team': 'TB',
+            'home_team': 'BAL',
+            'away_score': 2,
+            'home_score': 7,
+            'winning_team': 'BAL',
+            'losing_team': 'TB',
+        })
+        schedule = pd.concat([schedule, second_game.to_frame().T], ignore_index=True)
+
         raw_odds = pd.DataFrame({'sportsbook': ['DraftKings']})
         odds_features = pd.DataFrame({'sportsbook': ['DraftKings']})
+        idx = ['game_id', 'game_date', 'dh', 'home_team', 'away_team']
+
+        def indexed_feature_frame(rows):
+            return pd.DataFrame(rows).set_index(idx)
+
+        valid_schedule_seen_by_match = None
 
         def match_schedule_to_odds(schedule_arg, odds_arg):
-            assert schedule_arg['game_id'].tolist() == ['game1']
+            nonlocal valid_schedule_seen_by_match
+            valid_schedule_seen_by_match = schedule_arg.copy()
+            assert schedule_arg['game_id'].tolist() == ['game1', 'game2']
             assert odds_arg is odds_features
             return self._odds_matched_schedule(schedule_arg), raw_odds
 
-        with patch.object(feature_pipeline, '_load_schedule_data', return_value=schedule), \
-             patch.object(feature_pipeline, '_load_odds_data', return_value=pd.DataFrame({'raw': [1]})), \
-             patch.object(feature_pipeline, '_match_schedule_to_odds', side_effect=match_schedule_to_odds), \
-             patch('src.data.features.feature_pipeline.Odds') as mock_odds:
-            mock_odds.return_value.load_features.return_value = odds_features
-            home_only, returned_raw_odds = feature_pipeline.start_pipeline(mkt_only=True)
+        def rows_for_side_features(base_rows, cols, suffixes, home_offset=1.0, away_offset=0.0):
+            rows = []
+            for row_idx, base_row in enumerate(base_rows):
+                out = {
+                    'game_id': base_row['game_id'],
+                    'game_date': base_row['game_date'],
+                    'dh': base_row['dh'],
+                    'home_team': base_row['home_team'],
+                    'away_team': base_row['away_team'],
+                }
+                for stat_idx, stat in enumerate(cols, start=1):
+                    for suffix_idx, suffix in enumerate(suffixes, start=1):
+                        base_value = stat_idx * 10 + suffix_idx + row_idx / 10
+                        out[f'home_{stat}_{suffix}'] = base_value + home_offset
+                        out[f'away_{stat}_{suffix}'] = base_value + away_offset
+                rows.append(out)
+            return rows
 
-        assert returned_raw_odds is raw_odds
-        assert len(home_only) == 1
-        assert home_only.index.names == [
-            'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id', 'season'
+        matched_base_rows = [
+            {
+                'game_id': 'game1',
+                'game_date': pd.Timestamp('2024-04-01'),
+                'dh': 0,
+                'home_team': 'BOS',
+                'away_team': 'NYY',
+            },
+            {
+                'game_id': 'game2',
+                'game_date': pd.Timestamp('2024-04-02'),
+                'dh': 0,
+                'home_team': 'BAL',
+                'away_team': 'TB',
+            },
         ]
-        assert home_only.index.get_level_values('home_team').tolist() == ['BOS']
-        assert home_only.index.get_level_values('away_team').tolist() == ['NYY']
-        assert home_only['is_winner_home'].tolist() == [0]
-        assert 'vig_open' in home_only.columns
-        assert 'is_home' not in home_only.columns
-        assert 'opposing_team' not in home_only.columns
 
-    def test_start_pipeline_full_path_returns_collapsed_home_away_features(self, feature_pipeline):
-        schedule = self._pipeline_schedule()
-        matched_schedule = self._odds_matched_schedule(schedule)
-        raw_odds = pd.DataFrame({'sportsbook': ['DraftKings']})
-        odds_features = pd.DataFrame({'sportsbook': ['DraftKings']})
-        context_features = pd.DataFrame({
-            'game_id': ['game1'],
-            'game_date': [pd.Timestamp('2024-04-01')],
-            'dh': [0],
-            'game_datetime': [pd.Timestamp('2024-04-01T19:05:00')],
-            'away_team': ['NYY'],
-            'home_team': ['BOS'],
-            'park_factor': [102],
-            'day_night_game': [False],
-            'temp': [72],
-        })
-        raw_pitching = pd.DataFrame({'raw': [1]})
+        batting_cols = [
+            'woba', 'wrc_plus', 'hard_hit', 'barrel_percent', 'bb_k', 'ops',
+            'babip', 'ev', 'iso', 'baserunning', 'wpa', 'k_percent',
+            'bb_percent',
+        ]
+        position_player_features = indexed_feature_frame(
+            rows_for_side_features(
+                matched_base_rows,
+                batting_cols,
+                ['season', 'ewm_h3', 'ewm_h10', 'ewm_h25'],
+                home_offset=0.5,
+                away_offset=0.1,
+            )
+        )
+
+        pitching_cols = self.STARTER_COLS + self.PEN_COLS
+        pitching_features = indexed_feature_frame(
+            rows_for_side_features(
+                matched_base_rows,
+                pitching_cols,
+                self.PITCHING_SUFFIXES,
+                home_offset=2.0,
+                away_offset=0.25,
+            )
+        )
+
+        team_features = indexed_feature_frame(
+            rows_for_side_features(
+                matched_base_rows,
+                self.TEAM_METRIC_COLS,
+                self.TEAM_METRIC_SUFFIXES,
+                home_offset=0.75,
+                away_offset=0.25,
+            )
+        )
+
+        context_features = indexed_feature_frame([
+            {
+                **base_row,
+                'park_factor': 102 + idx_,
+                'context_temp': 72 + idx_,
+            }
+            for idx_, base_row in enumerate(matched_base_rows)
+        ])
 
         with patch.object(feature_pipeline, '_load_schedule_data', return_value=schedule), \
-             patch.object(feature_pipeline, '_load_odds_data', return_value=pd.DataFrame({'raw': [1]})), \
-             patch.object(feature_pipeline, '_load_pitching_data', return_value=raw_pitching), \
-             patch.object(feature_pipeline, '_match_schedule_to_odds', return_value=(matched_schedule, raw_odds)), \
-             patch.object(feature_pipeline, '_get_batting_features', return_value=self._batting_provider_output()) as mock_batting, \
-             patch('src.data.features.feature_pipeline.Odds') as mock_odds, \
-             patch('src.data.features.feature_pipeline.GameContextFeatures') as mock_context_cls, \
-             patch('src.data.features.feature_pipeline.TeamFeatures') as mock_team_cls, \
-             patch('src.data.features.feature_pipeline.PitchingFeatures') as mock_pitching_cls:
+            patch.object(feature_pipeline, '_load_odds_data', return_value=pd.DataFrame({'raw': [1]})), \
+            patch.object(feature_pipeline, '_match_schedule_to_odds', side_effect=match_schedule_to_odds), \
+            patch.object(feature_pipeline, '_get_position_player_features', return_value=position_player_features) as mock_get_position, \
+            patch.object(feature_pipeline, '_get_pitcher_features', return_value=pitching_features) as mock_get_pitcher, \
+            patch('src.data.features.feature_pipeline.Odds') as mock_odds, \
+            patch('src.data.features.feature_pipeline.GameContextFeatures') as mock_context_cls, \
+            patch('src.data.features.feature_pipeline.TeamFeatures') as mock_team_cls:
+            
             mock_odds.return_value.load_features.return_value = odds_features
             mock_context_cls.return_value.load_features.return_value = context_features
-            mock_team_cls.return_value.load_features.return_value = self._team_features_provider_output()
-            mock_pitching_cls.return_value.load_features.return_value = self._pitching_provider_output()
-
-            final_features, returned_raw_odds = feature_pipeline.start_pipeline(force_recreate=True)
+            mock_team_cls.return_value.load_features.return_value = team_features
+            final_features, returned_raw_odds = feature_pipeline.start_pipeline(force_recreate=True, mkt_only=True)
 
         assert returned_raw_odds is raw_odds
-        mock_batting.assert_called_once()
-        assert mock_batting.call_args.args[1] is True
-        assert mock_pitching_cls.call_args.args[2] is True
+        mock_odds.assert_called_once()
+        assert mock_odds.call_args.args[0].equals(pd.DataFrame({'raw': [1]}))
+        assert mock_odds.call_args.args[1] == feature_pipeline.season
+        assert mock_odds.call_args.args[2] is True
+        assert valid_schedule_seen_by_match['game_id'].tolist() == ['game1', 'game2']
 
-        assert len(final_features) == 1
-        assert final_features.index.get_level_values('home_team').tolist() == ['BOS']
-        assert final_features.index.get_level_values('away_team').tolist() == ['NYY']
-        assert 'is_winner_home' in final_features.columns
-        assert 'home_team_ops_season' in final_features.columns
-        assert 'away_team_ops_season' in final_features.columns
-        assert 'home_team_pen_era_season' in final_features.columns
-        assert 'away_team_pen_era_season' in final_features.columns
+        expected_index = pd.MultiIndex.from_frame(pd.DataFrame(matched_base_rows)[idx])
+        assert final_features.index.equals(expected_index)
+        assert len(final_features) == 2
+        assert final_features.index.get_level_values('game_date').is_monotonic_increasing
+
+        matched_schedule_arg = mock_get_position.call_args.args[0]
+        assert matched_schedule_arg.index.names == idx
+        assert matched_schedule_arg.index.equals(expected_index)
+        assert mock_get_position.call_args.args[1] is True
+
+        pitcher_schedule_arg = mock_get_pitcher.call_args.args[0]
+        assert pitcher_schedule_arg.index.equals(expected_index)
+        assert mock_get_pitcher.call_args.args[1] is True
+
+        context_schedule_arg = mock_context_cls.call_args.args[1]
+        assert context_schedule_arg['game_id'].tolist() == ['game1', 'game2']
+
+        team_schedule_arg = mock_team_cls.call_args.args[1]
+        assert team_schedule_arg.index.equals(expected_index)
+
+        assert 'wind' not in final_features.columns
+        assert 'condition' not in final_features.columns
         assert 'park_factor' in final_features.columns
-        assert 'starter_fip_woba_season_diff' in final_features.columns
-        assert 'win_pct_season_diff' in final_features.columns
-        assert final_features['starter_fip_woba_season_diff'].iloc[0] == pytest.approx(4.0)
+        assert 'vig_open' in final_features.columns
 
-    def test_temporal_ordering_validation(self, feature_pipeline, sample_schedule_data):
-        """Test that all data maintains proper temporal ordering."""
-        schedule_data = feature_pipeline._load_schedule_data()
-        transformed = feature_pipeline._transform_schedule(schedule_data)
-        
-        transformed_reset = transformed.reset_index()
-        transformed_reset['game_date'] = pd.to_datetime(transformed_reset['game_date'])
-        
-        prev_date = None
-        prev_dh = None
-        
-        for _, row in transformed_reset.iterrows():
-            current_date = row['game_date']
-            current_dh = row['dh']
-            
-            if prev_date is not None:
-                assert current_date >= prev_date, \
-                    f"Dates should be in order: {prev_date} <= {current_date}"
-                
-                if current_date == prev_date and prev_dh is not None:
-                    assert current_dh >= prev_dh, \
-                        f"DH should be in order for same date: {prev_dh} <= {current_dh}"
-            
-            prev_date = current_date
-            prev_dh = current_dh
+        first = final_features.loc[('game1', pd.Timestamp('2024-04-01'), 0, 'BOS', 'NYY')]
+        assert first['home_away_starter_era_season_diff'] == pytest.approx(
+            first['home_starter_era_season'] - first['away_starter_era_season']
+        )
+        assert first['home_away_pen_fip_ewm_h8_diff'] == pytest.approx(
+            first['home_pen_fip_ewm_h8'] - first['away_pen_fip_ewm_h8']
+        )
+        assert first['home_away_starter_fip_woba_season_diff'] == pytest.approx(
+            first['home_starter_fip_season'] - first['away_woba_season']
+        )
+        assert first['home_away_starter_k_percent_k_percent_ewm_h3_diff'] == pytest.approx(
+            first['home_starter_k_percent_ewm_h3'] - first['away_k_percent_ewm_h3']
+        )
+        assert first['home_away_win_pct_ewm_h20_diff'] == pytest.approx(
+            first['home_win_pct_ewm_h20'] - first['away_win_pct_ewm_h20']
+        )
+        assert first['home_away_one_run_win_pct_season_diff'] == pytest.approx(
+            first['home_one_run_win_pct_season'] - first['away_one_run_win_pct_season']
+        )
+
+        assert not final_features.isna().any().any()
+        mock_get_position.assert_called_once()
