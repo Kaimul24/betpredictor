@@ -20,9 +20,10 @@ logger = logging.getLogger(__name__)
 
 class BattingFeatures(BaseFeatures):
 
-    def __init__(self, season: int, data: DataFrame, force_recreate: bool = False):
+    def __init__(self, season: int, data: DataFrame, force_recreate: bool = False, halflives: tuple[int, ...] = (3, 10, 25)):
         super().__init__(season, data, force_recreate)
-        
+        self.halflives = halflives
+
     def load_features(self):
         return self.rolling_batting_stats()
     
@@ -90,7 +91,7 @@ class BattingFeatures(BaseFeatures):
             shrinkage_weights_cols=shrinkage_weights_cols,
             ewm_cols=ewm_cols,
             preserve_cols=["player_id", "mlb_id", "pos", "team", "game_date", "dh", "season", "ab", "pa"],
-            halflives=(3, 10, 25)
+            halflives=self.halflives
         )
         
         try:

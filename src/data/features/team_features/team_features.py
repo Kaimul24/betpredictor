@@ -12,19 +12,19 @@ import numpy as np
 
 class TeamFeatures(BaseFeatures):
 
-    METRIC_COLS = [
-        'win_pct_season', 'win_pct_ewm_h3', 'win_pct_ewm_h8', 'win_pct_ewm_h20',
-        'pyth_expectation_season', 'pyth_expectation_ewm_h3', 'pyth_expectation_ewm_h8', 'pyth_expectation_ewm_h20',
-        'run_diff_season', 'run_diff_ewm_h3', 'run_diff_ewm_h8', 'run_diff_ewm_h20',
-        'one_run_win_pct_season', 'one_run_win_pct_ewm_h3', 'one_run_win_pct_ewm_h8', 'one_run_win_pct_ewm_h20',
-    ]
-
-    SIDE_COLS = METRIC_COLS + ['team_gp']
+    METRIC_BASES = ['win_pct', 'pyth_expectation', 'run_diff', 'one_run_win_pct']
 
     OUTPUT_INDEX = ['game_id', 'game_date', 'home_team', 'away_team', 'dh']
 
-    def __init__(self, season: int, schedule_data: DataFrame):
+    def __init__(self, season: int, schedule_data: DataFrame, halflives: tuple[int, ...] = (3, 8, 20)):
         super().__init__(season, schedule_data)
+        self.halflives = tuple(halflives)
+        self.metric_cols = [
+            col
+            for base in self.METRIC_BASES
+            for col in [f'{base}_season', *[f'{base}_ewm_h{hl}' for hl in self.halflives]]
+        ]
+        self.side_cols = self.metric_cols + ['team_gp']
 
     def load_features(self) -> DataFrame:
         team_log = self._build_team_game_log()
@@ -109,14 +109,14 @@ class TeamFeatures(BaseFeatures):
         home_rows = df[df['is_home']].copy()
         away_rows = df[~df['is_home']].copy()
 
-        home_rows = home_rows.rename(columns={col: f'home_{col}' for col in self.SIDE_COLS})
-        away_rows = away_rows.rename(columns={col: f'away_{col}' for col in self.SIDE_COLS})
+        home_rows = home_rows.rename(columns={col: f'home_{col}' for col in self.side_cols})
+        away_rows = away_rows.rename(columns={col: f'away_{col}' for col in self.side_cols})
 
         home_rows = home_rows.rename(columns={'team': 'home_team'})
         away_rows = away_rows.rename(columns={'team': 'away_team'})
 
-        home_keep = keys + ['home_team', 'is_winner'] + [f'home_{col}' for col in self.SIDE_COLS]
-        away_keep = keys + ['away_team', 'is_winner'] + [f'away_{col}' for col in self.SIDE_COLS]
+        home_keep = keys + ['home_team', 'is_winner'] + [f'home_{col}' for col in self.side_cols]
+        away_keep = keys + ['away_team', 'is_winner'] + [f'away_{col}' for col in self.side_cols]
 
         merged = pd.merge(
             home_rows[home_keep],
@@ -157,7 +157,7 @@ class TeamFeatures(BaseFeatures):
             ewm_cols=ewm_cols,
             preserve_cols=preserve_cols,
             by=team_grouping,
-            halflives=(3, 8, 20)
+            halflives=self.halflives
         )
 
         result = result.set_index(['game_id', 'team', 'opposing_team', 'game_date', 'dh', 'game_datetime'])
@@ -239,7 +239,7 @@ class TeamFeatures(BaseFeatures):
             ewm_cols=ewm_cols,
             preserve_cols=preserve_cols,
             by=team_grouping,
-            halflives=(3, 8, 20)
+            halflives=self.halflives
         )
 
         result = result.set_index(['game_id', 'team', 'opposing_team', 'game_date', 'dh', 'game_datetime'])
@@ -266,7 +266,7 @@ class TeamFeatures(BaseFeatures):
         den = num + (RA_cum + alpha) ** gamma
         df['pyth_expectation_season'] = (num / den).fillna(0.5)
 
-        for hl in (3, 8, 20):
+        for hl in self.halflives:
             rs_ewm = BaseFeatures.compute_ewm(rs, df['gp'], df['team'], hl, val_is_rate=False)
             ra_ewm = BaseFeatures.compute_ewm(ra, df['gp'], df['team'], hl, val_is_rate=False)
             num = (rs_ewm + alpha) ** gamma
@@ -287,8 +287,7 @@ class TeamFeatures(BaseFeatures):
 
         preserve_cols = ['game_id', 'game_date', 'dh', 'game_datetime', 'team', 
                         'opposing_team', 'pyth_expectation_season',
-                        'pyth_expectation_ewm_h3', 'pyth_expectation_ewm_h8',
-                        'pyth_expectation_ewm_h20']
+                        *[f'pyth_expectation_ewm_h{hl}' for hl in self.halflives]]
 
         result, _ = BaseFeatures.compute_rolling_stats(
             data=df,
@@ -297,6 +296,7 @@ class TeamFeatures(BaseFeatures):
             ewm_cols=ewm_cols,
             preserve_cols=preserve_cols,
             by=df['team'],
+            halflives=self.halflives,
         )
 
         result = result.set_index(['game_id', 'team', 'opposing_team', 'game_date', 'dh', 'game_datetime'])

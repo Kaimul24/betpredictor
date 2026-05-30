@@ -8,7 +8,7 @@ from src.config import PROJECT_ROOT, FEATURES_CACHE_PATH
 import joblib
 
 from dotenv import load_dotenv
-from src.utils import setup_logging
+from src.utils import setup_logging, TupleAction
 
 load_dotenv()
 
@@ -24,14 +24,43 @@ def create_args():
     parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
+    parser.add_argument(
+        "--batter-halflives", 
+        nargs='*',
+        type=int,
+        action=TupleAction,
+        default=(3, 8, 20),
+        help="EWM halflives for batting stats")
+    parser.add_argument(
+        "--starter-halflives",
+        nargs='*',
+        type=int,
+        action=TupleAction,
+        default=(3, 8, 20),
+        help="EWM halflives for starting pitching stats")
+    parser.add_argument(
+        "--reliever-halflives", 
+        nargs='*',
+        type=int,
+        action=TupleAction,
+        default=(3, 8, 20),
+        help="EWM halflives for starting pitching stats")
+    parser.add_argument(
+        "--team-halflives",
+        nargs='*',
+        type=int,
+        action=TupleAction,
+        default=(3, 8, 20),
+        help="EWM halflives for team metric stats")
     return parser.parse_args()
 
 class PreProcessing():
 
-    def __init__(self, seasons: List[int], model_type: str, mkt_only: bool = False):
+    def __init__(self, seasons: List[int], model_type: str, mkt_only: bool = False, args = None):
         if model_type not in ['xgboost', 'mlp']:
             raise ValueError("Invalid model_type. Expected ['xgboost', 'mlp']")
-
+        
+        self.args = args
         self.model_type = model_type
         self.seasons = seasons
         self.seasons_str = "_".join(map(str, seasons))
@@ -227,7 +256,7 @@ class PreProcessing():
         )
 
         for year in self.seasons:
-            feat_pipe = FeaturePipeline(year, logger=pipeline_logger)
+            feat_pipe = FeaturePipeline(year, self.args, logger=pipeline_logger)
             season_feats, odds_data = feat_pipe.start_pipeline(force_recreate, self.mkt_only)
             all_features.append(season_feats)
             all_odds.append(odds_data)
@@ -304,7 +333,7 @@ def main():
     
     logger = setup_logging("feature_preprocessing", LOG_FILE, args=args)
     
-    pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='mlp', mkt_only=False)
+    pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='mlp', mkt_only=False, args=args)
     pre_processor.logger = logger
     
     preprocessed_feats, odds_data = pre_processor.preprocess_feats(

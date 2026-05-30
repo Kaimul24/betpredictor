@@ -10,6 +10,8 @@ import argparse
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 
+from torch import parse_type_comment
+
 from src.config import PROJECT_ROOT
 
 from src.data.features.base_feature import BaseFeatures
@@ -25,7 +27,7 @@ from src.data.loaders.game_loader import GameLoader
 from src.data.loaders.odds_loader import OddsLoader
 from src.data.loaders.player_loader import PlayerLoader
 from src.data.loaders.team_loader import TeamLoader
-from src.utils import setup_logging
+from src.utils import setup_logging, parse_tuple, TupleAction
 
 LOG_DIR = PROJECT_ROOT / "src" / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -48,16 +50,45 @@ def create_args():
         choices=["debug", "info", "warning", "error", "critical"],
         default="debug",
         help="File log level when --log is enabled")
-    
+    parser.add_argument(
+        "--batter-halflives", 
+        nargs='*',
+        type=int,
+        action=TupleAction,
+        default=(3, 8, 20),
+        help="EWM halflives for batting stats")
+    parser.add_argument(
+        "--starter-halflives",
+        nargs='*',
+        type=int,
+        action=TupleAction,
+        default=(3, 8, 20),
+        help="EWM halflives for starting pitching stats")
+    parser.add_argument(
+        "--reliever-halflives", 
+        nargs='*',
+        type=int,
+        action=TupleAction,
+        default=(3, 8, 20),
+        help="EWM halflives for starting pitching stats")
+    parser.add_argument(
+        "--team-halflives",
+        nargs='*',
+        type=int,
+        action=TupleAction,
+        default=(3, 8, 20),
+        help="EWM halflives for team metric stats")
+
     args = parser.parse_args()
     return args
 
 class FeaturePipeline:
 
-    def __init__(self, season: int, logger: Optional[logging.Logger] = None):
+    def __init__(self, season: int, args, logger: Optional[logging.Logger] = None):
         self.season = season
         self.cache = {}
         self.logger = logger or logging.getLogger("feature_pipeline")
+        self.args = args
 
     def start_pipeline(self, force_recreate: bool = False, mkt_only: bool = False) -> Tuple[DataFrame, DataFrame] | DataFrame:
         self.logger.info("="*60)
@@ -81,7 +112,7 @@ class FeaturePipeline:
         position_player_feats = self._get_position_player_features(odds_sch_matched, force_recreate).reset_index().set_index(idx)
         pitching_feats = self._get_pitcher_features(odds_sch_matched, force_recreate).reset_index().set_index(idx)
         context_feats = GameContextFeatures(self.season, schedule_data).load_features().reset_index().set_index(idx)
-        team_feats = TeamFeatures(self.season, odds_sch_matched).load_features().reset_index().set_index(idx)
+        team_feats = TeamFeatures(self.season, odds_sch_matched, self.args.team_halflives).load_features().reset_index().set_index(idx)
 
 
         final_features = odds_sch_matched.join(
@@ -92,7 +123,7 @@ class FeaturePipeline:
         assert len(final_features) == len(odds_sch_matched)
 
         self.logger.info(f" Adding matchup columns...")
-        pitcher_ewm_cols = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
+        starter_ewm_cols = ['season'] + [f'ewm_h{hl}' for hl in list(self.args.starter_halflives)]
         starter_cols = ['starter_era', 'starter_babip', 'starter_hard_hit', 'starter_k_percent', 
                         'starter_barrel_percent', 'starter_fip', 'starter_siera', 'starter_stuff',
                         'starter_ev', 'starter_hr_fb', 'starter_wpa']
@@ -100,10 +131,10 @@ class FeaturePipeline:
         starter_matchups = BaseFeatures._add_matchup_cols_diff_same_base(
                                                             df=final_features,
                                                             cols=starter_cols,
-                                                            ewm_cols=pitcher_ewm_cols)
+                                                            ewm_cols=starter_ewm_cols)
                                                                             
         final_features = final_features.assign(**starter_matchups)
-
+        reliever_ewm_cols = ['season'] + [f'ewm_h{hl}' for hl in list(self.args.reliever_halflives)]
         pen_cols = ['pen_era', 'pen_babip', 'pen_hard_hit', 'pen_k_percent', 
                     'pen_barrel_percent', 'pen_fip', 'pen_siera', 'pen_stuff',
                     'pen_ev', 'pen_hr_fb', 'pen_wpa_li']
@@ -112,25 +143,25 @@ class FeaturePipeline:
         pen_matchups = BaseFeatures._add_matchup_cols_diff_same_base(
                                                             df=final_features,
                                                             cols=pen_cols,
-                                                            ewm_cols=pitcher_ewm_cols)
+                                                            ewm_cols=reliever_ewm_cols)
                                                                             
         final_features = final_features.assign(**pen_matchups)
 
         team_pitch_cols = ["starter_fip", "starter_k_percent", "starter_bb_percent", "starter_barrel_percent"]
 
         opp_team_bat_cols = ["woba", "k_percent", "bb_percent", "barrel_percent"]
-        bat_ewm_cols = ['season', 'ewm_h3', 'ewm_h10', 'ewm_h25']
+        bat_ewm_cols = ['season'] + [f'ewm_h{hl}' for hl in list(self.args.batter_halflives)]
         team_pitching_vs_opp_batting = BaseFeatures._add_matchup_cols_diff_base(
                                                                         df=final_features,
                                                                         col1=team_pitch_cols,
                                                                         col2=opp_team_bat_cols,
-                                                                        col1_ewm_cols=pitcher_ewm_cols,
+                                                                        col1_ewm_cols=starter_ewm_cols,
                                                                         col2_ewm_cols=bat_ewm_cols)   
         
         final_features = final_features.assign(**team_pitching_vs_opp_batting)
 
         team_metrics_cols = ["win_pct", "pyth_expectation", "run_diff", "one_run_win_pct"]
-        team_metrics_ewm_cols = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
+        team_metrics_ewm_cols = ['season'] + [f'ewm_h{hl}' for hl in list(self.args.team_halflives)]
         team_metrics_matchups = BaseFeatures._add_matchup_cols_diff_same_base(df=final_features,
                                                                                  cols=team_metrics_cols,
                                                                                  ewm_cols=team_metrics_ewm_cols)
@@ -304,9 +335,10 @@ class FeaturePipeline:
         batting_features['player_id'] = batting_features['player_id'].astype('int')
         drop_cols = ["team", "opposing_team", "player_id", "team_bf", "season_bf"]
 
+        ewm_suffixes = [f'_ewm_h{hl}' for hl in self.args.batter_halflives]
         stats_cols = [
             c for c in batting_features.columns
-            if any(s in c for s in ['_season', '_ewm_h3', '_ewm_h10', '_ewm_h25', 'frv_per_9'])
+            if any(s in c for s in ['_season', *ewm_suffixes, 'frv_per_9'])
         ]
         league_medians = batting_features[stats_cols].median(numeric_only=True)
         group_cols = ["game_id", "game_date", "home_team", "away_team", "dh"]
@@ -356,7 +388,7 @@ class FeaturePipeline:
         lineups_data['game_date'] = pd.to_datetime(lineups_data['game_date'])
         lineups_data = lineups_data[~(lineups_data['position'].str.startswith('P') & (lineups_data['player_id'] != 19755))]
 
-        batting_features = BattingFeatures(self.season, raw_batter_data, force_recreate)
+        batting_features = BattingFeatures(self.season, raw_batter_data, force_recreate, self.args.batter_halflives)
         
         self.logger.info(f" Calculating batting rolling stats for {self.season}")
         batting_features = batting_features.load_features()
@@ -374,7 +406,7 @@ class FeaturePipeline:
         self.logger.info(f" Adding team batting comparison stats for {self.season}")
         batting_comp_cols = ["woba", "wrc_plus", "hard_hit", "barrel_percent", "bb_k", "ops",
                              "babip", "ev", "iso", "baserunning", "wpa"]
-        ewm_cols = ['season', 'ewm_h3', 'ewm_h10', 'ewm_h25']
+        ewm_cols = ['season'] + [f'ewm_h{hl}' for hl in self.args.batter_halflives]
 
         batting_comp_stats = BaseFeatures._add_matchup_cols_diff_same_base(team_position_player_features, batting_comp_cols, ewm_cols)
         team_position_player_features = team_position_player_features.assign(**batting_comp_stats)
@@ -391,7 +423,14 @@ class FeaturePipeline:
         )
 
         raw_pitching_data = self._load_pitching_data()
-        raw_feats = PitchingFeatures(self.season, raw_pitching_data, force_recreate).load_features()
+        raw_feats = PitchingFeatures(
+            self.season, 
+            raw_pitching_data, 
+            force_recreate, 
+            self.args.starter_halflives, 
+            self.args.reliever_halflives
+        ).load_features()
+        
         team_starter_cols = [col for col in raw_feats.columns if col.startswith("team_starter")]
         pen_cols = [col for col in raw_feats.columns if col.startswith("team_pen")]
         pitching_keys = ["game_date", "dh", "team", "opposing_team"]
@@ -793,7 +832,7 @@ def main():
     args = create_args()
     logger = setup_logging("feature_pipeline", LOG_FILE, args=args)
     
-    feat_pipe = FeaturePipeline(2021, logger)
+    feat_pipe = FeaturePipeline(2021, args, logger)
 
     features, _ = feat_pipe.start_pipeline(args.force_recreate, mkt_only=True)
 

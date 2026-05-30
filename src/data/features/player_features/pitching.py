@@ -24,8 +24,17 @@ PITCHING_CACHE_PATH = os.getenv("rolling_pitching_features_cache")
 
 class PitchingFeatures(BaseFeatures):
 
-    def __init__(self, season: int, data: DataFrame, force_recreate: bool = False) -> None:
+    def __init__(
+            self, 
+            season: int, 
+            data: DataFrame, 
+            force_recreate: bool = False, 
+            halflives_st: tuple[int, ...] = (3, 10, 25),
+            halflives_rel: tuple[int, ...] = (3, 10, 25)
+        ) -> None:
         super().__init__(season, data, force_recreate)
+        self.halflives_st = halflives_st
+        self.halflives_rel = halflives_rel
         self.pitching_matchups = TeamLoader().load_pitching_matchups(self.season)
 
     def load_features(self) -> DataFrame:
@@ -160,8 +169,9 @@ class PitchingFeatures(BaseFeatures):
         
         bullpen_roster_with_stats['game_date'] = pd.to_datetime(bullpen_roster_with_stats['game_date'])
         
+        ewm_suffixes = [f'_ewm_h{hl}' for hl in self.halflives_rel]
         value_cols = [c for c in bullpen_roster_with_stats.columns 
-              if any(s in c for s in ['_season', '_ewm_h3', '_ewm_h8', '_ewm_h20', '_li'])
+              if any(s in c for s in ['_season', *ewm_suffixes, '_li'])
               or c in ['fip', 'era', 'siera', 'stuff', 'gmli', 'wpa_li']]
 
         usage_df = self._compute_bullpen_usage(bullpen_roster_with_stats)
@@ -351,8 +361,8 @@ class PitchingFeatures(BaseFeatures):
         relievers = pitcher_data[pitcher_data['is_starter'] == False].copy()
         starters = pitcher_data[pitcher_data['is_starter'] == True].copy()
 
-        rl_df, rl_priors = self._compute_rolling_bullpen_stats(relievers)
-        st_df, st_priors = self._compute_rolling_starter_stats(starters)
+        rl_df, rl_priors = self._compute_rolling_bullpen_stats(relievers, self.halflives_rel)
+        st_df, st_priors = self._compute_rolling_starter_stats(starters, self.halflives_st)
         
         st_df_velo = self._compute_starter_velo_trends(st_df)
 

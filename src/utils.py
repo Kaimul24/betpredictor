@@ -1,10 +1,21 @@
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta
 import logging
 import sys
 import unicodedata
 import re
 from pathlib import Path
 from typing import List, Optional, Union
+import argparse
+
+def parse_tuple(string):
+    try:
+        return tuple(map(int, string.split(',')))
+    except ValueError:
+        raise argparse.ArgumentTypeError("Tuple must be comma-separated integers (e.g., '1,2,3')")
+
+class TupleAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, tuple(values))
 
 def _coerce_log_level(level: Union[int, str], arg_name: str = "log level") -> int:
     """Normalize a logging level supplied as an int or CLI string."""
