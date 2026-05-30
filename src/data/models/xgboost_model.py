@@ -11,7 +11,7 @@ from typing import Dict
 from tqdm import tqdm
 
 from src.data.models.calibration import select_and_fit_calibrator, save_calibrator, load_calibrator, apply_calibration, plot_calibration
-from src.data.feature_preprocessing import PreProcessing
+from src.data.features.feature_preprocessing import PreProcessing
 from src.config import PROJECT_ROOT
 from src.utils import setup_logging
 

@@ -59,47 +59,192 @@ class FeaturePipeline:
         self.cache = {}
         self.logger = logger or logging.getLogger("feature_pipeline")
 
-    def _transform_schedule(self, schedule_data: DataFrame) -> DataFrame:
-        """Splits each game in the schedule into 2 rows, each representing one team's perspective of the game"""
-        self.logger.info(f" Transforming schedule for {self.season}")
+    def start_pipeline(self, force_recreate: bool = False, mkt_only: bool = False) -> Tuple[DataFrame, DataFrame] | DataFrame:
+        self.logger.info("="*60)
+        self.logger.info(f" Starting feature pipeline...")
+        self.logger.info("="*60 + "\n")
+        schedule_data = self._load_schedule_data()
 
-        schedule_data = schedule_data.reset_index().copy()
+        far_future_games = schedule_data[(schedule_data['game_datetime'].astype('datetime64[ns]') - schedule_data['game_date'].astype('datetime64[ns]')) > pd.Timedelta("2 Days")]
 
-        unique_cols = ['away_team', 'home_team', 'away_probable_pitcher', 'home_probable_pitcher', 'starter_normalized', 'opposing_starter_normalized', 'away_score', 'home_score']
-        common_cols = [col for col in schedule_data.columns if col not in unique_cols]
+        self.logger.info(f" Far rescheduled games\n{far_future_games}")
+        self.logger.info(f" Dropping rescheduled games that are far past original game_date")
 
-        away_df_base = schedule_data[common_cols]
-        home_df_base = schedule_data[common_cols]
+        schedule_data = schedule_data.drop(far_future_games.index)
+        
+        idx = ["game_id", "game_date", "dh", "home_team", "away_team"]
+        odds_data = self._load_odds_data()
+        odds_feats = Odds(odds_data, self.season, mkt_only).load_features()
+        odds_sch_matched, raw_odds_data = self._match_schedule_to_odds(schedule_data, odds_feats)
+        odds_sch_matched = odds_sch_matched.reset_index().set_index(idx)
+        
+        position_player_feats = self._get_position_player_features(odds_sch_matched, force_recreate).reset_index().set_index(idx)
+        pitching_feats = self._get_pitcher_features(odds_sch_matched, force_recreate).reset_index().set_index(idx)
+        context_feats = GameContextFeatures(self.season, schedule_data).load_features().reset_index().set_index(idx)
+        team_feats = TeamFeatures(self.season, odds_sch_matched).load_features().reset_index().set_index(idx)
 
-        away_df = away_df_base.assign(
-            is_home = False,
-            team=schedule_data['away_team'],
-            opposing_team=schedule_data['home_team'],
-            starter_normalized=schedule_data['away_starter_normalized'],
-            opposing_starter_normalized=schedule_data['home_starter_normalized'],
-            team_score=schedule_data['away_score'],
-            opposing_team_score = schedule_data['home_score'],
-            is_winner=np.where(schedule_data['winning_team'] == schedule_data['away_team'], 1, 0)
+
+        final_features = odds_sch_matched.join(
+            [position_player_feats, pitching_feats, context_feats, team_feats],
+
         )
 
-        home_df = home_df_base.assign(
-            is_home = True,
-            team=schedule_data['home_team'],
-            opposing_team=schedule_data['away_team'], 
-            starter_normalized=schedule_data['home_starter_normalized'],
-            opposing_starter_normalized=schedule_data['away_starter_normalized'],
-            team_score=schedule_data['home_score'],
-            opposing_team_score = schedule_data['away_score'],
-            is_winner=np.where(schedule_data['winning_team'] == schedule_data['home_team'], 1, 0)
-        )
+        assert len(final_features) == len(odds_sch_matched)
 
-        result = pd.concat([away_df, home_df], ignore_index=True)
-        result = result.sort_values(["game_date", "dh", "game_datetime", "is_home"], ascending=[True, True, True, False])
-        result = result.set_index(['game_date', 'dh', 'game_datetime', 'team']).sort_index()
+        self.logger.info(f" Adding matchup columns...")
+        pitcher_ewm_cols = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
+        starter_cols = ['starter_era', 'starter_babip', 'starter_hard_hit', 'starter_k_percent', 
+                        'starter_barrel_percent', 'starter_fip', 'starter_siera', 'starter_stuff',
+                        'starter_ev', 'starter_hr_fb', 'starter_wpa']
 
-        assert len(result) == len(schedule_data) * 2
+        starter_matchups = BaseFeatures._add_matchup_cols_diff_same_base(
+                                                            df=final_features,
+                                                            cols=starter_cols,
+                                                            ewm_cols=pitcher_ewm_cols)
+                                                                            
+        final_features = final_features.assign(**starter_matchups)
 
-        return result
+        pen_cols = ['pen_era', 'pen_babip', 'pen_hard_hit', 'pen_k_percent', 
+                    'pen_barrel_percent', 'pen_fip', 'pen_siera', 'pen_stuff',
+                    'pen_ev', 'pen_hr_fb', 'pen_wpa_li']
+        
+        
+        pen_matchups = BaseFeatures._add_matchup_cols_diff_same_base(
+                                                            df=final_features,
+                                                            cols=pen_cols,
+                                                            ewm_cols=pitcher_ewm_cols)
+                                                                            
+        final_features = final_features.assign(**pen_matchups)
+
+        team_pitch_cols = ["starter_fip", "starter_k_percent", "starter_bb_percent", "starter_barrel_percent"]
+
+        opp_team_bat_cols = ["woba", "k_percent", "bb_percent", "barrel_percent"]
+        bat_ewm_cols = ['season', 'ewm_h3', 'ewm_h10', 'ewm_h25']
+        team_pitching_vs_opp_batting = BaseFeatures._add_matchup_cols_diff_base(
+                                                                        df=final_features,
+                                                                        col1=team_pitch_cols,
+                                                                        col2=opp_team_bat_cols,
+                                                                        col1_ewm_cols=pitcher_ewm_cols,
+                                                                        col2_ewm_cols=bat_ewm_cols)   
+        
+        final_features = final_features.assign(**team_pitching_vs_opp_batting)
+
+        team_metrics_cols = ["win_pct", "pyth_expectation", "run_diff", "one_run_win_pct"]
+        team_metrics_ewm_cols = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
+        team_metrics_matchups = BaseFeatures._add_matchup_cols_diff_same_base(df=final_features,
+                                                                                 cols=team_metrics_cols,
+                                                                                 ewm_cols=team_metrics_ewm_cols)
+        
+        final_features = final_features.assign(**team_metrics_matchups)
+
+        assert (final_features['home_away_starter_fip_woba_season_diff'] == final_features['home_starter_fip_season'] - final_features['away_woba_season']).all()
+
+
+        final_features = final_features.drop(columns=[col for col in final_features.columns if col.endswith('_sch_bat') or
+                                                    col in ['wind', 'condition'] or 
+                                                    col.endswith('_to_drop')])
+
+        assert final_features.index.get_level_values('game_date').is_monotonic_increasing, "final_features game_date not globally sorted"
+
+        self.logger.info(f" Final merged dataset shape: {final_features.shape}")
+        self.logger.debug(f" Final dataframe datatypes:\n{final_features.dtypes.to_dict()}")
+        self.logger.debug(f" Final columns: {final_features.columns.to_list()}")        
+
+        nan_rows = final_features[final_features.isna().any(axis=1)]
+        self.logger.info(f" Remaining rows with NaN for {self.season}: {len(nan_rows)}")
+        self.logger.debug(f" Sample NaN rows\n{nan_rows.head().to_string()}")
+
+        self.logger.debug("="*60 + "\n")
+        self.logger.debug(" Final features DataFrame tail")
+        self.logger.debug(final_features.tail().to_string())
+        self.logger.debug("="*60 + "\n")
+
+        return final_features, raw_odds_data
+
+        ### TODO
+        # if mkt_only:
+        #     home_only = transformed_schedule[transformed_schedule['is_home'] == True]
+        #     assert len(home_only) * 2 == len(transformed_schedule)
+
+        #     cols = ['day_night_game', 'venue_name', 'venue_id', 'venue_elevation', 'venue_timezone', 'venue_gametime_offset', 'status', 'away_starter_normalized',
+        #             'home_starter_normalized', 'wind', 'condition', 'temp', 'winning_team', 'losing_team', 'is_home', 'starter_normalized', 'opposing_starter_normalized',
+        #              'team_score' , 'opposing_team_score']
+
+        #     home_only = home_only.drop(columns=cols).reset_index()
+        #     home_only.rename(columns={'team': 'home_team', 'opposing_team': 'away_team', 'is_winner': 'is_winner_home'}, inplace=True)
+        #     home_only.set_index(['game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id', 'season'], inplace=True)
+
+        #     return home_only, raw_odds_data
+        
+        # batting_features = self._get_batting_features(transformed_schedule, force_recreate)
+       
+
+        # context_features = GameContextFeatures(self.season, schedule_data).load_features()
+        # context_features = context_features.drop(columns=['away_team', 'home_team'])
+        
+
+        # team_features = TeamFeatures(self.season, transformed_schedule).load_features()
+        # team_feat_cols = ['win_pct_season', 'win_pct_ewm_h3', 'win_pct_ewm_h8', 'win_pct_ewm_h20', 
+        #                   'pyth_expectation_season', 'pyth_expectation_ewm_h3', 'pyth_expectation_ewm_h8', 'pyth_expectation_ewm_h20', 
+        #                   'run_diff_season', 'run_diff_ewm_h3', 'run_diff_ewm_h8', 'run_diff_ewm_h20',
+        #                   'one_run_win_pct_season', 'one_run_win_pct_ewm_h3', 'one_run_win_pct_ewm_h8', 'one_run_win_pct_ewm_h20']
+        
+        # team_features.rename(columns = {col: f"team_{col}" for col in team_feat_cols}, inplace=True)
+        # team_features_with_opp = self._add_opponent_features(team_features, feature_cols=[f"team_{col}" for col in team_feat_cols])
+        
+        # team_features_with_opp = team_features_with_opp.sort_index(level=['game_date', 'dh', 'team'])
+        # team_features_with_opp.rename(columns = {col: f"team_{col}" for col in team_feat_cols}, inplace=True)
+
+        # raw_pitching_data = self._load_pitching_data()
+        # pitching_features = PitchingFeatures(self.season, raw_pitching_data, force_recreate).load_features().reset_index()
+        # pitching_features = pitching_features.set_index(['game_date', 'dh', 'team', 'opposing_team'])
+
+        # self.logger.info(f" Adding opposing team bullpen pitching stats to each row for {self.season}")
+        # bullpen_cols = [col for col in pitching_features.columns if 'pen_' in col and not col.startswith('opposing_')]
+
+        # pitching_features_opp_bp = self._add_opponent_features(pitching_features, feature_cols=bullpen_cols)
+        # pitching_features_opp_bp = pitching_features_opp_bp.sort_index(level=['game_date', 'dh', 'team'])
+        # pitching_features_opp_bp = pitching_features_opp_bp.reset_index()
+
+        # transformed_schedule_reset = transformed_schedule.reset_index()
+        # batting_features_reset = batting_features.reset_index()
+        
+        # sch_batting_features = pd.merge(
+        #     transformed_schedule_reset,
+        #     batting_features_reset,
+        #     on=['game_date', 'game_id', 'dh', 'team', 'opposing_team'],
+        #     how='inner',
+        #     validate='1:1' 
+        # )
+
+        # sch_bat_ctx = pd.merge(
+        #     sch_batting_features,
+        #     context_features,
+        #     on=['game_id', 'game_date', 'dh', 'game_datetime'],
+        #     how='inner',
+        #     validate='m:1',
+        #     suffixes=('_sch_bat', '')
+        # )
+        
+        # sch_bat_ctx_team = pd.merge(
+        #     sch_bat_ctx,
+        #     team_features_with_opp,
+        #     on=['game_id', 'game_date', 'dh', 'game_datetime', 'team', 'opposing_team'],
+        #     how='inner',
+        #     validate='1:1',
+        # )
+
+        # final_features = pd.merge(
+        #     sch_bat_ctx_team,
+        #     pitching_features_opp_bp,
+        #     on=['game_date', 'dh', 'team', 'opposing_team', 'season'],
+        #     how='inner',
+        #     validate='1:1',
+        #     suffixes=('_to_drop', '_to_drop')
+        # )
+
+
+        # return final_features, raw_odds_data
     
     def _merge_batting_fielding_features(self, batting_stats: DataFrame, fielding_stats: DataFrame) -> DataFrame:
         bat_df = batting_stats.copy()
@@ -246,10 +391,9 @@ class FeaturePipeline:
         )
 
         raw_pitching_data = self._load_pitching_data()
-        print(list(raw_pitching_data.columns))
         raw_feats = PitchingFeatures(self.season, raw_pitching_data, force_recreate).load_features()
-        team_starter_cols = [col for col in raw_feats if col.startswith("team_starter")]
-        pen_cols = [col for col in raw_feats if col.startswith("team_pen")]
+        team_starter_cols = [col for col in raw_feats.columns if col.startswith("team_starter")]
+        pen_cols = [col for col in raw_feats.columns if col.startswith("team_pen")]
         pitching_keys = ["game_date", "dh", "team", "opposing_team"]
 
         home_stats = games.merge(
@@ -611,248 +755,6 @@ class FeaturePipeline:
             return result_df
         else:
             return DataFrame()
-        
-    def start_pipeline(self, force_recreate: bool = False, mkt_only: bool = False) -> Tuple[DataFrame, DataFrame] | DataFrame:
-        self.logger.info("="*60)
-        self.logger.info(f" Starting feature pipeline...")
-        self.logger.info("="*60 + "\n")
-        schedule_data = self._load_schedule_data()
-
-        far_future_games = schedule_data[(schedule_data['game_datetime'].astype('datetime64[ns]') - schedule_data['game_date'].astype('datetime64[ns]')) > pd.Timedelta("2 Days")]
-
-        self.logger.info(f" Far rescheduled games\n{far_future_games}")
-        self.logger.info(f" Dropping rescheduled games that are far past original game_date")
-
-        schedule_data = schedule_data.drop(far_future_games.index)
-        
-        idx = ["game_id", "game_date", "dh", "home_team", "away_team"]
-        odds_data = self._load_odds_data()
-        odds_feats = Odds(odds_data, self.season, mkt_only).load_features()
-        odds_sch_matched, raw_odds_data = self._match_schedule_to_odds(schedule_data, odds_feats)
-        odds_sch_matched = odds_sch_matched.reset_index().set_index(idx)
-        
-        position_player_feats = self._get_position_player_features(odds_sch_matched, force_recreate).reset_index().set_index(idx)
-        pitching_feats = self._get_pitcher_features(odds_sch_matched, force_recreate).reset_index().set_index(idx)
-        context_feats = GameContextFeatures(self.season, schedule_data).load_features().reset_index().set_index(idx)
-        team_feats = TeamFeatures(self.season, odds_sch_matched).load_features().reset_index().set_index(idx)
-
-
-        final_features = odds_sch_matched.join(
-            [position_player_feats, pitching_feats, context_feats, team_feats],
-
-        )
-
-        assert len(final_features) == len(odds_sch_matched)
-
-        # sch_pos_player_feats = pd.merge(
-        #     odds_sch_matched,
-        #     position_player_feats,
-        #     left_index=True,
-        #     right_index=True
-        # )
-
-        self.logger.info(f" Adding engineered matchup columns...")
-        pitcher_ewm_cols = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
-        starter_cols = ['starter_era', 'starter_babip', 'starter_hard_hit', 'starter_k_percent', 
-                        'starter_barrel_percent', 'starter_fip', 'starter_siera', 'starter_stuff',
-                        'starter_ev', 'starter_hr_fb', 'starter_wpa']
-
-        starter_matchups = BaseFeatures._add_matchup_cols_diff_same_base(
-                                                            df=final_features,
-                                                            cols=starter_cols,
-                                                            ewm_cols=pitcher_ewm_cols)
-                                                                            
-        final_features = final_features.assign(**starter_matchups)
-
-        pen_cols = ['pen_era', 'pen_babip', 'pen_hard_hit', 'pen_k_percent', 
-                    'pen_barrel_percent', 'pen_fip', 'pen_siera', 'pen_stuff',
-                    'pen_ev', 'pen_hr_fb', 'pen_wpa_li']
-        
-        
-        pen_matchups = BaseFeatures._add_matchup_cols_diff_same_base(
-                                                            df=final_features,
-                                                            cols=pen_cols,
-                                                            ewm_cols=pitcher_ewm_cols)
-                                                                            
-        final_features = final_features.assign(**pen_matchups)
-
-        team_pitch_cols = ["starter_fip", "starter_k_percent", "starter_bb_percent", "starter_barrel_percent"]
-
-        opp_team_bat_cols = ["woba", "k_percent", "bb_percent", "barrel_percent"]
-        bat_ewm_cols = ['season', 'ewm_h3', 'ewm_h10', 'ewm_h25']
-        team_pitching_vs_opp_batting = BaseFeatures._add_matchup_cols_diff_base(
-                                                                        df=final_features,
-                                                                        col1=team_pitch_cols,
-                                                                        col2=opp_team_bat_cols,
-                                                                        col1_ewm_cols=pitcher_ewm_cols,
-                                                                        col2_ewm_cols=bat_ewm_cols)   
-        
-        final_features = final_features.assign(**team_pitching_vs_opp_batting)
-
-        team_metrics_cols = ["win_pct", "pyth_expectation", "run_diff", "one_run_win_pct"]
-        team_metrics_ewm_cols = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
-        team_metrics_matchups = BaseFeatures._add_matchup_cols_diff_same_base(df=final_features,
-                                                                                 cols=team_metrics_cols,
-                                                                                 ewm_cols=team_metrics_ewm_cols)
-        
-        final_features = final_features.assign(**team_metrics_matchups)
-
-        assert (final_features['home_away_starter_fip_woba_season_diff'] == final_features['home_starter_fip_season'] - final_features['away_woba_season']).all()
-
-
-        final_features = final_features.drop(columns=[col for col in final_features.columns if col.endswith('_sch_bat') or
-                                                    col in ['wind', 'condition'] or 
-                                                    col.endswith('_to_drop')])
-
-        assert final_features.index.get_level_values('game_date').is_monotonic_increasing, "final_features game_date not globally sorted"
-
-        self.logger.info(f" Final merged dataset shape: {final_features.shape}")
-        self.logger.debug(f" Final dataframe datatypes:\n{final_features.dtypes.to_dict()}")
-        self.logger.debug(f" Final columns: {final_features.columns.to_list()}")        
-
-        nan_rows = final_features[final_features.isna().any(axis=1)]
-        self.logger.info(f" Remaining rows with NaN for {self.season}: {len(nan_rows)}")
-        self.logger.debug(f" Sample NaN rows\n{nan_rows.head().to_string()}")
-
-        self.logger.debug("="*60 + "\n")
-        self.logger.debug(" Final features DataFrame tail")
-        self.logger.debug(final_features.tail().to_string())
-        self.logger.debug("="*60 + "\n")
-
-        return final_features, raw_odds_data
-
-        ### TODO
-        # if mkt_only:
-        #     home_only = transformed_schedule[transformed_schedule['is_home'] == True]
-        #     assert len(home_only) * 2 == len(transformed_schedule)
-
-        #     cols = ['day_night_game', 'venue_name', 'venue_id', 'venue_elevation', 'venue_timezone', 'venue_gametime_offset', 'status', 'away_starter_normalized',
-        #             'home_starter_normalized', 'wind', 'condition', 'temp', 'winning_team', 'losing_team', 'is_home', 'starter_normalized', 'opposing_starter_normalized',
-        #              'team_score' , 'opposing_team_score']
-
-        #     home_only = home_only.drop(columns=cols).reset_index()
-        #     home_only.rename(columns={'team': 'home_team', 'opposing_team': 'away_team', 'is_winner': 'is_winner_home'}, inplace=True)
-        #     home_only.set_index(['game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id', 'season'], inplace=True)
-
-        #     return home_only, raw_odds_data
-        
-        # batting_features = self._get_batting_features(transformed_schedule, force_recreate)
-       
-
-        # context_features = GameContextFeatures(self.season, schedule_data).load_features()
-        # context_features = context_features.drop(columns=['away_team', 'home_team'])
-        
-
-        # team_features = TeamFeatures(self.season, transformed_schedule).load_features()
-        # team_feat_cols = ['win_pct_season', 'win_pct_ewm_h3', 'win_pct_ewm_h8', 'win_pct_ewm_h20', 
-        #                   'pyth_expectation_season', 'pyth_expectation_ewm_h3', 'pyth_expectation_ewm_h8', 'pyth_expectation_ewm_h20', 
-        #                   'run_diff_season', 'run_diff_ewm_h3', 'run_diff_ewm_h8', 'run_diff_ewm_h20',
-        #                   'one_run_win_pct_season', 'one_run_win_pct_ewm_h3', 'one_run_win_pct_ewm_h8', 'one_run_win_pct_ewm_h20']
-        
-        # team_features.rename(columns = {col: f"team_{col}" for col in team_feat_cols}, inplace=True)
-        # team_features_with_opp = self._add_opponent_features(team_features, feature_cols=[f"team_{col}" for col in team_feat_cols])
-        
-        # team_features_with_opp = team_features_with_opp.sort_index(level=['game_date', 'dh', 'team'])
-        # team_features_with_opp.rename(columns = {col: f"team_{col}" for col in team_feat_cols}, inplace=True)
-
-        # raw_pitching_data = self._load_pitching_data()
-        # pitching_features = PitchingFeatures(self.season, raw_pitching_data, force_recreate).load_features().reset_index()
-        # pitching_features = pitching_features.set_index(['game_date', 'dh', 'team', 'opposing_team'])
-
-        # self.logger.info(f" Adding opposing team bullpen pitching stats to each row for {self.season}")
-        # bullpen_cols = [col for col in pitching_features.columns if 'pen_' in col and not col.startswith('opposing_')]
-
-        # pitching_features_opp_bp = self._add_opponent_features(pitching_features, feature_cols=bullpen_cols)
-        # pitching_features_opp_bp = pitching_features_opp_bp.sort_index(level=['game_date', 'dh', 'team'])
-        # pitching_features_opp_bp = pitching_features_opp_bp.reset_index()
-
-        # transformed_schedule_reset = transformed_schedule.reset_index()
-        # batting_features_reset = batting_features.reset_index()
-        
-        # sch_batting_features = pd.merge(
-        #     transformed_schedule_reset,
-        #     batting_features_reset,
-        #     on=['game_date', 'game_id', 'dh', 'team', 'opposing_team'],
-        #     how='inner',
-        #     validate='1:1' 
-        # )
-
-        # sch_bat_ctx = pd.merge(
-        #     sch_batting_features,
-        #     context_features,
-        #     on=['game_id', 'game_date', 'dh', 'game_datetime'],
-        #     how='inner',
-        #     validate='m:1',
-        #     suffixes=('_sch_bat', '')
-        # )
-        
-        # sch_bat_ctx_team = pd.merge(
-        #     sch_bat_ctx,
-        #     team_features_with_opp,
-        #     on=['game_id', 'game_date', 'dh', 'game_datetime', 'team', 'opposing_team'],
-        #     how='inner',
-        #     validate='1:1',
-        # )
-
-        # final_features = pd.merge(
-        #     sch_bat_ctx_team,
-        #     pitching_features_opp_bp,
-        #     on=['game_date', 'dh', 'team', 'opposing_team', 'season'],
-        #     how='inner',
-        #     validate='1:1',
-        #     suffixes=('_to_drop', '_to_drop')
-        # )
-
-
-        # return final_features, raw_odds_data
-    
-    def _collapse_data(self, df: DataFrame) -> DataFrame:
-        df = df.copy()
-
-        home_df = df[df['is_home']]
-        away_df = df[~df['is_home']]
-        
-        const_cols = [col for col in df.columns if 'team_' not in col and 'opposing_' not in col]
-        
-        assert len(home_df) + len(away_df) == len(df)
-
-        home_rename = {
-            col: f"home_{col}" for col in home_df.columns if col not in const_cols and 'opposing_team_' not in col and 'diff' not in col
-        }
-
-        away_rename = {
-            col: f"away_{col}" for col in away_df.columns if col not in const_cols and 'opposing_team_' not in col and 'diff' not in col
-        }
-
-        home_df = home_df.rename(columns=home_rename)
-        away_df = away_df.rename(columns=away_rename)
-
-        home_df.index = home_df.index.set_names('home_team', level='team')
-        away_df.index = away_df.index.set_names('away_team', level='team')
-
-        home_df = home_df.reset_index(level='opposing_team').drop(columns='opposing_team')
-        away_df = away_df.reset_index(level='opposing_team').drop(columns='opposing_team')
-
-        home_df = home_df.drop(columns=[col for col in home_df.columns if col.startswith("opposing_team_")])
-        away_df = away_df.drop(columns=[col for col in away_df.columns if col.startswith("opposing_team_")])
-        
-        assert 'opposing_team' not in away_df.columns and 'opposing_team' not in away_df.index.names
-
-        final_df = pd.merge(
-            home_df,
-            away_df,
-            how='inner',
-            left_index=True,
-            right_index=True,
-            suffixes=('', '_drop_away')
-
-        )
-
-        from_away_cols = [col for col in final_df.columns if col.endswith('_drop_away')]
-        final_df = final_df.drop(columns=from_away_cols)
-        final_df = final_df.rename(columns={'is_winner': 'is_winner_home'})
-
-        return final_df
         
     def _load_schedule_data(self) -> DataFrame:
         game_loader = GameLoader()

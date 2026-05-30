@@ -12,11 +12,6 @@ import numpy as np
 
 class TeamFeatures(BaseFeatures):
 
-    REQUIRED_COLUMNS = [
-        'game_id', 'game_date', 'dh', 'game_datetime',
-        'home_team', 'away_team', 'home_score', 'away_score', 'winning_team',
-    ]
-
     METRIC_COLS = [
         'win_pct_season', 'win_pct_ewm_h3', 'win_pct_ewm_h8', 'win_pct_ewm_h20',
         'pyth_expectation_season', 'pyth_expectation_ewm_h3', 'pyth_expectation_ewm_h8', 'pyth_expectation_ewm_h20',
@@ -120,20 +115,21 @@ class TeamFeatures(BaseFeatures):
         home_rows = home_rows.rename(columns={'team': 'home_team'})
         away_rows = away_rows.rename(columns={'team': 'away_team'})
 
-        home_keep = keys + ['home_team'] + [f'home_{col}' for col in self.SIDE_COLS]
-        away_keep = keys + ['away_team'] + [f'away_{col}' for col in self.SIDE_COLS]
+        home_keep = keys + ['home_team', 'is_winner'] + [f'home_{col}' for col in self.SIDE_COLS]
+        away_keep = keys + ['away_team', 'is_winner'] + [f'away_{col}' for col in self.SIDE_COLS]
 
         merged = pd.merge(
             home_rows[home_keep],
             away_rows[away_keep],
             on=keys,
             how='inner',
+            suffixes=("_home", "_away")
         )
 
         merged = merged.set_index(self.OUTPUT_INDEX)
-        merged = merged.drop(columns=['game_datetime'], errors='ignore')
+        merged = merged.drop(columns=['game_datetime', 'is_winner_away'], errors='ignore')
         merged = merged.sort_index(level=['game_date', 'dh', ])
-
+        
         return merged
 
     def _calc_rolling_win_pct(self, team_log: DataFrame) -> DataFrame:
@@ -151,7 +147,7 @@ class TeamFeatures(BaseFeatures):
             'win_pct': ('is_winner', 'gp', 'win_pct_prior', 10, True)
         }
 
-        preserve_cols = ['game_id', 'game_date', 'dh', 'game_datetime', 'team', 'opposing_team', 'is_home']
+        preserve_cols = ['game_id', 'game_date', 'dh', 'game_datetime', 'team', 'opposing_team', 'is_home', "is_winner"]
         team_grouping = df['team']
 
         result, _ = BaseFeatures.compute_rolling_stats(

@@ -54,34 +54,64 @@ class PreProcessing():
         self.target = ['is_winner_home']
 
         self.exclude_columns = [
-            'home_team_score', 'away_team_score', 'home_score', 
-            'winning_team', 'losing_team', 'winner', 'away_score',
-            
-            'game_datetime', 'season', 'is_home',
-            
-            'away_starter_normalized', 'home_starter_normalized',
-            'starter_normalized', 'home_opposing_starter_normalized', 'home_opposing_starter_normalized', 'home_team_starter_normalized_player_name',
-            'away_team_starter_normalized_player_name', 'home_team_starter_name', 'away_team_starter_name', 'away_opposing_starter_normalized',
-            
-            'home_team_starter_id', 'away_starter_id','away_team_starter_id', 'away_team_starter_player_id', 'mlb_id', 'venue_id',
-
-            'status', 'venue_name', 'venue_timezone', 'venue_gametime_offset'
-
-
+            'home_team_score', 'away_team_score', 'home_score', 'winning_team', 'losing_team', 'winner', 
+            'away_score', 'is_home', 'away_starter_normalized', 'home_starter_normalized',
+            'starter_normalized', 'home_opposing_starter_normalized', 'home_opposing_starter_normalized', 
+            'home_team_starter_normalized_player_name', 'away_team_starter_normalized_player_name', 
+            'home_team_starter_name', 'away_team_starter_name', 'away_opposing_starter_normalized',
+            'home_team_starter_id', 'away_starter_id','away_team_starter_id', 'away_team_starter_player_id',
+            'mlb_id', 'venue_id', 'status', 'venue_name', 'venue_timezone', 'venue_gametime_offset',
+            'home_starter_last_app_date', 'away_starter_last_app_date', 'home_probable_pitcher', 'away_probable_pitcher'
         ]
 
-    def _remove_early_games(self, dfs: List[DataFrame]) -> List:
-        removed_early = []
-        for df in dfs:
-            print(df.columns.to_list())
-            d = df[(df['home_team_gp'] > 10) & (df['away_team_gp'] > 10)]
-            removed_early.append(d)
-        return removed_early
+    def preprocess_feats(self, force_recreate: bool = False, force_recreate_preprocessing: bool = False, clear_log: bool = False) -> Tuple[Dict, DataFrame]:
+        """
+        Main preprocessing method with caching functionality.
+        
+        Args:
+            force_recreate: If True, recreate underlying rolling features even if cached
+            force_recreate_preprocessing: If True, recreate preprocessed datasets even if cached
+            clear_log: If True, clear the log file before starting
+            
+        Returns:
+            Dictionary containing processed features and data splits
+        """
+        if not hasattr(self, 'logger'):
+            self.logger = setup_logging("feature_preprocessing", LOG_FILE)
+
+        if not force_recreate_preprocessing and self._cache_exists():
+            self.logger.info(f" Found cached preprocessed data for seasons {self.seasons}")
+            cached_data = self._load_cached_data()
+            if cached_data is not None:
+                self.logger.info(f" Successfully loaded cached preprocessed data")
+                return cached_data[0], cached_data[1]
+            else:
+                self.logger.warning(f" Failed to load cached data, reprocessing...")
+        
+        elif force_recreate_preprocessing:
+            self.logger.info(f" Force recreate preprocessing enabled, clearing cache and reprocessing...")
+            self._clear_cache()
+        
+        else:
+            self.logger.info(f" No cached preprocessed data found, processing features...")
+
+        self.logger.info(f" Getting raw features for seasons {self.seasons}")
+        features, odds_data = self._get_features(force_recreate, clear_log)
+
+        self.logger.info(f" Performing feature scaling and data splitting")
+        processed_data = self._feature_scaling(features)
+        all_odds = pd.concat(odds_data) 
+        
+        self.logger.info(f" Caching processed data")
+        self._save_cached_data(processed_data, all_odds)
+        
+        return processed_data, all_odds
            
     def _feature_scaling(self, dfs: List[DataFrame]) -> Dict[str, Union[DataFrame, StandardScaler | None]]:
         filtered_dfs = [df[[col for col in df.columns if col not in self.exclude_columns]] for df in dfs]
         
         train_dfs = filtered_dfs[:4]
+        train_data = pd.concat(train_dfs)
 
         test_val_df = filtered_dfs[-1]
 
@@ -94,11 +124,10 @@ class PreProcessing():
         self.logger.debug(f" Val length{len(val_df)}")
         self.logger.debug(f" Test length{len(test_df)}")
 
+        train_data = train_data.reset_index().set_index(['season', 'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id']).sort_index()
         val_df = val_df.reset_index().set_index(['season', 'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id']).sort_index()
         test_df = test_df.reset_index().set_index(['season', 'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id']).sort_index()
 
-        train_data = pd.concat(train_dfs)
-        
         for data in [train_data, val_df, test_df]:
             assert data.index.get_level_values(level='season').is_monotonic_increasing, f"{data} season is not globally sorted"
             assert data.index.get_level_values(level='game_date').is_monotonic_increasing, f"{data} game_date is not globally sorted"
@@ -129,10 +158,12 @@ class PreProcessing():
             col for col in ["p_open_home_median_nv"] if col in X_train.columns
         ]
         bool_cols = X_train.select_dtypes(include=['bool']).columns.tolist()
+
         numeric_cols = [
-            col for col in X_train.select_dtypes(exclude=['bool']).columns.tolist()
+            col for col in X_train.select_dtypes(include=['number']).columns.tolist()
             if col not in market_probability_cols
         ]
+
         object_cols = X_train.select_dtypes(include=['object']).columns.tolist()
         
         self.logger.info(f" Boolean columns: {bool_cols}")
@@ -267,50 +298,6 @@ class PreProcessing():
                     self.logger.info(f" Removed cached file: {cache_path}")
                 except Exception as e:
                     self.logger.error(f" Error removing cache file {cache_path}: {e}")
-    
-    def preprocess_feats(self, force_recreate: bool = False, force_recreate_preprocessing: bool = False, clear_log: bool = False) -> Tuple[Dict, DataFrame]:
-        """
-        Main preprocessing method with caching functionality.
-        
-        Args:
-            force_recreate: If True, recreate underlying rolling features even if cached
-            force_recreate_preprocessing: If True, recreate preprocessed datasets even if cached
-            clear_log: If True, clear the log file before starting
-            
-        Returns:
-            Dictionary containing processed features and data splits
-        """
-        if not hasattr(self, 'logger'):
-            self.logger = setup_logging("feature_preprocessing", LOG_FILE)
-
-        if not force_recreate_preprocessing and self._cache_exists():
-            self.logger.info(f" Found cached preprocessed data for seasons {self.seasons}")
-            cached_data = self._load_cached_data()
-            if cached_data is not None:
-                self.logger.info(f" Successfully loaded cached preprocessed data")
-                return cached_data[0], cached_data[1]
-            else:
-                self.logger.warning(f" Failed to load cached data, reprocessing...")
-        
-        elif force_recreate_preprocessing:
-            self.logger.info(f" Force recreate preprocessing enabled, clearing cache and reprocessing...")
-            self._clear_cache()
-        
-        else:
-            self.logger.info(f" No cached preprocessed data found, processing features...")
-
-        self.logger.info(f" Getting raw features for seasons {self.seasons}")
-        features, odds_data = self._get_features(force_recreate, clear_log)
-
-        self.logger.info(f" Performing feature scaling and data splitting")
-        processed_data = self._feature_scaling(features)
-        all_odds = pd.concat(odds_data) 
-        
-        self.logger.info(f" Caching processed data")
-        self._save_cached_data(processed_data, all_odds)
-        
-        return processed_data, all_odds
-
 
 def main():
     args = create_args()
@@ -325,7 +312,6 @@ def main():
         force_recreate_preprocessing=args.force_recreate_preprocessing,
         clear_log=args.clear_log
     )
-    print(preprocessed_feats)
 
     print(preprocessed_feats["X_train"].shape)
 
