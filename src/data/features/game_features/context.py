@@ -19,9 +19,6 @@ class GameContextFeatures(BaseFeatures):
         super().__init__(season, data)
 
         self.park_factor_data = GameLoader().load_park_factor_season(season)
-
-    def load_data(self) -> DataFrame:
-        return self.data
     
     def load_features(self) -> DataFrame:
         """
@@ -36,7 +33,7 @@ class GameContextFeatures(BaseFeatures):
         self.data['park_factor'] = self.data['venue_id'].map(venue_to_park_factor, na_action='ignore')
         self.data['park_factor'] = self.data['park_factor'].fillna(100)
 
-        essential_cols = ['game_id', 'game_date', 'game_datetime', 'away_team', 'home_team', 'dh', 'venue_name', 'venue_id', 'park_factor', 'venue_elevation']
+        essential_cols = ['game_id', 'game_date', 'home_team', 'away_team', 'dh', 'venue_name', 'venue_id', 'park_factor', 'venue_elevation']
         context_data = self.data[essential_cols].copy()
 
         return pd.concat([context_data.reset_index(drop=True),

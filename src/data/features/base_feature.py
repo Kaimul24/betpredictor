@@ -87,7 +87,10 @@ class BaseFeatures(ABC):
         return rate, den_cum
     
     @staticmethod
-    def compute_weighted_priors(data: DataFrame, prior_specs) -> Tuple[DataFrame, Dict[str, float]]:
+    def compute_weighted_priors(
+                    data: DataFrame, 
+                    prior_specs: Dict[str, Tuple[str, str]]
+                ) -> Tuple[DataFrame, Dict[str, float]]:
 
         df = data.copy()
 
@@ -107,7 +110,8 @@ class BaseFeatures(ABC):
                         ewm_cols: Dict[str, Tuple[str, str, str, int, bool]],
                         preserve_cols: List[str],
                         by: pd.Series = pd.Series([]),
-                        halflives=(3, 8, 20)) -> Tuple[DataFrame, Dict]:
+                        halflives=(3, 8, 20)
+                    ) -> Tuple[DataFrame, Dict]:
 
         df = data.copy()
         
@@ -125,33 +129,40 @@ class BaseFeatures(ABC):
         result = df[preserve_cols].copy()
 
         for name, (val_col, denom_key, prior_col, k, val_is_rate) in ewm_cols.items():
-            
             val = df[val_col]
-            
             den = df[denom_key]
-
             season_stats, N_season = BaseFeatures.expanding_weighted_mean(val, den, by, val_is_rate=val_is_rate)
-            
             result[f'{name}_season'] = BaseFeatures.shrinkage(N_season, k, season_stats, df[prior_col])
 
             for hl in halflives:
-                
                 rate_hl = BaseFeatures.compute_ewm(val, den, by, half_life=hl, val_is_rate=val_is_rate)
-
                 result[f'{name}_ewm_h{hl}'] = BaseFeatures.shrinkage(shrink_weights[denom_key], k, rate_hl, df[prior_col])
-
-
-        # for name, (_val_col, _denom_key, prior_col, _k, _is_rate) in ewm_cols.items():
-        #     col = f"{name}_season"
-        #     if col in result.columns and prior_col in df.columns:
-        #         result[col] = result[col].fillna(df[prior_col])
-        #     for hl in halflives:
-        #         col = f"{name}_ewm_h{hl}"
-        #         if col in result.columns and prior_col in df.columns:
-        #             result[col] = result[col].fillna(df[prior_col])
 
         if 'game_date' in df.columns:
             result['last_app_date'] = df.groupby(by)['game_date'].shift(1)
         
         return result, priors
+    
+    @staticmethod
+    def _add_matchup_cols_diff_same_base(df: DataFrame, cols: List[str], ewm_cols: List[str]) -> Dict[str, pd.Series]:
+        
+        result = {}
+
+        for col in cols:
+            for c in ewm_cols:
+                result[f"home_away_{col}_{c}_diff"] = df[f"home_{col}_{c}"] - df[f"away_{col}_{c}"]
+
+        return result
+    
+    @staticmethod
+    def _add_matchup_cols_diff_base(df: DataFrame, col1: List[str], col2: List[str], col1_ewm_cols: List[str], col2_ewm_cols: List[str]) -> Dict[str, pd.Series]:
+        if len(col1) != len(col2) or len(col1_ewm_cols) != len(col2_ewm_cols):
+            raise ValueError("Col1 and Col2 must be same length.")
+        
+        result = {}
+        for c1, c2 in zip(col1, col2):
+            for e1, e2 in zip(col1_ewm_cols, col2_ewm_cols):
+                result[f"home_away_{c1}_{c2}_{e1}_diff"] = df[f"home_{c1}_{e1}"] - df[f"away_{c2}_{e2}"]
+
+        return result
     
