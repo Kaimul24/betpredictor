@@ -10,6 +10,7 @@ class TestTeamFeatures:
 
     PROB_BASES = ['win_pct', 'pyth_expectation', 'one_run_win_pct']
     METRIC_SUFFIXES = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
+    HALF_LIVES = (3, 8, 20)
 
     @pytest.fixture
     def sample_schedule_df(self):
@@ -36,8 +37,14 @@ class TestTeamFeatures:
 
     @staticmethod
     def _side_columns():
+        metric_cols = [
+            col
+            for base in TeamFeatures.METRIC_BASES
+            for col in [f'{base}_season', *[f'{base}_ewm_h{hl}' for hl in TestTeamFeatures.HALF_LIVES]]
+        ]
+        side_cols = metric_cols + ['team_gp']
         cols = []
-        for base in TeamFeatures.SIDE_COLS:
+        for base in side_cols:
             cols.append(f'home_{base}')
             cols.append(f'away_{base}')
         return cols
