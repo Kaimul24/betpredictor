@@ -38,6 +38,15 @@ def create_args():
     parser.add_argument("--p-drop", type=float, default=0.2, help="Dropout Probability")
     parser.add_argument("--train-batch", type=int, default=1024, help="Training Batch Size")
     parser.add_argument("--val-batch", type=int, default=8192, help="Val Batch Size")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Initial learning rate")
+    parser.add_argument("--min-lr", type=float, default=1e-6, help="Minimum learning rate for cosine annealing")
+    parser.add_argument(
+        "--cosine-scheduler",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Anneal learning rate with CosineAnnealingLR over training epochs",
+    )
     parser.add_argument("--force-recreate", action="store_true", help="Recreate rolling features, even if cached file exists")
     parser.add_argument("--force-recreate-preprocessing", action="store_true", help="Recreate preprocessed datasets, even if cached file exists")
     parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
@@ -162,11 +171,10 @@ class NNWrapper():
             val_dl: DataLoader, 
             test_dl: DataLoader,
             max_residual: float = 0.5, 
-            alpha: float = 0.7,
-            epochs: int = 100):
+            alpha: float = 0.4):
         
         self.device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
-        self.epochs = epochs
+        self.epochs = model_args.epochs
         self.max_residual = max_residual
         self.alpha = alpha
         self.base_hidden_size = model_args.base_hidden_size if model_args.base_hidden_size is not None else 256
@@ -215,6 +223,8 @@ class NNWrapper():
                 mkt_adjustment = self.model(X)
                 pred = base_logit + self.alpha * mkt_adjustment
                 val_loss += self.loss_fn(pred, y).item()
+                residual_loss = 0.4 * mkt_adjustment.pow(2).mean()
+                val_loss += residual_loss.item()
 
         val_loss /= num_batches
         return val_loss
@@ -262,8 +272,11 @@ class NNWrapper():
         if params:
             self.model = self._build_model_from_hparams(params).to(self.device)
             optimizer_name = params.get("optimizer", "AdamW")
-            lr = params.get("lr", 1e-3)
-            self.optimizer = getattr(optim, optimizer_name)(self.model.parameters(), lr=lr)
+            lr = params.get("lr", self.model_args.lr)
+            weight_decay = params.get("weight_decay", 0.03)
+            self.optimizer = getattr(optim, optimizer_name)(
+                self.model.parameters(), lr=lr, weight_decay=weight_decay
+            )
         else:
             self.model = NeuralNetwork(
                             self.in_dim, 
@@ -272,8 +285,21 @@ class NNWrapper():
                             max_residual=self.max_residual).to(self.device)
             
             if optimizer is None:
-                self.optimizer = optim.AdamW(self.model.parameters(), weight_decay=0.03, lr=1e-4)
-            
+                self.optimizer = optim.AdamW(
+                    self.model.parameters(),
+                    weight_decay=0.03,
+                    lr=self.model_args.lr,
+                )
+            else:
+                self.optimizer = optimizer
+
+        self.scheduler = None
+        if self.model_args.cosine_scheduler:
+            self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer,
+                T_max=self.epochs,
+                eta_min=self.model_args.min_lr,
+            )
 
         train_losses = []
         val_losses = []
@@ -287,6 +313,9 @@ class NNWrapper():
 
             print(f"train loss: {train_loss}")
             print(f"val loss: {val_loss}")
+            if self.scheduler is not None:
+                self.scheduler.step()
+                print(f"lr: {self.optimizer.param_groups[0]['lr']:.2e}")
 
         self._plot_loss(train_losses, val_losses)
         self._save_model()
@@ -476,7 +505,8 @@ if __name__ == "__main__":
         train_dl=data['train_dl'], 
         val_dl=data['val_dl'], 
         test_dl=data['test_dl'],
-        max_residual=model_args.max_residual
+        max_residual=model_args.max_residual,
+        alpha=model_args.alpha,
     )
     mlp.train_and_eval_model()
 
