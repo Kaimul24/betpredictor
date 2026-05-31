@@ -21,6 +21,11 @@ def create_args():
     parser = argparse.ArgumentParser(description="Feature preprocessing runner")
     parser.add_argument("--force-recreate", action="store_true", help="Recreate rolling features, even if cached file exists")
     parser.add_argument("--force-recreate-preprocessing", action="store_true", help="Recreate preprocessed datasets, even if cached file exists")
+    parser.add_argument(
+        "--model-type",
+        choices=["xgboost", "mlp"],
+        default="mlp",
+        help="Determines if feature scaling needs to be applied.")
     parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
@@ -84,11 +89,8 @@ class PreProcessing():
 
         self.exclude_columns = [
             'home_team_score', 'away_team_score', 'home_score', 'winning_team', 'losing_team', 'winner', 
-            'away_score', 'is_home', 'away_starter_normalized', 'home_starter_normalized',
-            'starter_normalized', 'home_opposing_starter_normalized', 'home_opposing_starter_normalized', 
-            'home_team_starter_normalized_player_name', 'away_team_starter_normalized_player_name', 
-            'home_team_starter_name', 'away_team_starter_name', 'away_opposing_starter_normalized',
-            'home_team_starter_id', 'away_starter_id','away_team_starter_id', 'away_team_starter_player_id',
+            'away_score', 'is_home', 'home_starter_normalized_player_name', 'away_starter_normalized_player_name', 
+            'home_starter_name', 'away_starter_name', 'away_starter_normalized', 'home_starter_id', 'away_starter_id',
             'mlb_id', 'venue_id', 'status', 'venue_name', 'venue_timezone', 'venue_gametime_offset',
             'home_starter_last_app_date', 'away_starter_last_app_date', 'home_probable_pitcher', 'away_probable_pitcher'
         ]
@@ -113,6 +115,9 @@ class PreProcessing():
             cached_data = self._load_cached_data()
             if cached_data is not None:
                 self.logger.info(f" Successfully loaded cached preprocessed data")
+                self.logger.info(f" Train Shape: {cached_data[0]['X_train'].shape}")
+                self.logger.info(f" Val Shape: {cached_data[0]['X_val'].shape}")
+                self.logger.info(f" Test Shape: {cached_data[0]['X_test'].shape}")
                 return cached_data[0], cached_data[1]
             else:
                 self.logger.warning(f" Failed to load cached data, reprocessing...")
@@ -133,6 +138,9 @@ class PreProcessing():
         
         self.logger.info(f" Caching processed data")
         self._save_cached_data(processed_data, all_odds)
+        self.logger.info(f" Train Shape: {processed_data['X_train'].shape}")
+        self.logger.info(f" Val Shape: {processed_data['X_val'].shape}")
+        self.logger.info(f" Test Shape: {processed_data['X_test'].shape}")
         
         return processed_data, all_odds
            
@@ -203,32 +211,37 @@ class PreProcessing():
             self.logger.info(f" Numeric columns to scale: {len(numeric_cols)}")
             scaler = StandardScaler()
 
-            X_train_numeric_scaled = pd.DataFrame(
+            X_train_numeric= pd.DataFrame(
                 scaler.fit_transform(X_train[numeric_cols]),
                 columns=numeric_cols,
                 index=X_train.index
             )
-            X_train_bool = X_train[bool_cols].astype('int')
-            X_train_market = X_train[market_probability_cols]
-            X_train = pd.concat([X_train_numeric_scaled, X_train_bool, X_train_market], axis=1)
-
-            X_val_numeric_scaled = pd.DataFrame(
+            X_val_numeric = pd.DataFrame(
                 scaler.transform(X_val[numeric_cols]),
                 columns=numeric_cols,
                 index=X_val.index
             )
-            X_val_bool = X_val[bool_cols].astype('int')
-            X_val_market = X_val[market_probability_cols]
-            X_val = pd.concat([X_val_numeric_scaled, X_val_bool, X_val_market], axis=1)
-
-            X_test_numeric_scaled = pd.DataFrame(
+            X_test_numeric = pd.DataFrame(
                 scaler.transform(X_test[numeric_cols]),
                 columns=numeric_cols,
                 index=X_test.index
             )
-            X_test_bool = X_test[bool_cols].astype('int')
-            X_test_market = X_test[market_probability_cols]
-            X_test = pd.concat([X_test_numeric_scaled, X_test_bool, X_test_market], axis=1)
+        else:
+            X_train_numeric = X_train[numeric_cols]
+            X_val_numeric = X_val[numeric_cols]
+            X_test_numeric = X_test[numeric_cols]
+
+        X_train_bool = X_train[bool_cols].astype('int')
+        X_train_market = X_train[market_probability_cols]
+        X_train = pd.concat([X_train_numeric, X_train_bool, X_train_market], axis=1)
+
+        X_val_bool = X_val[bool_cols].astype('int')
+        X_val_market = X_val[market_probability_cols]
+        X_val = pd.concat([X_val_numeric, X_val_bool, X_val_market], axis=1)
+
+        X_test_bool = X_test[bool_cols].astype('int')
+        X_test_market = X_test[market_probability_cols]
+        X_test = pd.concat([X_test_numeric, X_test_bool, X_test_market], axis=1)
 
         self.logger.debug(f" Dtypes\n{X_train.dtypes.value_counts()}")
         self.logger.debug(f" Final X_train head\n{X_train.head(3).to_string()}")
@@ -333,7 +346,7 @@ def main():
     
     logger = setup_logging("feature_preprocessing", LOG_FILE, args=args)
     
-    pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='mlp', mkt_only=False, args=args)
+    pre_processor = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type=args.model_type, mkt_only=False, args=args)
     pre_processor.logger = logger
     
     preprocessed_feats, odds_data = pre_processor.preprocess_feats(
@@ -341,12 +354,6 @@ def main():
         force_recreate_preprocessing=args.force_recreate_preprocessing,
         clear_log=args.clear_log
     )
-
-    print(preprocessed_feats["X_train"].shape)
-
-
-
-
 
 if __name__ == "__main__":
     main()

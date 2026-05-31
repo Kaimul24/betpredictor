@@ -844,7 +844,7 @@ class FeaturePipeline:
                 else:
                     self.logger.info(f" Merge validation passed: {all_odds_count} merged <= {original_odds_count} total odds")
 
-                self._log_matching_summary(schedule_data, odds_data, final_merged, remaining_unmatched_games)
+                # self._log_matching_summary(schedule_data, odds_data, final_merged, remaining_unmatched_games)
                 merged_games = final_merged
                 all_odds_data.set_index(["game_date", "dh", "home_team", "away_team", "game_id"], inplace=True)
                 all_odds_data.drop(columns=[col for col in all_odds_data.columns if col not in ['sportsbook', 'away_opening_prob_raw', 'home_opening_prob_raw', 'home_opening_prob_nv', 'away_opening_prob_nv']], inplace=True)
@@ -892,11 +892,6 @@ class FeaturePipeline:
         self.logger.info(f" Games with no odds:\n{no_odds_rows}")
         self.logger.info(f" Removing games without odds...")
         final_result = final_result[~no_odds_mask]
-
-        self.logger.debug("="*50 + "\n")
-        self.logger.debug(" Resulting DataFrame after matching schedule")       
-        self.logger.debug(final_result.head().to_string())
-        self.logger.debug("="*50 + "\n")
         
         return final_result, all_odds_data
 
