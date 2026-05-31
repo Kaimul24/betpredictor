@@ -4,7 +4,7 @@ Abstract base class for all features
 
 from abc import ABC, abstractmethod
 from pandas.core.api import DataFrame as DataFrame
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import pandas as pd
 import numpy as np
 
@@ -89,10 +89,22 @@ class BaseFeatures(ABC):
     @staticmethod
     def compute_weighted_priors(
                     data: DataFrame, 
-                    prior_specs: Dict[str, Tuple[str, str]]
+                    prior_specs: Dict[str, Tuple[str, str]],
+                    prior_data: Optional[DataFrame] = None,
+                    fallback_prior_data: Optional[DataFrame] = None,
+                    min_samples: Optional[Dict[str, float]] = None,
                 ) -> Tuple[DataFrame, Dict[str, float]]:
 
         df = data.copy()
+
+        if prior_data is not None and not prior_data.empty:
+            return BaseFeatures.compute_player_priors(
+                df,
+                prior_specs,
+                prior_data,
+                fallback_prior_data=fallback_prior_data,
+                min_samples=min_samples,
+            )
 
         priors = {key: BaseFeatures._weighted_mean(df[val], df[weight]) 
                   for key, (val, weight) in prior_specs.items()}
@@ -101,6 +113,83 @@ class BaseFeatures(ABC):
             df[k] = v
 
         return df, priors
+
+    @staticmethod
+    def compute_player_priors(
+                    data: DataFrame,
+                    prior_specs: Dict[str, Tuple[str, str]],
+                    prior_data: DataFrame,
+                    fallback_prior_data: Optional[DataFrame] = None,
+                    min_samples: Optional[Dict[str, float]] = None,
+                ) -> Tuple[DataFrame, Dict[str, float]]:
+        df = data.copy()
+        min_samples = min_samples or {}
+        priors = {}
+
+        for prior_col, (val_col, weight_col) in prior_specs.items():
+            league_prior = BaseFeatures._prior_league_average(df, prior_data, val_col, weight_col)
+            priors[prior_col] = league_prior
+
+            player_priors = BaseFeatures._player_prior_map(
+                prior_data,
+                val_col,
+                weight_col,
+                min_samples.get(weight_col, 0),
+            )
+            prior_values = df["player_id"].map(player_priors)
+
+            if fallback_prior_data is not None and not fallback_prior_data.empty:
+                fallback_priors = BaseFeatures._player_prior_map(
+                    fallback_prior_data,
+                    val_col,
+                    weight_col,
+                    min_samples.get(weight_col, 0),
+                )
+                prior_values = prior_values.fillna(df["player_id"].map(fallback_priors))
+
+            df[prior_col] = prior_values.fillna(league_prior)
+
+        return df, priors
+
+    @staticmethod
+    def _prior_league_average(
+                    current_data: DataFrame,
+                    prior_data: DataFrame,
+                    val_col: str,
+                    weight_col: str,
+                ) -> float:
+        source = prior_data if {val_col, weight_col}.issubset(prior_data.columns) else current_data
+        if not {val_col, weight_col}.issubset(source.columns):
+            return np.nan
+
+        prior = BaseFeatures._weighted_mean(source[val_col], source[weight_col])
+        if pd.isna(prior) and {val_col, weight_col}.issubset(current_data.columns):
+            prior = BaseFeatures._weighted_mean(current_data[val_col], current_data[weight_col])
+        return prior
+
+    @staticmethod
+    def _player_prior_map(
+                    prior_data: DataFrame,
+                    val_col: str,
+                    weight_col: str,
+                    min_sample: float,
+                ) -> pd.Series:
+        if prior_data.empty or "player_id" not in prior_data.columns:
+            return pd.Series(dtype=float)
+        if not {val_col, weight_col}.issubset(prior_data.columns):
+            return pd.Series(dtype=float)
+
+        source = prior_data[["player_id", val_col, weight_col]].copy()
+        source[val_col] = pd.to_numeric(source[val_col], errors="coerce").fillna(0)
+        source[weight_col] = pd.to_numeric(source[weight_col], errors="coerce").fillna(0)
+        source["_weighted_value"] = source[val_col] * source[weight_col]
+
+        grouped = source.groupby("player_id", observed=True).agg(
+            weighted_value=("_weighted_value", "sum"),
+            weight=(weight_col, "sum"),
+        )
+        priors = grouped["weighted_value"] / grouped["weight"].replace(0, np.nan)
+        return priors.where(grouped["weight"] >= min_sample).dropna()
     
     @staticmethod
     def compute_rolling_stats(
@@ -110,7 +199,10 @@ class BaseFeatures(ABC):
                         ewm_cols: Dict[str, Tuple[str, str, str, int, bool]],
                         preserve_cols: List[str],
                         by: pd.Series = pd.Series([]),
-                        halflives=(3, 8, 20)
+                        halflives=(3, 8, 20),
+                        prior_data: Optional[DataFrame] = None,
+                        fallback_prior_data: Optional[DataFrame] = None,
+                        prior_min_samples: Optional[Dict[str, float]] = None,
                     ) -> Tuple[DataFrame, Dict]:
 
         df = data.copy()
@@ -119,7 +211,11 @@ class BaseFeatures(ABC):
             by = df['player_id']
         
         df, priors = BaseFeatures.compute_weighted_priors(
-            df, prior_specs
+            df,
+            prior_specs,
+            prior_data=prior_data,
+            fallback_prior_data=fallback_prior_data,
+            min_samples=prior_min_samples,
         )
 
         shrink_weights = {
@@ -145,9 +241,7 @@ class BaseFeatures(ABC):
     
     @staticmethod
     def _add_matchup_cols_diff_same_base(df: DataFrame, cols: List[str], ewm_cols: List[str]) -> Dict[str, pd.Series]:
-        
         result = {}
-
         for col in cols:
             for c in ewm_cols:
                 result[f"home_away_{col}_{c}_diff"] = df[f"home_{col}_{c}"] - df[f"away_{col}_{c}"]
@@ -158,11 +252,10 @@ class BaseFeatures(ABC):
     def _add_matchup_cols_diff_base(df: DataFrame, col1: List[str], col2: List[str], col1_ewm_cols: List[str], col2_ewm_cols: List[str]) -> Dict[str, pd.Series]:
         if len(col1) != len(col2) or len(col1_ewm_cols) != len(col2_ewm_cols):
             raise ValueError("Col1 and Col2 must be same length.")
-        
+
         result = {}
         for c1, c2 in zip(col1, col2):
             for e1, e2 in zip(col1_ewm_cols, col2_ewm_cols):
                 result[f"home_away_{c1}_{c2}_{e1}_diff"] = df[f"home_{c1}_{e1}"] - df[f"away_{c2}_{e2}"]
 
         return result
-    

@@ -14,21 +14,37 @@ from pathlib import Path
 
 load_dotenv()
 BATTING_CACHE_PATH = os.getenv("rolling_batting_features_cache")
+BATTING_PRIOR_CACHE_VERSION = "player_prior_v1"
+PRIOR_MIN_SAMPLES = {
+    "pa": 100,
+    "ab": 75,
+    "bip": 50,
+}
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class BattingFeatures(BaseFeatures):
 
-    def __init__(self, season: int, data: DataFrame, force_recreate: bool = False, halflives: tuple[int, ...] = (3, 10, 25)):
+    def __init__(
+            self,
+            season: int,
+            data: DataFrame,
+            force_recreate: bool = False,
+            halflives: tuple[int, ...] = (3, 10, 25),
+            *,
+            previous_season_data: DataFrame | None = None,
+        ):
         super().__init__(season, data, force_recreate)
         self.halflives = halflives
+        self.previous_season_data = previous_season_data
 
     def load_features(self):
         return self.rolling_batting_stats()
     
     def rolling_batting_stats(self) -> DataFrame:
-        cache_path = Path(FEATURES_CACHE_PATH / BATTING_CACHE_PATH.format(self.season))
+        cache_key = f"{self.season}_{BATTING_PRIOR_CACHE_VERSION}"
+        cache_path = Path(FEATURES_CACHE_PATH / BATTING_CACHE_PATH.format(cache_key))
         
         if cache_path.exists() and not self.force_recreate:
             logger.info(f" Found cached batter rolling stats for {self.season}")
@@ -91,7 +107,9 @@ class BattingFeatures(BaseFeatures):
             shrinkage_weights_cols=shrinkage_weights_cols,
             ewm_cols=ewm_cols,
             preserve_cols=["player_id", "mlb_id", "pos", "team", "game_date", "dh", "season", "ab", "pa"],
-            halflives=self.halflives
+            halflives=self.halflives,
+            prior_data=self._previous_position_player_data(),
+            prior_min_samples=PRIOR_MIN_SAMPLES,
         )
         
         try:
@@ -101,3 +119,14 @@ class BattingFeatures(BaseFeatures):
             logger.error(f" Failed to cache batting rolling stats: {e}")
 
         return result
+
+    def _previous_position_player_data(self) -> DataFrame | None:
+        if self.previous_season_data is None or self.previous_season_data.empty:
+            return None
+
+        previous = self.previous_season_data.copy()
+        if "pos" in previous.columns:
+            is_pitcher = previous["pos"].fillna("").astype(str).str.startswith("P")
+            previous = previous[~(is_pitcher & (previous["player_id"] != 19755))]
+
+        return previous

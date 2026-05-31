@@ -21,6 +21,13 @@ from pathlib import Path
 
 load_dotenv()
 PITCHING_CACHE_PATH = os.getenv("rolling_pitching_features_cache")
+PITCHING_PRIOR_CACHE_VERSION = "player_prior_v1"
+PRIOR_MIN_SAMPLES = {
+    "tbf": 100,
+    "bip": 50,
+    "ip": 20,
+    "apps": 10,
+}
 
 class PitchingFeatures(BaseFeatures):
 
@@ -30,16 +37,20 @@ class PitchingFeatures(BaseFeatures):
             data: DataFrame, 
             force_recreate: bool = False, 
             halflives_st: tuple[int, ...] = (3, 10, 25),
-            halflives_rel: tuple[int, ...] = (3, 10, 25)
+            halflives_rel: tuple[int, ...] = (3, 10, 25),
+            *,
+            previous_season_data: DataFrame | None = None,
         ) -> None:
         super().__init__(season, data, force_recreate)
         self.halflives_st = halflives_st
         self.halflives_rel = halflives_rel
+        self.previous_season_data = previous_season_data
         self.pitching_matchups = TeamLoader().load_pitching_matchups(self.season)
 
     def load_features(self) -> DataFrame:
         "Loads all pitching features"
-        cache_path = Path(FEATURES_CACHE_PATH / PITCHING_CACHE_PATH.format(self.season))
+        cache_key = f"{self.season}_{PITCHING_PRIOR_CACHE_VERSION}"
+        cache_path = Path(FEATURES_CACHE_PATH / PITCHING_CACHE_PATH.format(cache_key))
         
         if cache_path.exists() and not self.force_recreate:
             logger.info(f" Found cached pitching rolling stats for {self.season}")
@@ -423,7 +434,10 @@ class PitchingFeatures(BaseFeatures):
             shrinkage_weights_cols=shrinkage_weights_cols,
             ewm_cols=specs,
             preserve_cols=cols,
-            halflives=halflives
+            halflives=halflives,
+            prior_data=self._previous_reliever_prior_data(),
+            fallback_prior_data=self._previous_pitching_prior_data(),
+            prior_min_samples=PRIOR_MIN_SAMPLES,
         )
         
         return result, reliever_priors
@@ -480,9 +494,51 @@ class PitchingFeatures(BaseFeatures):
             shrinkage_weights_cols=shrinkage_weights_cols,
             ewm_cols=specs,
             preserve_cols=cols,
-            halflives=halflives)
+            halflives=halflives,
+            prior_data=self._previous_starter_prior_data(),
+            fallback_prior_data=self._previous_pitching_prior_data(),
+            prior_min_samples=PRIOR_MIN_SAMPLES)
         
         return result, starter_priors
+
+    def _previous_pitching_prior_data(self) -> DataFrame | None:
+        previous = getattr(self, "previous_season_data", None)
+        if previous is None or previous.empty:
+            return None
+
+        previous = previous.copy()
+        if "k_bb_percent" not in previous.columns and {"k_percent", "bb_percent"}.issubset(previous.columns):
+            previous["k_bb_percent"] = previous["k_percent"] - previous["bb_percent"]
+        if "apps" not in previous.columns:
+            previous["apps"] = 1
+        if "wpa_li" not in previous.columns and {"wpa", "gmli"}.issubset(previous.columns):
+            previous["wpa_li"] = previous["wpa"] / previous["gmli"].replace(0, np.nan)
+
+        return previous
+
+    def _previous_starter_prior_data(self) -> DataFrame | None:
+        previous = self._previous_pitching_prior_data()
+        if previous is None or previous.empty:
+            return previous
+        if "gs" in previous.columns:
+            starters = previous[previous["gs"].fillna(0) > 0].copy()
+            return starters if not starters.empty else previous
+        if "is_starter" in previous.columns:
+            starters = previous[previous["is_starter"].fillna(False)].copy()
+            return starters if not starters.empty else previous
+        return previous
+
+    def _previous_reliever_prior_data(self) -> DataFrame | None:
+        previous = self._previous_pitching_prior_data()
+        if previous is None or previous.empty:
+            return previous
+        if "gs" in previous.columns:
+            relievers = previous[previous["gs"].fillna(0) == 0].copy()
+            return relievers if not relievers.empty else previous
+        if "is_starter" in previous.columns:
+            relievers = previous[~previous["is_starter"].fillna(False)].copy()
+            return relievers if not relievers.empty else previous
+        return previous
         
 
     def _compute_starter_velo_trends(self, starters: DataFrame) -> DataFrame:

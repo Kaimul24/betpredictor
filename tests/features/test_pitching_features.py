@@ -44,6 +44,7 @@ def _make_pitching_row(
     fa_velo: float,
     fc_velo: float,
     si_velo: float,
+    season: int = 2024,
 ) -> dict:
     return {
         "player_id": player_id,
@@ -79,8 +80,16 @@ def _make_pitching_row(
         "fa_velo": fa_velo,
         "fc_velo": fc_velo,
         "si_velo": si_velo,
-        "season": 2024,
+        "season": season,
     }
+
+
+def _with_k_bb_percent(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df["k_bb_percent"] = df["k_percent"] - df["bb_percent"]
+    df["is_starter"] = df["gs"].gt(0)
+    df["is_opener"] = False
+    return df
 
 
 @pytest.fixture
@@ -223,3 +232,70 @@ def test_fill_bullpen_with_priors_replaces_missing():
     assert filled.loc[0, "team_pen_era_season"] == pytest.approx(4.05, rel=1e-6)
     assert filled.loc[0, "team_pen_k_percent_ewm_h3"] == pytest.approx(23.5, rel=1e-6)
     assert filled.loc[1, "team_pen_era_season"] == pytest.approx(3.2, rel=1e-6)
+
+
+def test_previous_season_starter_prior_used_for_returning_pitcher():
+    dummy = object.__new__(PitchingFeatures)
+    current = _with_k_bb_percent(pd.DataFrame([
+        _make_pitching_row(3001, 7001, "Prior Ace", "TEX", "2024-04-01", 0, 1, 1, 6.0, 0.310, 5.0, 100, 40,
+                           4, 18.0, 9.0, 8.0, 45.0, 90.0, 18.0, 5.20, 6.10, 90, 2, -0.10, 1.00,
+                           0.40, 0.30, 0.30, 94.0, 88.0, 91.0),
+    ]))
+    previous = pd.DataFrame([
+        _make_pitching_row(3001, 7001, "Prior Ace", "TEX", "2023-06-01", 0, 1, 1, 2.8, 0.280, 25.0, 120, 70,
+                           8, 30.0, 8.0, 4.0, 30.0, 87.0, 8.0, 3.10, 3.20, 105, 2, 0.30, 1.10,
+                           0.45, 0.25, 0.30, 95.0, 88.0, 91.0, season=2023),
+        _make_pitching_row(3999, 7999, "League Arm", "SEA", "2023-06-01", 0, 1, 1, 5.0, 0.330, 25.0, 120, 70,
+                           12, 18.0, 12.0, 8.0, 45.0, 90.0, 15.0, 4.80, 5.20, 90, 2, -0.20, 0.90,
+                           0.45, 0.25, 0.30, 92.0, 86.0, 89.0, season=2023),
+    ])
+    dummy.previous_season_data = previous
+
+    result, _ = dummy._compute_rolling_starter_stats(current, halflives=(3,))
+
+    assert result.iloc[0]["fip_season"] == pytest.approx(3.20)
+    assert result.iloc[0]["fip_ewm_h3"] == pytest.approx(3.20)
+    assert result.iloc[0]["k_bb_percent_season"] == pytest.approx(22.0)
+
+
+def test_previous_season_reliever_prior_falls_back_to_all_pitching_for_role_change():
+    dummy = object.__new__(PitchingFeatures)
+    current = _with_k_bb_percent(pd.DataFrame([
+        _make_pitching_row(3101, 7101, "Converted Arm", "TEX", "2024-04-01", 0, 1, 0, 7.0, 0.320, 1.0, 20, 8,
+                           4, 16.0, 8.0, 9.0, 50.0, 91.0, 20.0, 5.80, 6.40, 88, 0, -0.20, 1.30,
+                           0.50, 0.25, 0.25, 95.0, 88.0, 91.0),
+    ]))
+    previous = pd.DataFrame([
+        _make_pitching_row(3101, 7101, "Converted Arm", "TEX", "2023-06-01", 0, 1, 1, 2.4, 0.275, 25.0, 120, 70,
+                           6, 28.0, 7.0, 4.0, 28.0, 86.0, 7.0, 2.90, 2.40, 103, 1, 0.40, 1.00,
+                           0.45, 0.30, 0.25, 94.5, 87.5, 90.5, season=2023),
+    ])
+    dummy.previous_season_data = previous
+
+    result, _ = dummy._compute_rolling_bullpen_stats(current, halflives=(3,))
+
+    assert result.iloc[0]["fip_season"] == pytest.approx(2.40)
+    assert result.iloc[0]["k_bb_percent_season"] == pytest.approx(21.0)
+
+
+def test_previous_season_pitcher_low_sample_falls_back_to_role_league_average():
+    dummy = object.__new__(PitchingFeatures)
+    current = _with_k_bb_percent(pd.DataFrame([
+        _make_pitching_row(3201, 7201, "Small Sample", "TEX", "2024-04-01", 0, 1, 1, 7.0, 0.320, 5.0, 100, 40,
+                           4, 16.0, 8.0, 9.0, 50.0, 91.0, 20.0, 5.80, 6.40, 88, 0, -0.20, 1.30,
+                           0.50, 0.25, 0.25, 95.0, 88.0, 91.0),
+    ]))
+    previous = pd.DataFrame([
+        _make_pitching_row(3201, 7201, "Small Sample", "TEX", "2023-06-01", 0, 1, 1, 1.5, 0.250, 10.0, 80, 40,
+                           1, 50.0, 5.0, 2.0, 20.0, 84.0, 4.0, 2.00, 1.50, 110, 0, 0.50, 1.00,
+                           0.45, 0.30, 0.25, 95.0, 88.0, 91.0, season=2023),
+        _make_pitching_row(3299, 7299, "League Starter", "SEA", "2023-06-01", 0, 1, 1, 4.5, 0.310, 30.0, 120, 60,
+                           15, 20.0, 10.0, 8.0, 45.0, 90.0, 14.0, 4.20, 4.50, 90, 0, -0.20, 0.90,
+                           0.40, 0.35, 0.25, 92.0, 86.0, 89.0, season=2023),
+    ])
+    dummy.previous_season_data = previous
+
+    result, _ = dummy._compute_rolling_starter_stats(current, halflives=(3,))
+
+    assert result.iloc[0]["fip_season"] == pytest.approx(((1.50 * 10) + (4.50 * 30)) / 40)
+    assert result.iloc[0]["k_percent_season"] == pytest.approx(((50.0 * 80) + (20.0 * 120)) / 200)

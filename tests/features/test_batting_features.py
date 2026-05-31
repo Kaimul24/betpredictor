@@ -198,6 +198,62 @@ def _shrink(prev_vals: pd.Series, prev_weights: pd.Series, prior: float, k: int)
     return (weight_total / (weight_total + k)) * rate + (k / (weight_total + k)) * prior
 
 
+def _make_batting_row(
+    player_id: int,
+    game_date: str,
+    *,
+    season: int = 2024,
+    team: str = "NYY",
+    pos: str = "OF",
+    mlb_id: int | None = None,
+    ab: int = 4,
+    pa: int = 4,
+    bip: int = 3,
+    woba: float = 0.300,
+    ops: float = 0.700,
+    wrc_plus: float = 100.0,
+    babip: float = 0.300,
+    k_percent: float = 0.200,
+    bb_percent: float = 0.080,
+    bb_k: float = 0.400,
+    barrel_percent: float = 0.060,
+    hard_hit: float = 0.350,
+    ev: float = 88.0,
+    iso: float = 0.150,
+    gb_fb: float = 1.000,
+    baserunning: float = 0.0,
+    wraa: float = 0.0,
+    wpa: float = 0.0,
+) -> dict:
+    return {
+        "player_id": player_id,
+        "mlb_id": mlb_id if mlb_id is not None else player_id + 1000,
+        "team": team,
+        "pos": pos,
+        "game_date": pd.Timestamp(game_date),
+        "dh": 0,
+        "ab": ab,
+        "pa": pa,
+        "bip": bip,
+        "woba": woba,
+        "ops": ops,
+        "wrc_plus": wrc_plus,
+        "babip": babip,
+        "k_percent": k_percent,
+        "bb_percent": bb_percent,
+        "bb_k": bb_k,
+        "barrel_percent": barrel_percent,
+        "hard_hit": hard_hit,
+        "ev": ev,
+        "iso": iso,
+        "gb_fb": gb_fb,
+        "baserunning": baserunning,
+        "wraa": wraa,
+        "wpa": wpa,
+        "season": season,
+    }
+
+
 def test_load_features_returns_expected_columns(sample_batting_frame, fake_batting_cache):
     features = BattingFeatures(2024, sample_batting_frame, force_recreate=True)
     result = features.load_features()
@@ -313,3 +369,91 @@ def test_temporal_validation_with_unsorted_input(sample_batting_frame, fake_batt
         assert result.loc[idx, "woba_season"] == pytest.approx(expected)
         assert result.loc[idx, "last_app_date"] == source.loc[idx - 1, "game_date"]
         assert result.loc[idx, "woba_season"] != pytest.approx(source.loc[idx, "woba"])
+
+
+def test_previous_season_player_prior_used_for_returning_batter(fake_batting_cache):
+    current = pd.DataFrame([
+        _make_batting_row(1, "2024-04-01", woba=0.250, pa=4),
+        _make_batting_row(1, "2024-04-02", woba=0.300, pa=6),
+    ])
+    previous = pd.DataFrame([
+        _make_batting_row(1, "2023-06-01", season=2023, woba=0.500, pa=60),
+        _make_batting_row(1, "2023-06-02", season=2023, woba=0.400, pa=60),
+        _make_batting_row(2, "2023-06-01", season=2023, woba=0.250, pa=120),
+    ])
+
+    features = BattingFeatures(
+        2024,
+        current,
+        force_recreate=True,
+        previous_season_data=previous,
+    )
+    result = features.load_features().sort_values(["player_id", "game_date", "dh"]).reset_index(drop=True)
+
+    player_prior = ((0.500 * 60) + (0.400 * 60)) / 120
+    assert result.loc[0, "woba_season"] == pytest.approx(player_prior)
+
+    expected_second = _shrink(current.iloc[:1]["woba"], current.iloc[:1]["pa"], player_prior, 100)
+    assert result.loc[1, "woba_season"] == pytest.approx(expected_second)
+
+
+def test_previous_season_batter_without_prior_falls_back_to_previous_league_average(fake_batting_cache):
+    current = pd.DataFrame([
+        _make_batting_row(9, "2024-04-01", woba=0.700, pa=4),
+    ])
+    previous = pd.DataFrame([
+        _make_batting_row(1, "2023-06-01", season=2023, woba=0.300, pa=40),
+        _make_batting_row(2, "2023-06-01", season=2023, woba=0.400, pa=60),
+    ])
+
+    result = BattingFeatures(
+        2024,
+        current,
+        force_recreate=True,
+        previous_season_data=previous,
+    ).load_features()
+
+    league_prior = ((0.300 * 40) + (0.400 * 60)) / 100
+    assert result.iloc[0]["woba_season"] == pytest.approx(league_prior)
+
+
+def test_previous_season_batter_prior_uses_metric_specific_sample_floors(fake_batting_cache):
+    current = pd.DataFrame([
+        _make_batting_row(1, "2024-04-01", woba=0.200, iso=0.200, barrel_percent=0.100),
+    ])
+    previous = pd.DataFrame([
+        _make_batting_row(
+            1,
+            "2023-06-01",
+            season=2023,
+            pa=120,
+            ab=50,
+            bip=60,
+            woba=0.500,
+            iso=0.900,
+            barrel_percent=0.200,
+        ),
+        _make_batting_row(
+            2,
+            "2023-06-01",
+            season=2023,
+            pa=120,
+            ab=100,
+            bip=60,
+            woba=0.300,
+            iso=0.100,
+            barrel_percent=0.050,
+        ),
+    ])
+
+    result = BattingFeatures(
+        2024,
+        current,
+        force_recreate=True,
+        previous_season_data=previous,
+    ).load_features()
+
+    league_iso = ((0.900 * 50) + (0.100 * 100)) / 150
+    assert result.iloc[0]["woba_season"] == pytest.approx(0.500)
+    assert result.iloc[0]["iso_season"] == pytest.approx(league_iso)
+    assert result.iloc[0]["barrel_percent_season"] == pytest.approx(0.200)

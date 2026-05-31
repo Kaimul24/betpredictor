@@ -27,7 +27,7 @@ from src.data.loaders.game_loader import GameLoader
 from src.data.loaders.odds_loader import OddsLoader
 from src.data.loaders.player_loader import PlayerLoader
 from src.data.loaders.team_loader import TeamLoader
-from src.utils import setup_logging, parse_tuple, TupleAction
+from src.utils import setup_logging, TupleAction
 
 LOG_DIR = PROJECT_ROOT / "src" / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -389,13 +389,20 @@ class FeaturePipeline:
         """Get position_player features for all games efficiently"""
         raw_batter_data = self._load_batting_data()
         self.cache["raw_batting_data"] = raw_batter_data.copy()
-        raw_batter_data = raw_batter_data[~((raw_batter_data['pos'].str.startswith('P')) & (raw_batter_data['player_id'] != 19755))] # Shohei
+        raw_batter_data = self._filter_position_player_batting_data(raw_batter_data)
+        previous_batter_data = self._filter_position_player_batting_data(self._load_previous_batting_data())
 
         lineups_data = self._load_lineups_data()
         lineups_data['game_date'] = pd.to_datetime(lineups_data['game_date'])
         lineups_data = lineups_data[~(lineups_data['position'].str.startswith('P') & (lineups_data['player_id'] != 19755))]
 
-        batting_features = BattingFeatures(self.season, raw_batter_data, force_recreate, self.args.batter_halflives)
+        batting_features = BattingFeatures(
+            self.season,
+            raw_batter_data,
+            force_recreate,
+            self.args.batter_halflives,
+            previous_season_data=previous_batter_data,
+        )
         
         self.logger.info(f" Calculating batting rolling stats for {self.season}")
         batting_features = batting_features.load_features()
@@ -436,7 +443,8 @@ class FeaturePipeline:
             raw_pitching_data, 
             force_recreate, 
             self.args.starter_halflives, 
-            self.args.reliever_halflives
+            self.args.reliever_halflives,
+            previous_season_data=self._load_previous_pitching_data(),
         ).load_features()
         
         team_starter_cols = [col for col in raw_feats.columns if col.startswith("team_starter")]
@@ -1007,6 +1015,17 @@ class FeaturePipeline:
         if batting_data.empty:
             raise ValueError(f"Batting data in {self.season} is empty")
         return batting_data
+
+    def _load_previous_batting_data(self) -> DataFrame:
+        loader = PlayerLoader()
+        return loader.load_for_season_batter(self.season - 1)
+
+    def _filter_position_player_batting_data(self, batting_data: DataFrame) -> DataFrame:
+        if batting_data is None or batting_data.empty or "pos" not in batting_data.columns:
+            return batting_data
+
+        is_pitcher = batting_data["pos"].fillna("").astype(str).str.startswith("P")
+        return batting_data[~(is_pitcher & (batting_data["player_id"] != 19755))].copy()
     
     def _load_lineups_data(self) -> DataFrame:
         loader = TeamLoader()
@@ -1018,6 +1037,10 @@ class FeaturePipeline:
         loader = PlayerLoader()
         pitching_data = loader.load_for_season_pitcher(self.season)
         return pitching_data
+
+    def _load_previous_pitching_data(self) -> DataFrame:
+        loader = PlayerLoader()
+        return loader.load_for_season_pitcher(self.season - 1)
     
     def _load_fielding_data(self) -> DataFrame:
         loader = PlayerLoader()

@@ -668,6 +668,52 @@ class TestFeaturePipeline:
         assert 'away_frv_per_9' in team_features.columns
         assert 'home_away_ops_season_diff' in team_features.columns
 
+    def test_get_position_player_features_passes_previous_season_batting_priors(self, feature_pipeline):
+        schedule_data = self._pipeline_schedule()
+        raw_batting = pd.DataFrame({
+            'player_id': [1, 99, 19755],
+            'pos': ['OF', 'P', 'P'],
+        })
+        previous_batting = pd.DataFrame({
+            'player_id': [1, 99, 19755],
+            'pos': ['OF', 'P', 'P'],
+        })
+        lineups = pd.DataFrame({
+            'game_date': [pd.Timestamp('2024-04-01')],
+            'team': ['NYY'],
+            'opposing_team': ['BOS'],
+            'dh': [0],
+            'player_id': [1],
+            'batting_order': [1],
+            'position': ['OF'],
+            'season': [2024],
+        })
+        merged_lineup_features = pd.DataFrame({'player_id': [1], 'frv_per_9': [0.0]})
+        team_position_player_features = pd.DataFrame(index=[0])
+        for stat in [
+            'woba', 'wrc_plus', 'hard_hit', 'barrel_percent', 'bb_k', 'ops',
+            'babip', 'ev', 'iso', 'baserunning', 'wpa',
+        ]:
+            for suffix in ['season', 'ewm_h3', 'ewm_h10', 'ewm_h25']:
+                team_position_player_features[f'home_{stat}_{suffix}'] = 1.0
+                team_position_player_features[f'away_{stat}_{suffix}'] = 0.5
+
+        with patch.object(feature_pipeline, '_load_batting_data', return_value=raw_batting), \
+             patch.object(feature_pipeline, '_load_previous_batting_data', return_value=previous_batting, create=True), \
+             patch.object(feature_pipeline, '_load_lineups_data', return_value=lineups), \
+             patch.object(feature_pipeline, '_load_fielding_data', return_value=pd.DataFrame()), \
+             patch.object(feature_pipeline, '_merge_batting_fielding_features', return_value=merged_lineup_features), \
+             patch.object(feature_pipeline, '_merge_schedule_with_position_player_features', return_value=team_position_player_features), \
+             patch('src.data.features.feature_pipeline.BattingFeatures') as mock_batting_cls, \
+             patch('src.data.features.feature_pipeline.FieldingFeatures') as mock_fielding_cls:
+            mock_batting_cls.return_value.load_features.return_value = pd.DataFrame({'player_id': [1]})
+            mock_fielding_cls.return_value.load_features.return_value = pd.DataFrame()
+
+            feature_pipeline._get_position_player_features(schedule_data)
+
+        prior_data = mock_batting_cls.call_args.kwargs['previous_season_data']
+        assert set(prior_data['player_id']) == {1, 19755}
+
     def test_merge_batting_fielding_features_uses_normalized_months(self, feature_pipeline):
         """Fielding features are monthly and March/October batting rows map to regular-season months."""
         batting_stats = pd.DataFrame({
@@ -986,6 +1032,36 @@ class TestFeaturePipeline:
         assert row['home_pen_rest_days_mean'] == 2.5
         assert row['home_team_id'] == 111
         assert row['home_p_open_home_mean_nv'] == 0.55
+
+    def test_get_pitcher_features_passes_previous_season_pitching_priors(self, feature_pipeline):
+        schedule = self._odds_matched_schedule(self._pipeline_schedule()).reset_index().set_index([
+            'game_id', 'game_date', 'dh', 'home_team', 'away_team',
+        ])
+        current_pitching = pd.DataFrame({'player_id': [10], 'team': ['NYY']})
+        previous_pitching = pd.DataFrame({'player_id': [10], 'team': ['NYY'], 'season': [2023]})
+        raw_pitching_features = pd.DataFrame({
+            'game_date': [pd.Timestamp('2024-04-01'), pd.Timestamp('2024-04-01')],
+            'dh': [0, 0],
+            'season': [2024, 2024],
+            'team': ['BOS', 'NYY'],
+            'opposing_team': ['NYY', 'BOS'],
+            'team_starter_player_id': [22, 11],
+            'team_starter_fip_season': [3.5, 4.0],
+            'team_pen_fip_season': [3.8, 4.2],
+        })
+
+        with patch.object(feature_pipeline, '_load_pitching_data', return_value=current_pitching), \
+             patch.object(feature_pipeline, '_load_previous_pitching_data', return_value=previous_pitching, create=True), \
+             patch('src.data.features.feature_pipeline.PitchingFeatures') as mock_pitching_cls:
+            mock_pitching_cls.return_value.load_features.return_value = raw_pitching_features
+
+            result = feature_pipeline._get_pitcher_features(schedule)
+
+        assert not result.empty
+        pd.testing.assert_frame_equal(
+            mock_pitching_cls.call_args.kwargs['previous_season_data'].reset_index(drop=True),
+            previous_pitching.reset_index(drop=True),
+        )
 
     def test_start_pipeline_matchups_are_based_on_adjusted_side_columns(self, feature_pipeline):
         schedule = self._pipeline_schedule()
