@@ -14,6 +14,7 @@ import pytest
 import pandas as pd
 import numpy as np
 from datetime import date, timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.data.features.base_feature import BaseFeatures
@@ -64,6 +65,15 @@ class TestFeaturePipeline:
         'pen_wpa_li',
     ]
     PITCHING_SUFFIXES = ['season', 'ewm_h3', 'ewm_h8', 'ewm_h20']
+
+    @staticmethod
+    def _default_args():
+        return SimpleNamespace(
+            batter_halflives=(3, 10, 25),
+            starter_halflives=(3, 8, 20),
+            reliever_halflives=(3, 8, 20),
+            team_halflives=(3, 8, 20),
+        )
 
     @staticmethod
     def _pipeline_schedule(include_far_future=False):
@@ -247,7 +257,7 @@ class TestFeaturePipeline:
     @pytest.fixture
     def feature_pipeline(self, clean_db):
         """Create a FeaturePipeline instance."""
-        return FeaturePipeline(season=2024)
+        return FeaturePipeline(season=2024, args=self._default_args())
 
     @pytest.fixture
     def sample_schedule_data(self, clean_db):
@@ -374,10 +384,12 @@ class TestFeaturePipeline:
 
     def test_init(self):
         """Test FeaturePipeline initialization."""
-        pipeline = FeaturePipeline(season=2024)
+        args = self._default_args()
+        pipeline = FeaturePipeline(season=2024, args=args)
         assert pipeline.season == 2024
         assert hasattr(pipeline, 'cache')
         assert isinstance(pipeline.cache, dict)
+        assert pipeline.args is args
 
     def test_load_schedule_data(self, feature_pipeline, sample_schedule_data):
         """Test loading schedule data."""
@@ -798,6 +810,294 @@ class TestFeaturePipeline:
                 col1_ewm_cols=['season'],
                 col2_ewm_cols=['season'],
             )
+
+    def test_apply_league_average_deltas_batting_uses_raw_as_of_avgs_and_warmup_fallback(self, feature_pipeline):
+        """Batting model stats become dynamic league-average deltas after rolling/shrinkage."""
+        game_dates = pd.date_range('2024-04-01', periods=12, freq='D')
+        pa_values = [10, 30, *([20] * 9), 50]
+        woba_values = [0.200, 0.400, *([0.300] * 9), 0.100]
+        ops_values = [0.600, 0.900, *([0.750] * 9), 0.300]
+        k_percent_values = [0.100, 0.300, *([0.150] * 9), 0.800]
+        bb_percent_values = [0.050, 0.150, *([0.100] * 9), 0.010]
+        raw_batting = pd.DataFrame({
+            'game_date': list(game_dates) + [pd.Timestamp('2024-04-04')],
+            'dh': [0] * 13,
+            'season': [2024] * 13,
+            'player_id': list(range(1, 13)) + [99],
+            'pos': ['OF'] * 12 + ['P'],
+            'team': ['NYY'] * 13,
+            'pa': pa_values + [999],
+            'woba': woba_values + [9.000],
+            'ops': ops_values + [9.000],
+            'k_percent': k_percent_values + [9.000],
+            'bb_percent': bb_percent_values + [9.000],
+        })
+        features = pd.DataFrame({
+            'game_id': ['warmup', 'asof'],
+            'game_date': [pd.Timestamp('2024-04-03'), pd.Timestamp('2024-04-12')],
+            'dh': [0, 0],
+            'home_team': ['BOS', 'BOS'],
+            'away_team': ['NYY', 'NYY'],
+            'home_woba_season': [0.360, 0.350],
+            'away_woba_season': [0.290, 0.310],
+            'home_ops_season': [0.800, 0.790],
+            'home_bb_percent_season': [0.120, 0.120],
+            'home_k_percent_season': [0.180, 0.180],
+            'away_k_percent_season': [0.260, 0.260],
+            'home_wrc_plus_season': [125.0, 126.0],
+            'home_baserunning_season': [1.2, 1.3],
+            'home_wpa_season': [0.4, 0.5],
+            'home_frv_per_9': [0.8, 0.9],
+        }).set_index(['game_id', 'game_date', 'dh', 'home_team', 'away_team'])
+
+        adjusted = feature_pipeline._apply_league_average_deltas(
+            features,
+            raw_batting_data=raw_batting,
+            raw_pitching_data=pd.DataFrame(),
+        )
+
+        warmup = adjusted.loc[('warmup', pd.Timestamp('2024-04-03'), 0, 'BOS', 'NYY')]
+        assert warmup['home_woba_season'] == pytest.approx(0.360 - (73 / 270))
+        assert warmup['home_k_percent_season'] == pytest.approx((77 / 270) - 0.180)
+
+        asof = adjusted.loc[('asof', pd.Timestamp('2024-04-12'), 0, 'BOS', 'NYY')]
+        assert asof['home_woba_season'] == pytest.approx(0.350 - (68 / 220))
+        assert asof['away_woba_season'] == pytest.approx(0.310 - (68 / 220))
+        assert asof['home_ops_season'] == pytest.approx(0.790 - (168 / 220))
+        assert asof['home_bb_percent_season'] == pytest.approx(0.120 - (23 / 220))
+        assert asof['home_k_percent_season'] == pytest.approx((37 / 220) - 0.180)
+        assert asof['away_k_percent_season'] == pytest.approx((37 / 220) - 0.260)
+
+        assert asof['home_wrc_plus_season'] == 126.0
+        assert asof['home_baserunning_season'] == 1.3
+        assert asof['home_wpa_season'] == 0.5
+        assert asof['home_frv_per_9'] == 0.9
+
+    def test_apply_league_average_deltas_warmup_counts_game_buckets_not_raw_batting_rows(self, feature_pipeline):
+        """Warmup fallback uses prior game buckets, not the number of player rows in those buckets."""
+        prior_dates = list(pd.date_range('2024-04-01', periods=5, freq='D'))
+        future_dates = list(pd.date_range('2024-04-06', periods=5, freq='D'))
+        raw_rows = []
+
+        for game_date in prior_dates:
+            for player_id in range(1, 12):
+                raw_rows.append({
+                    'game_date': game_date,
+                    'dh': 0,
+                    'season': 2024,
+                    'player_id': player_id,
+                    'pos': 'OF',
+                    'team': 'NYY',
+                    'pa': 4,
+                    'woba': 0.200,
+                    'k_percent': 0.400,
+                })
+
+        for game_date in future_dates:
+            for player_id in range(101, 112):
+                raw_rows.append({
+                    'game_date': game_date,
+                    'dh': 0,
+                    'season': 2024,
+                    'player_id': player_id,
+                    'pos': 'IF',
+                    'team': 'BOS',
+                    'pa': 4,
+                    'woba': 0.800,
+                    'k_percent': 0.100,
+                })
+
+        features = pd.DataFrame({
+            'game_id': ['warmup'],
+            'game_date': [pd.Timestamp('2024-04-06')],
+            'dh': [0],
+            'home_team': ['BOS'],
+            'away_team': ['NYY'],
+            'home_woba_season': [0.600],
+            'home_k_percent_season': [0.200],
+        }).set_index(['game_id', 'game_date', 'dh', 'home_team', 'away_team'])
+
+        adjusted = feature_pipeline._apply_league_average_deltas(
+            features,
+            raw_batting_data=pd.DataFrame(raw_rows),
+            raw_pitching_data=pd.DataFrame(),
+        )
+
+        row = adjusted.iloc[0]
+        assert row['home_woba_season'] == pytest.approx(0.100)
+        assert row['home_k_percent_season'] == pytest.approx(0.050)
+
+    def test_apply_league_average_deltas_pitching_uses_role_specific_as_of_avgs(self, feature_pipeline):
+        """Starter columns use starter raw rows; bullpen columns use reliever raw rows."""
+        prior_dates = list(pd.date_range('2024-04-01', periods=10, freq='D'))
+        raw_pitching = pd.DataFrame({
+            'game_date': (prior_dates + [pd.Timestamp('2024-04-11')]) * 2,
+            'dh': [0] * 22,
+            'season': [2024] * 22,
+            'player_id': list(range(1, 12)) + list(range(101, 112)),
+            'team': ['NYY'] * 11 + ['BOS'] * 11,
+            'gs': [1] * 11 + [0] * 11,
+            'ip': [2, 8, *([5] * 8), 9, 1, 9, *([5] * 8), 9],
+            'tbf': [10, 30, *([20] * 8), 90, 10, 30, *([20] * 8), 90],
+            'era': [3.00, 5.00, *([4.00] * 8), 9.00, 2.00, 4.00, *([3.00] * 8), 9.00],
+            'fip': [3.00, 4.00, *([3.80] * 8), 9.00, 2.80, 3.80, *([3.20] * 8), 9.00],
+            'k_percent': [0.100, 0.300, *([0.250] * 8), 0.900, 0.100, 0.300, *([0.220] * 8), 0.900],
+            'bb_percent': [0.050, 0.150, *([0.090] * 8), 0.900, 0.040, 0.120, *([0.080] * 8), 0.900],
+        })
+        features = pd.DataFrame({
+            'game_id': ['game1'],
+            'game_date': [pd.Timestamp('2024-04-11')],
+            'dh': [0],
+            'home_team': ['BOS'],
+            'away_team': ['NYY'],
+            'home_starter_era_season': [4.10],
+            'away_starter_fip_season': [3.50],
+            'home_starter_k_percent_season': [0.270],
+            'away_starter_bb_percent_season': [0.110],
+            'home_pen_era_season': [2.50],
+            'away_pen_k_percent_season': [0.180],
+            'home_starter_stuff_season': [105.0],
+            'home_starter_wpa_season': [0.70],
+            'home_pen_stuff_season': [97.0],
+            'home_pen_wpa_li_season': [0.20],
+            'home_pen_rest_days_mean': [2.5],
+            'home_team_id': [111],
+            'home_p_open_home_mean_nv': [0.55],
+        }).set_index(['game_id', 'game_date', 'dh', 'home_team', 'away_team'])
+
+        adjusted = feature_pipeline._apply_league_average_deltas(
+            features,
+            raw_batting_data=pd.DataFrame(),
+            raw_pitching_data=raw_pitching,
+        )
+
+        row = adjusted.iloc[0]
+        assert row['home_starter_era_season'] == pytest.approx((206 / 50) - 4.10)
+        assert row['away_starter_fip_season'] == pytest.approx((190 / 50) - 3.50)
+        assert row['home_starter_k_percent_season'] == pytest.approx(0.270 - (50 / 200))
+        assert row['away_starter_bb_percent_season'] == pytest.approx((19.4 / 200) - 0.110)
+        assert row['home_pen_era_season'] == pytest.approx((158 / 50) - 2.50)
+        assert row['away_pen_k_percent_season'] == pytest.approx(0.180 - (45.2 / 200))
+
+        assert row['home_starter_stuff_season'] == 105.0
+        assert row['home_starter_wpa_season'] == 0.70
+        assert row['home_pen_stuff_season'] == 97.0
+        assert row['home_pen_wpa_li_season'] == 0.20
+        assert row['home_pen_rest_days_mean'] == 2.5
+        assert row['home_team_id'] == 111
+        assert row['home_p_open_home_mean_nv'] == 0.55
+
+    def test_start_pipeline_matchups_are_based_on_adjusted_side_columns(self, feature_pipeline):
+        schedule = self._pipeline_schedule()
+        raw_odds = pd.DataFrame({'sportsbook': ['DraftKings']})
+        odds_features = pd.DataFrame({'sportsbook': ['DraftKings']})
+        idx = ['game_id', 'game_date', 'dh', 'home_team', 'away_team']
+        matched = self._odds_matched_schedule(schedule).reset_index().set_index(idx)
+
+        position_player_features = pd.DataFrame({
+            'game_id': ['game1'],
+            'game_date': [pd.Timestamp('2024-04-01')],
+            'dh': [0],
+            'home_team': ['BOS'],
+            'away_team': ['NYY'],
+            'home_woba_season': [0.330],
+            'away_woba_season': [0.320],
+            'home_k_percent_season': [0.220],
+            'away_k_percent_season': [0.230],
+            'home_bb_percent_season': [0.090],
+            'away_bb_percent_season': [0.080],
+            'home_barrel_percent_season': [0.080],
+            'away_barrel_percent_season': [0.070],
+        }).set_index(idx)
+        for stat in ['woba', 'k_percent', 'bb_percent', 'barrel_percent']:
+            for suffix in ['ewm_h3', 'ewm_h10', 'ewm_h25']:
+                position_player_features[f'home_{stat}_{suffix}'] = position_player_features[f'home_{stat}_season']
+                position_player_features[f'away_{stat}_{suffix}'] = position_player_features[f'away_{stat}_season']
+
+        pitching_features = pd.DataFrame({
+            'game_id': ['game1'],
+            'game_date': [pd.Timestamp('2024-04-01')],
+            'dh': [0],
+            'home_team': ['BOS'],
+            'away_team': ['NYY'],
+            'home_starter_fip_season': [3.800],
+            'away_starter_fip_season': [4.100],
+            'home_starter_k_percent_season': [0.260],
+            'away_starter_k_percent_season': [0.210],
+            'home_starter_bb_percent_season': [0.080],
+            'away_starter_bb_percent_season': [0.100],
+            'home_starter_barrel_percent_season': [0.060],
+            'away_starter_barrel_percent_season': [0.090],
+        }).set_index(idx)
+        missing_pitching_cols = {}
+        for stat in ['starter_era', 'starter_babip', 'starter_hard_hit', 'starter_k_percent',
+                     'starter_barrel_percent', 'starter_fip', 'starter_siera', 'starter_stuff',
+                     'starter_ev', 'starter_hr_fb', 'starter_wpa', 'starter_bb_percent',
+                     'pen_era', 'pen_babip', 'pen_hard_hit', 'pen_k_percent',
+                     'pen_barrel_percent', 'pen_fip', 'pen_siera', 'pen_stuff',
+                     'pen_ev', 'pen_hr_fb', 'pen_wpa_li']:
+            for suffix in self.PITCHING_SUFFIXES:
+                col_home = f'home_{stat}_{suffix}'
+                col_away = f'away_{stat}_{suffix}'
+                if col_home not in pitching_features:
+                    missing_pitching_cols[col_home] = [0.0]
+                if col_away not in pitching_features:
+                    missing_pitching_cols[col_away] = [0.0]
+        pitching_features = pd.concat(
+            [pitching_features, pd.DataFrame(missing_pitching_cols, index=pitching_features.index)],
+            axis=1,
+        )
+
+        def apply_adjusted_side_columns(df, raw_batting_data, raw_pitching_data):
+            adjusted = df.copy()
+            adjusted['home_woba_season'] = 0.050
+            adjusted['away_woba_season'] = -0.020
+            adjusted['home_k_percent_season'] = 0.010
+            adjusted['away_k_percent_season'] = -0.030
+            adjusted['home_starter_fip_season'] = -0.300
+            adjusted['home_starter_k_percent_season'] = 0.080
+            return adjusted
+
+        team_features = pd.DataFrame({
+            'game_id': ['game1'],
+            'game_date': [pd.Timestamp('2024-04-01')],
+            'dh': [0],
+            'home_team': ['BOS'],
+            'away_team': ['NYY'],
+        }).set_index(idx)
+        for stat in self.TEAM_METRIC_COLS:
+            for suffix in self.TEAM_METRIC_SUFFIXES:
+                team_features[f'home_{stat}_{suffix}'] = 0.0
+                team_features[f'away_{stat}_{suffix}'] = 0.0
+
+        context_features = pd.DataFrame({
+            'game_id': ['game1'],
+            'game_date': [pd.Timestamp('2024-04-01')],
+            'dh': [0],
+            'home_team': ['BOS'],
+            'away_team': ['NYY'],
+            'park_factor': [101],
+        }).set_index(idx)
+
+        with patch.object(feature_pipeline, '_load_schedule_data', return_value=schedule), \
+            patch.object(feature_pipeline, '_load_odds_data', return_value=pd.DataFrame({'raw': [1]})), \
+            patch.object(feature_pipeline, '_match_schedule_to_odds', return_value=(matched.reset_index(), raw_odds)), \
+            patch.object(feature_pipeline, '_get_position_player_features', return_value=position_player_features), \
+            patch.object(feature_pipeline, '_get_pitcher_features', return_value=pitching_features), \
+            patch.object(feature_pipeline, '_apply_league_average_deltas', side_effect=apply_adjusted_side_columns, create=True) as mock_adjust, \
+            patch('src.data.features.feature_pipeline.Odds') as mock_odds, \
+            patch('src.data.features.feature_pipeline.GameContextFeatures') as mock_context_cls, \
+            patch('src.data.features.feature_pipeline.TeamFeatures') as mock_team_cls:
+
+            mock_odds.return_value.load_features.return_value = odds_features
+            mock_context_cls.return_value.load_features.return_value = context_features
+            mock_team_cls.return_value.load_features.return_value = team_features
+            final_features, _ = feature_pipeline.start_pipeline()
+
+        mock_adjust.assert_called_once()
+        row = final_features.iloc[0]
+        assert row['home_away_starter_fip_woba_season_diff'] == pytest.approx(-0.280)
+        assert row['home_away_starter_k_percent_k_percent_season_diff'] == pytest.approx(0.110)
 
     def test_handle_unmatched_games_doubleheader_uses_closest_time(self, feature_pipeline, clean_db):
         games = [

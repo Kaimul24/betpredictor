@@ -122,6 +122,12 @@ class FeaturePipeline:
 
         assert len(final_features) == len(odds_sch_matched)
 
+        final_features = self._apply_league_average_deltas(
+            final_features,
+            raw_batting_data=self.cache.get("raw_batting_data", pd.DataFrame()),
+            raw_pitching_data=self.cache.get("raw_pitching_data", pd.DataFrame()),
+        )
+
         self.logger.info(f" Adding matchup columns...")
         starter_ewm_cols = ['season'] + [f'ewm_h{hl}' for hl in list(self.args.starter_halflives)]
         starter_cols = ['starter_era', 'starter_babip', 'starter_hard_hit', 'starter_k_percent', 
@@ -382,6 +388,7 @@ class FeaturePipeline:
     def _get_position_player_features(self, schedule_df: DataFrame, force_recreate: bool = False) -> DataFrame:
         """Get position_player features for all games efficiently"""
         raw_batter_data = self._load_batting_data()
+        self.cache["raw_batting_data"] = raw_batter_data.copy()
         raw_batter_data = raw_batter_data[~((raw_batter_data['pos'].str.startswith('P')) & (raw_batter_data['player_id'] != 19755))] # Shohei
 
         lineups_data = self._load_lineups_data()
@@ -423,6 +430,7 @@ class FeaturePipeline:
         )
 
         raw_pitching_data = self._load_pitching_data()
+        self.cache["raw_pitching_data"] = raw_pitching_data.copy()
         raw_feats = PitchingFeatures(
             self.season, 
             raw_pitching_data, 
@@ -472,6 +480,194 @@ class FeaturePipeline:
         assert len(all_pitching_features) == len(games)
         
         return all_pitching_features
+
+    def _apply_league_average_deltas(
+        self,
+        features: DataFrame,
+        raw_batting_data: DataFrame,
+        raw_pitching_data: DataFrame,
+    ) -> DataFrame:
+        """
+        Convert supported home/away rolling stats to deltas from dynamic league averages.
+
+        Positive values mean better than league average. League averages come from raw
+        season rows before the feature row date, with a full-season fallback early in
+        the season when fewer than 10 prior league buckets are available.
+        """
+        adjusted = features.copy()
+        if adjusted.empty:
+            return adjusted
+
+        feature_dates = self._feature_dates(adjusted)
+
+        batting_stats = {
+            "woba": ("pa", "higher"),
+            "ops": ("pa", "higher"),
+            "bb_percent": ("pa", "higher"),
+            "bb_k": ("pa", "higher"),
+            "babip": ("bip", "higher"),
+            "barrel_percent": ("bip", "higher"),
+            "hard_hit": ("bip", "higher"),
+            "ev": ("bip", "higher"),
+            "gb_fb": ("bip", "higher"),
+            "iso": ("ab", "higher"),
+            "k_percent": ("pa", "lower"),
+        }
+        pitching_stats = {
+            "era": ("ip", "lower"),
+            "fip": ("ip", "lower"),
+            "siera": ("ip", "lower"),
+            "k_percent": ("tbf", "higher"),
+            "bb_percent": ("tbf", "lower"),
+            "k_bb_percent": ("tbf", "higher"),
+            "babip": ("bip", "lower"),
+            "barrel_percent": ("bip", "lower"),
+            "hard_hit": ("bip", "lower"),
+            "ev": ("bip", "lower"),
+            "hr_fb": ("bip", "lower"),
+        }
+
+        raw_batting = self._filter_league_average_batting(raw_batting_data)
+        batting_averages = {
+            stat: self._league_averages_by_feature_date(raw_batting, stat, denom, feature_dates)
+            for stat, (denom, _) in batting_stats.items()
+        }
+        for stat, (_, direction) in batting_stats.items():
+            adjusted = self._apply_stat_delta(adjusted, stat, direction, batting_averages[stat])
+
+        raw_pitching = self._prepare_pitching_league_average_data(raw_pitching_data)
+        starter_rows, reliever_rows = self._split_pitching_rows(raw_pitching)
+        starter_averages = {
+            stat: self._league_averages_by_feature_date(starter_rows, stat, denom, feature_dates)
+            for stat, (denom, _) in pitching_stats.items()
+        }
+        reliever_averages = {
+            stat: self._league_averages_by_feature_date(reliever_rows, stat, denom, feature_dates)
+            for stat, (denom, _) in pitching_stats.items()
+        }
+
+        for stat, (_, direction) in pitching_stats.items():
+            adjusted = self._apply_stat_delta(adjusted, f"starter_{stat}", direction, starter_averages[stat])
+            adjusted = self._apply_stat_delta(adjusted, f"pen_{stat}", direction, reliever_averages[stat])
+
+        return adjusted
+
+    def _feature_dates(self, features: DataFrame) -> pd.Series:
+        if "game_date" in features.index.names:
+            dates = features.index.get_level_values("game_date")
+        elif "game_date" in features.columns:
+            dates = features["game_date"]
+        else:
+            raise ValueError("features must include game_date")
+        return pd.Series(pd.to_datetime(dates), index=features.index)
+
+    def _filter_league_average_batting(self, raw_batting_data: DataFrame) -> DataFrame:
+        if raw_batting_data is None or raw_batting_data.empty:
+            return pd.DataFrame()
+
+        raw = raw_batting_data.copy()
+        is_pitcher = raw["pos"].fillna("").astype(str).str.startswith("P")
+        raw = raw[~(is_pitcher & (raw["player_id"] != 19755))]
+        return raw
+
+    def _prepare_pitching_league_average_data(self, raw_pitching_data: DataFrame) -> DataFrame:
+        if raw_pitching_data is None or raw_pitching_data.empty:
+            return pd.DataFrame()
+
+        raw = raw_pitching_data.copy()
+        if "k_bb_percent" not in raw.columns and {"k_percent", "bb_percent"}.issubset(raw.columns):
+            raw["k_bb_percent"] = raw["k_percent"] - raw["bb_percent"]
+        return raw
+
+    def _split_pitching_rows(self, raw_pitching_data: DataFrame) -> Tuple[DataFrame, DataFrame]:
+        if raw_pitching_data is None or raw_pitching_data.empty:
+            empty = pd.DataFrame()
+            return empty, empty
+
+        raw = raw_pitching_data.copy()
+        if "is_starter" in raw.columns:
+            is_starter = raw["is_starter"].fillna(False).astype(bool)
+        elif "gs" in raw.columns:
+            gs = pd.to_numeric(raw["gs"], errors="coerce")
+            is_starter = gs > 0
+        else:
+            return raw, raw
+
+        return raw[is_starter], raw[~is_starter]
+
+    def _league_averages_by_feature_date(
+        self,
+        raw_data: DataFrame,
+        stat: str,
+        denominator: str,
+        feature_dates: pd.Series,
+    ) -> pd.Series:
+        if raw_data is None or raw_data.empty or stat not in raw_data.columns:
+            return pd.Series(np.nan, index=feature_dates.index)
+
+        raw = raw_data.copy()
+        raw["game_date"] = pd.to_datetime(raw["game_date"])
+        raw[stat] = pd.to_numeric(raw[stat], errors="coerce")
+
+        if denominator in raw.columns:
+            raw["_denominator"] = pd.to_numeric(raw[denominator], errors="coerce")
+        else:
+            raw["_denominator"] = 1.0
+
+        raw = raw.dropna(subset=["game_date", stat, "_denominator"])
+        raw = raw[raw["_denominator"] > 0]
+        if raw.empty:
+            return pd.Series(np.nan, index=feature_dates.index)
+
+        full_average = self._weighted_average(raw, stat)
+        averages_by_date = {}
+        for game_date in feature_dates.drop_duplicates().sort_values():
+            prior = raw[raw["game_date"] < game_date]
+            if self._prior_league_bucket_count(prior) < 10:
+                averages_by_date[game_date] = full_average
+            else:
+                averages_by_date[game_date] = self._weighted_average(prior, stat)
+
+        return feature_dates.map(averages_by_date)
+
+    def _prior_league_bucket_count(self, prior_raw_data: DataFrame) -> int:
+        if prior_raw_data.empty:
+            return 0
+
+        if {"game_date", "dh", "team"}.issubset(prior_raw_data.columns):
+            bucket_cols = ["game_date", "dh", "team"]
+        elif {"game_date", "team"}.issubset(prior_raw_data.columns):
+            bucket_cols = ["game_date", "team"]
+        else:
+            bucket_cols = ["game_date"]
+
+        return len(prior_raw_data[bucket_cols].drop_duplicates())
+
+    def _weighted_average(self, raw_data: DataFrame, stat: str) -> float:
+        denominator = raw_data["_denominator"].sum()
+        if denominator == 0:
+            return np.nan
+        return (raw_data[stat] * raw_data["_denominator"]).sum() / denominator
+
+    def _apply_stat_delta(
+        self,
+        features: DataFrame,
+        stat: str,
+        direction: str,
+        averages: pd.Series,
+    ) -> DataFrame:
+        if averages.isna().all():
+            return features
+
+        adjusted = features
+        prefixes = (f"home_{stat}_", f"away_{stat}_")
+        columns = [col for col in adjusted.columns if col.startswith(prefixes)]
+        for col in columns:
+            if direction == "lower":
+                adjusted[col] = averages - adjusted[col]
+            else:
+                adjusted[col] = adjusted[col] - averages
+        return adjusted
 
 
 
