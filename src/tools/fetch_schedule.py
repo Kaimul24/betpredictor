@@ -384,4 +384,3 @@ def fetch_schedule():
 
 if __name__ == "__main__":
     fetch_schedule()
-    db_manager = get_database_manager()

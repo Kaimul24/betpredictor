@@ -122,15 +122,15 @@ class NeuralNetwork(nn.Module):
             nn.Linear(in_dim, base_hidden_size),
             nn.ReLU(),
             
-            nn.Linear(base_hidden_size, base_hidden_size * 2),
+            nn.Linear(base_hidden_size, base_hidden_size ),
             nn.Dropout(p_drop),
             nn.ReLU(),
 
-            nn.Linear(base_hidden_size * 2, base_hidden_size * 2),
+            nn.Linear(base_hidden_size, base_hidden_size),
             nn.Dropout(p_drop),
             nn.ReLU(),
 
-            nn.Linear(base_hidden_size * 2, base_hidden_size),
+            nn.Linear(base_hidden_size, base_hidden_size),
             nn.Dropout(p_drop),
             nn.ReLU(),
 

@@ -7,7 +7,12 @@
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
+from dotenv import load_dotenv
+
 from config import DATABASE_PATH
+from src.scrapers.fangraphs_session import fangraphs_context_kwargs
+
+load_dotenv()
 
 BOT_NAME = "scrapers"
 
@@ -46,7 +51,8 @@ PLAYWRIGHT_LAUNCH_OPTIONS = {
 PLAYWRIGHT_CONTEXTS = {
     "default": {
         "ignore_https_errors": True
-    }
+    },
+    "fangraphs": fangraphs_context_kwargs(),
 }
 
 # Configure a delay for requests for the same website (default: 0)

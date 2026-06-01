@@ -29,34 +29,7 @@ class SqlitePipeline:
             schema_path=self.ddl_path,
             max_connections=5
         )
-
-        if spider.name == 'lineups':
-            execute_query("PRAGMA foreign_keys = OFF", readonly=False)
-            tables_to_drop = [
-                'lineup_players', 
-                'lineups'
-            ]
-            for table in tables_to_drop:
-                execute_query(f"DROP TABLE IF EXISTS {table}", readonly=False)
-                
-            execute_query("PRAGMA foreign_keys = ON", readonly=False)
-
-        if spider.name == 'stats':
-            tables_to_drop = [
-                'batting_stats', 
-                'pitching_stats',
-                'players'
-            ]
-
-            for table in tables_to_drop:
-                execute_query(f"DROP TABLE IF EXISTS {table}", readonly=False)
-
-        if spider.name == 'odds':
-            execute_query("DROP TABLE IF EXISTS odds", readonly=False)
-
-        if spider.name == 'fielding':
-            execute_query("DROP TABLE IF EXISTS fielding", readonly=False)
-
+        
         self.db_manager.initialize_schema()
 
         schema_updated = auto_update_schema_for_tool(f"scraper_{spider.name}")

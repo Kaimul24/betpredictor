@@ -1,10 +1,16 @@
 import scrapy
-import json
 from dotenv import load_dotenv
 import os
 from config import DATES, LG_AVG_STATS, TEAM_ABBR_MAP
 from scrapers.items import BatterStat, PitcherStat, LineupItem, LineupPlayerItem
 from datetime import datetime
+from src.scrapers.fangraphs_session import (
+    FANGRAPHS_SPIDER_SETTINGS,
+    fangraphs_headers,
+    fangraphs_request,
+    load_fangraphs_json,
+    require_fangraphs_storage_state,
+)
 from src.utils import normalize_names
 
 load_dotenv()
@@ -13,46 +19,20 @@ GAME_LOG_URL = os.getenv("GAME_URL")
 
 class fgSpider(scrapy.Spider):
     name = "lineups"
+    custom_settings = FANGRAPHS_SPIDER_SETTINGS.copy()
     
     async def start(self):
+        require_fangraphs_storage_state(self)
         self.requested_dates = set()
         self.LG_AVG_STATS = LG_AVG_STATS
-
-        self.json_headers = {
-            **self.settings.getdict("DEFAULT_REQUEST_HEADERS"),
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Referer": "https://www.fangraphs.com",
-            "Origin":  "https://www.fangraphs.com",
-            "Sec-Fetch-Mode": "cors",
-        }
-
-        yield scrapy.Request(
-            "https://www.fangraphs.com/",
-            meta={
-                "playwright": True,
-                "playwright_include_page": True,
-                "playwright_page_goto_kwargs": {
-                    "wait_until": "domcontentloaded",
-                    "timeout": 45_000,
-                },
-            },
-            callback=self.after_handshake
-        )
-    
-    async def after_handshake(self, response):
-        page = response.meta["playwright_page"]
-        cookies = await page.context.cookies()
-        self.cookies = {c["name"]: c["value"] for c in cookies}
-        await page.close()
-
+        self.json_headers = fangraphs_headers(self.settings)
         self.seen_player_season = set()
 
         for team_id in range(1, 31):
             for year in DATES.keys():
                 url = TEAM_URL.format(team_id, year)
-                yield scrapy.Request(
+                yield fangraphs_request(
                     url,
-                    cookies=self.cookies,
                     headers=self.json_headers,
                     callback=self.parse_roster,
                     cb_kwargs={"year": year},
@@ -60,7 +40,7 @@ class fgSpider(scrapy.Spider):
             
 
     def parse_roster(self, response, year):
-        payload = json.loads(response.text)
+        payload = load_fangraphs_json(response, self.logger)
 
         lineups_to_yield = []
         players_to_yield = []
