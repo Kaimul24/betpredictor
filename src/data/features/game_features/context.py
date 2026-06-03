@@ -62,8 +62,7 @@ class GameContextFeatures(BaseFeatures):
     def _encode_wind(self) -> DataFrame:
         """Encodes the wind column."""
         wind_encoded = self.data[['wind']].copy()
-        wind_encoded[['wind_magnitude' , 'wind_direction']] \
-            = wind_encoded['wind'].str.split(',', expand=True)
+        wind_encoded[['wind_magnitude' , 'wind_direction']] = wind_encoded['wind'].str.split(',', expand=True)
         
         wind_encoded['wind_magnitude'] = wind_encoded['wind_magnitude'].str.split().str[0]
         wind_encoded['wind_magnitude'] = wind_encoded['wind_magnitude'].fillna("0")
@@ -149,7 +148,6 @@ def main():
     print(context_features.columns)
 if __name__ == "__main__":
     main()    
-
 
 
 

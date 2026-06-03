@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import argparse
 import numpy as np
 
-from src.data.feature_preprocessing import PreProcessing
+from src.data.features.feature_preprocessing import PreProcessing
 from src.data.models.xgboost_model import XGBoostModel
 from src.config import PROJECT_ROOT
 from src.utils import setup_logging
