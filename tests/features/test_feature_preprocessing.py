@@ -94,7 +94,7 @@ def test_preprocessing_cache_key_uses_stable_dataclass_values():
 
     assert processor._cache_key() == (
         "xgboost_finetune_market_residual_seasons-2021_2022_2023_2024_2025_"
-        "bat-4-12_sp-3-8_rp-3-8_team-3-8-20"
+        "perspective-0_bat-4-12_sp-3-8_rp-3-8_team-3-8-20"
     )
 
 

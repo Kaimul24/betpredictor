@@ -38,6 +38,7 @@ class FeatureConfig(ConfigMixin):
     stage: str
     training_mode: str = "market_residual"
     model_type: str = "mlp"
+    perspective_duplication: bool = False
     force_recreate: bool = False
     force_recreate_preprocessing: bool = False
     clear_log: bool = False
@@ -75,6 +76,7 @@ class FeatureConfig(ConfigMixin):
 class XGBoostConfig(ConfigMixin):
     stage: str
     training_mode: str = "stacked"
+    perspective_duplication: bool = False
     retune: bool = False
     force_recreate: bool = False
     force_recreate_preprocessing: bool = False
@@ -117,6 +119,7 @@ class XGBoostConfig(ConfigMixin):
             training_mode=training_mode,
             stage=stage,
             model_type=model_type,
+            perspective_duplication=self.perspective_duplication,
             force_recreate=self.force_recreate,
             force_recreate_preprocessing=self.force_recreate_preprocessing,
             clear_log=self.clear_log,
@@ -133,6 +136,7 @@ class XGBoostConfig(ConfigMixin):
 class NeuralNetworkConfig(ConfigMixin):
     stage: str
     training_mode: str = "market_residual"
+    perspective_duplication: bool = False
     base_hidden_size: int = 256
     max_residual: float = 0.5
     alpha: float = 0.7
@@ -142,6 +146,7 @@ class NeuralNetworkConfig(ConfigMixin):
     epochs: int = 100
     lr: float = 1e-4
     min_lr: float = 1e-6
+    weight_decay: float = 0.03
     cosine_scheduler: bool = True
     retune: bool = False
     use_hyperparams: bool = False
@@ -173,8 +178,8 @@ class NeuralNetworkConfig(ConfigMixin):
         values = _select_dataclass_values(cls, _namespace_values(namespace))
         return cls(**values)
 
-    def for_stage(self, training_mode: str, stage: str) -> "NeuralNetworkConfig":
-        return replace(self, training_mode=training_mode, stage=stage)
+    def for_stage(self, training_mode: str, stage: str, perspective_duplication: bool) -> "NeuralNetworkConfig":
+        return replace(self, training_mode=training_mode, stage=stage, perspective_duplication=perspective_duplication)
     
     def to_feature_config(
         self,
@@ -186,6 +191,7 @@ class NeuralNetworkConfig(ConfigMixin):
             training_mode=training_mode,
             stage=stage,
             model_type=model_type,
+            perspective_duplication=self.perspective_duplication,
             force_recreate=self.force_recreate,
             force_recreate_preprocessing=self.force_recreate_preprocessing,
             clear_log=self.clear_log,
@@ -201,6 +207,7 @@ class NeuralNetworkConfig(ConfigMixin):
 @dataclass(frozen=True)
 class TwoHeadNNConfig(NeuralNetworkConfig):
     device: str = "auto"
+    pretrain_trials: int = 50
     pretrain_dir: Path = PROJECT_ROOT / "src" / "data" / "models" / "saved_models" / "nn_pretrain_ckpts"
     finetune_dir: Path = PROJECT_ROOT / "src" / "data" / "models" / "saved_models" / "nn_finetune_ckpts"
     pretrained_checkpoint: Path | None = None

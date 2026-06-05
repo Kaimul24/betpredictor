@@ -21,6 +21,7 @@ def create_args():
     parser = argparse.ArgumentParser(description="Feature preprocessing runner")
     parser.add_argument("--force-recreate", action="store_true", help="Recreate rolling features, even if cached file exists")
     parser.add_argument("--force-recreate-preprocessing", action="store_true", help="Recreate preprocessed datasets, even if cached file exists")
+    parser.add_argument("--perspective-duplication", action="store_true", help="Duplicate training rows from each focal team's perspective")
     parser.add_argument(
         "--model-type",
         choices=["xgboost", "mlp"],
@@ -137,6 +138,7 @@ class PreProcessing():
             self.stage,
             self.training_mode,
             f"seasons-{self.seasons_str}",
+            f"perspective-{int(self.config.perspective_duplication)}",
             *halflive_parts,
         ])
 
@@ -194,6 +196,18 @@ class PreProcessing():
         filtered_dfs = [df[[col for col in df.columns if col not in self.exclude_columns]] for df in dfs]
 
         train_data, val_df, test_df = self._split_data(filtered_dfs)
+
+        if self.config.perspective_duplication:
+            train_data = self._duplicate_training_perspective(train_data)
+            val_df = self._add_canonical_perspective_feature(val_df)
+            test_df = self._add_canonical_perspective_feature(test_df)
+        else:
+            train_data = train_data.copy()
+            val_df = val_df.copy()
+            test_df = test_df.copy()
+            train_data["focal_is_home"] = True
+            val_df["focal_is_home"] = True
+            test_df["focal_is_home"] = True 
 
         train_data = train_data.reset_index().set_index(['season', 'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id']).sort_index()
         val_df = val_df.reset_index().set_index(['season', 'game_date', 'dh', 'game_datetime', 'home_team', 'away_team', 'game_id']).sort_index()
@@ -292,6 +306,32 @@ class PreProcessing():
             'y_test': y_test,
             'scaler': scaler
         }
+
+    def _duplicate_training_perspective(self, train_data: DataFrame) -> DataFrame:
+        from src.data.features.perspective import duplicate_training_perspective
+
+        self.logger.info(" Applying focal-team perspective duplication to training data")
+        return duplicate_training_perspective(
+            train_data,
+            market_probability_col="p_open_home_median_nv",
+            batter_halflives=self.config.batter_halflives,
+            starter_halflives=self.config.starter_halflives,
+            reliever_halflives=self.config.reliever_halflives,
+            team_halflives=self.config.team_halflives,
+        )
+
+    def _add_canonical_perspective_feature(self, data: DataFrame) -> DataFrame:
+        from src.data.features.perspective import recompute_matchup_columns
+
+        canonical_data = data.copy()
+        canonical_data["focal_is_home"] = True
+        return recompute_matchup_columns(
+            canonical_data,
+            batter_halflives=self.config.batter_halflives,
+            starter_halflives=self.config.starter_halflives,
+            reliever_halflives=self.config.reliever_halflives,
+            team_halflives=self.config.team_halflives,
+        )
 
     def _split_data(self, filtered_dfs: List[DataFrame]) -> Tuple[DataFrame, DataFrame, DataFrame]:
         train_dfs = filtered_dfs[:-1]

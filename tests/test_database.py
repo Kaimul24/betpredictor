@@ -59,7 +59,7 @@ def test_execute_many_write_queries(temp_db_manager):
     rows = temp_db_manager.execute_read_query(
         "SELECT player_id FROM players ORDER BY player_id"
     )
-    assert [row._mapping["player_id"] for row in rows] == ["1", "2"]
+    assert [row._mapping["player_id"] for row in rows] == [1, 2]
 
 
 def test_writer_connection_rolls_back_on_error(temp_db_manager):

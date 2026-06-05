@@ -129,7 +129,7 @@ class FeaturePipeline:
             drop_cols = [
                 col for col in odds_sch_matched.columns 
                 if ("prob_home" in col)
-                or (col in ["num_books", "vig_open"])
+                or (not mkt_only and col in ["num_books", "vig_open"])
             ]
             odds_sch_matched = odds_sch_matched.drop(columns=drop_cols)
             schedule_data = odds_sch_matched
