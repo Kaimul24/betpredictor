@@ -2,10 +2,9 @@ from src.data.features.feature_pipeline import FeaturePipeline
 import pandas as pd
 from pandas.core.api import DataFrame as DataFrame
 import argparse
-from types import SimpleNamespace
 from typing import List, Tuple, Dict, Union
 from sklearn.preprocessing import StandardScaler
-from src.config import PROJECT_ROOT, FEATURES_CACHE_PATH
+from src.config import FeatureConfig, PROJECT_ROOT, FEATURES_CACHE_PATH
 import joblib
 
 from dotenv import load_dotenv
@@ -31,7 +30,7 @@ def create_args():
         "--training-mode",
         choices=["market_residual", "baseball_only"],
         required=True,
-        help="Determines if odds features are used. Pretraining should not have odds"
+        help="Determines whether odds features are used."
         )
     parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
@@ -70,21 +69,31 @@ class PreProcessing():
     PRETRAIN_YEARS = [2016, 2017, 2018, 2019]
     FINETUNE_YEARS = [2021, 2022, 2023, 2024, 2025]
 
-    def __init__(self, seasons: List[int], model_type: str, mkt_only: bool = False, args = None):
-        if model_type not in ['xgboost', 'mlp']:
+    def __init__(
+            self,
+            seasons: List[int],
+            config: FeatureConfig,
+            mkt_only: bool = False,
+        ):
+
+        if not isinstance(config, FeatureConfig):
+            raise TypeError("PreProcessing requires a FeatureConfig")
+
+        if config.model_type not in ['xgboost', 'mlp']:
             raise ValueError("Invalid model_type. Expected ['xgboost', 'mlp']")
 
-        self.args = self._normalize_args(args)
-        self.training_mode = self.args.training_mode
-        self.stage = self.args.stage
+        self.config = config
+        self.args = config
+        self.stage = config.stage
+        self.training_mode = config.training_mode
 
-        if self.training_mode == "baseball_only":
-            assert seasons == self.PRETRAIN_YEARS, f"Baseball only mode should only be used for pretraining on 2016 - 2019 data. " \
+        if self.stage == "pretrain":
+            assert seasons == self.PRETRAIN_YEARS, f"Baseball only mode (pretrain) should only be used for pretraining on 2016 - 2019 data. " \
                                                    f"Expected seasons: '{self.PRETRAIN_YEARS}', got '{seasons}'"
         else:
-            assert seasons == self.FINETUNE_YEARS, f"Market residual mode should only be used for finetuning on 2021 - 2025 data. " \
+            assert seasons == self.FINETUNE_YEARS, f"Market residual mode (finetune) should only be used for finetuning on 2021 - 2025 data. " \
                                                    f"Expected seasons: '{self.FINETUNE_YEARS}', got '{seasons}'"
-        self.model_type = model_type
+        self.model_type = config.model_type
         self.seasons = seasons
         self.seasons_str = "_".join(map(str, seasons))
         self.mkt_only = mkt_only
@@ -116,29 +125,6 @@ class PreProcessing():
             'away_pitcher_id', 'home_pitcher_id'
         ]
 
-    @staticmethod
-    def _normalize_args(args):
-        training_mode = getattr(
-            args,
-            "training_mode",
-            getattr(args, "feature_mode", "market_residual"),
-        )
-        stage = getattr(
-            args,
-            "stage",
-            "pretrain" if training_mode == "baseball_only" else "finetune",
-        )
-
-        return SimpleNamespace(
-            training_mode=training_mode,
-            feature_mode=training_mode,
-            stage=stage,
-            batter_halflives=getattr(args, "batter_halflives", (4, 12)),
-            starter_halflives=getattr(args, "starter_halflives", (3, 8)),
-            reliever_halflives=getattr(args, "reliever_halflives", (3, 8)),
-            team_halflives=getattr(args, "team_halflives", (3, 8, 20)),
-        )
-
     def _cache_key(self) -> str:
         halflive_parts = [
             "bat-" + "-".join(map(str, self.args.batter_halflives)),
@@ -154,7 +140,8 @@ class PreProcessing():
             *halflive_parts,
         ])
 
-    def preprocess_feats(self, force_recreate: bool = False, force_recreate_preprocessing: bool = False, clear_log: bool = False) -> Tuple[Dict, DataFrame]:
+    def preprocess_feats(self, force_recreate: bool = False, force_recreate_preprocessing: bool = False, clear_log: bool = False
+                                                                ) -> Tuple[Dict[str, DataFrame | StandardScaler | None], DataFrame]:
         """
         Main preprocessing method with caching functionality.
         
@@ -336,7 +323,7 @@ class PreProcessing():
         )
 
         for year in self.seasons:
-            feat_pipe = FeaturePipeline(year, self.args, logger=pipeline_logger)
+            feat_pipe = FeaturePipeline(year, self.config, logger=pipeline_logger)
             season_feats, odds_data = feat_pipe.start_pipeline(force_recreate, self.mkt_only)
             all_features.append(season_feats)
             all_odds.append(odds_data)
@@ -410,21 +397,27 @@ class PreProcessing():
 
 def main():
     args = create_args()
+    config = FeatureConfig.from_namespace(
+        argparse.Namespace(
+            **vars(args),
+            stage="pretrain" if args.training_mode == "baseball_only" else "finetune",
+        )
+    )
     
     logger = setup_logging("feature_preprocessing", LOG_FILE, args=args)
 
     seasons = (
         PreProcessing.PRETRAIN_YEARS
-        if args.training_mode == "baseball_only"
+        if config.training_mode == "baseball_only"
         else PreProcessing.FINETUNE_YEARS
     )
-    pre_processor = PreProcessing(seasons, model_type=args.model_type, mkt_only=False, args=args)
+    pre_processor = PreProcessing(seasons, config=config, mkt_only=False)
     pre_processor.logger = logger
     
     preprocessed_feats, odds_data = pre_processor.preprocess_feats(
-        force_recreate=args.force_recreate,
-        force_recreate_preprocessing=args.force_recreate_preprocessing,
-        clear_log=args.clear_log
+        force_recreate=config.force_recreate,
+        force_recreate_preprocessing=config.force_recreate_preprocessing,
+        clear_log=config.clear_log
     )
 
 if __name__ == "__main__":

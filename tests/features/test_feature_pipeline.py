@@ -14,9 +14,9 @@ import pytest
 import pandas as pd
 import numpy as np
 from datetime import date, timedelta
-from types import SimpleNamespace
 from unittest.mock import patch
 
+from src.config import FeatureConfig
 from src.data.features.base_feature import BaseFeatures
 from src.data.features.feature_pipeline import FeaturePipeline
 from src.data.features.game_features.odds import Odds
@@ -78,22 +78,26 @@ class TestFeaturePipeline:
 
     @staticmethod
     def _default_args():
-        return SimpleNamespace(
+        return FeatureConfig(
+            training_mode="market_residual",
+            stage="finetune",
+            model_type="xgboost",
             batter_halflives=(3, 10, 25),
             starter_halflives=(3, 8, 20),
             reliever_halflives=(3, 8, 20),
             team_halflives=(3, 8, 20),
-            feature_mode='market_residual'
         )
 
     @staticmethod
     def _pretrain_args():
-        return SimpleNamespace(
+        return FeatureConfig(
+            training_mode="baseball_only",
+            stage="pretrain",
+            model_type="xgboost",
             batter_halflives=(3, 10, 25),
             starter_halflives=(3, 8, 20),
             reliever_halflives=(3, 8, 20),
             team_halflives=(3, 8, 20),
-            feature_mode='baseball_only'
         )
 
     @staticmethod
@@ -278,7 +282,7 @@ class TestFeaturePipeline:
     @pytest.fixture
     def feature_pipeline(self, clean_db):
         """Create a FeaturePipeline instance."""
-        return FeaturePipeline(season=2024, args=self._default_args())
+        return FeaturePipeline(season=2024, config=self._default_args())
 
     @pytest.fixture
     def sample_schedule_data(self, clean_db):
@@ -405,12 +409,12 @@ class TestFeaturePipeline:
 
     def test_init(self):
         """Test FeaturePipeline initialization."""
-        args = self._default_args()
-        pipeline = FeaturePipeline(season=2024, args=args)
+        config = self._default_args()
+        pipeline = FeaturePipeline(season=2024, config=config)
         assert pipeline.season == 2024
         assert hasattr(pipeline, 'cache')
         assert isinstance(pipeline.cache, dict)
-        assert pipeline.args is args
+        assert pipeline.config is config
 
     def test_load_schedule_data(self, feature_pipeline, sample_schedule_data):
         """Test loading schedule data."""
@@ -1362,7 +1366,7 @@ class TestFeaturePipeline:
         mock_get_position.assert_called_once()
 
     def test_baseball_only_mode_has_no_odds_cols(self, feature_pipeline):
-        pipe = FeaturePipeline(season=2024, args=self._pretrain_args())
+        pipe = FeaturePipeline(season=2024, config=self._pretrain_args())
         schedule = self._pipeline_schedule()
         idx = ['game_id', 'game_date', 'dh', 'home_team', 'away_team']
         base_rows = [
@@ -1406,7 +1410,7 @@ class TestFeaturePipeline:
         mock_odds.assert_not_called()
 
     def test_market_residual_mode_requires_odds_and_keeps_market_target(self, feature_pipeline):
-        pipe = FeaturePipeline(season=2024, args=self._default_args())
+        pipe = FeaturePipeline(season=2024, config=self._default_args())
         schedule = self._pipeline_schedule()
         raw_odds = pd.DataFrame({'sportsbook': ['DraftKings']})
         odds_input = pd.DataFrame({'raw': [1]})

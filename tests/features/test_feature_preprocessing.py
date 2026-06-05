@@ -1,14 +1,17 @@
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pandas as pd
+import pytest
 
+from src.config import FeatureConfig
 from src.data.features.feature_preprocessing import PreProcessing
 
 
 def _args(training_mode):
-    return SimpleNamespace(
+    return FeatureConfig(
         training_mode=training_mode,
+        stage="pretrain" if training_mode == "baseball_only" else "finetune",
+        model_type="xgboost",
         batter_halflives=(4, 12),
         starter_halflives=(3, 8),
         reliever_halflives=(3, 8),
@@ -40,8 +43,7 @@ def _season_frame(season, dates):
 def test_preprocessing_split_uses_final_season_for_val_test_cutoff():
     processor = PreProcessing(
         PreProcessing.PRETRAIN_YEARS,
-        model_type="xgboost",
-        args=_args("baseball_only"),
+        config=_args("baseball_only"),
     )
     processor.logger = Mock()
 
@@ -63,45 +65,44 @@ def test_preprocessing_split_uses_final_season_for_val_test_cutoff():
     assert test_df.index.get_level_values("game_date").tolist() == [pd.Timestamp("2019-04-04")]
 
 
-def test_preprocessing_accepts_feature_mode_alias():
-    args = SimpleNamespace(
-        feature_mode="baseball_only",
-        batter_halflives=(4, 12),
-        starter_halflives=(3, 8),
-        reliever_halflives=(3, 8),
-        team_halflives=(3, 8, 20),
-    )
+def test_preprocessing_requires_feature_config():
+    with pytest.raises(TypeError, match="FeatureConfig"):
+        PreProcessing(
+            PreProcessing.PRETRAIN_YEARS,
+            config=None,
+        )
 
+
+def test_preprocessing_uses_dataclass_config_without_mutating_it():
+    config = _args("baseball_only")
     processor = PreProcessing(
         PreProcessing.PRETRAIN_YEARS,
-        model_type="xgboost",
-        args=args,
+        config=config,
     )
 
     assert processor.training_mode == "baseball_only"
-    assert processor.args.feature_mode == "baseball_only"
-    assert not hasattr(args, "training_mode")
+    assert processor.args == config
 
 
-def test_preprocessing_does_not_mutate_training_mode_args():
-    args = _args("market_residual")
+def test_preprocessing_cache_key_uses_stable_dataclass_values():
+    config = _args("market_residual")
 
     processor = PreProcessing(
         PreProcessing.FINETUNE_YEARS,
-        model_type="xgboost",
-        args=args,
+        config=config,
     )
 
-    assert processor.training_mode == "market_residual"
-    assert processor.args.feature_mode == "market_residual"
-    assert not hasattr(args, "feature_mode")
+    assert processor._cache_key() == (
+        "xgboost_finetune_market_residual_seasons-2021_2022_2023_2024_2025_"
+        "bat-4-12_sp-3-8_rp-3-8_team-3-8-20"
+    )
 
 
-def test_preprocessing_default_args_still_work():
+def test_preprocessing_config_defaults_still_work():
+    config = FeatureConfig(stage="finetune", model_type="xgboost")
     processor = PreProcessing(
         PreProcessing.FINETUNE_YEARS,
-        model_type="xgboost",
-        args=None,
+        config=config,
     )
 
     assert processor.training_mode == "market_residual"

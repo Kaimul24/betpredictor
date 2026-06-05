@@ -1,11 +1,221 @@
+from dataclasses import asdict, dataclass, fields, replace
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
 DATABASE_PATH = PROJECT_ROOT / 'src' / 'data' / 'mlb_stats.sqlite'
 SCHEMA_PATH = PROJECT_ROOT / 'src' / 'scrapers' / 'schema.sql'
 FEATURES_CACHE_PATH = PROJECT_ROOT / 'src' / 'data' / 'features' 
+
+
+def _namespace_values(namespace: Any) -> dict[str, Any]:
+    return vars(namespace).copy()
+
+def _select_dataclass_values(cls, values: dict[str, Any]) -> dict[str, Any]:
+    field_names = {field.name for field in fields(cls)}
+    return {key: value for key, value in values.items() if key in field_names}
+
+class ConfigMixin:
+    def to_dict(self) -> dict[str, Any]:
+        def convert(value):
+            if isinstance(value, Path):
+                return str(value)
+            if isinstance(value, tuple):
+                return [convert(item) for item in value]
+            if isinstance(value, list):
+                return [convert(item) for item in value]
+            if isinstance(value, dict):
+                return {key: convert(item) for key, item in value.items()}
+            return value
+
+        return convert(asdict(self))
+
+
+@dataclass(frozen=True)
+class FeatureConfig(ConfigMixin):
+    stage: str
+    training_mode: str = "market_residual"
+    model_type: str = "mlp"
+    force_recreate: bool = False
+    force_recreate_preprocessing: bool = False
+    clear_log: bool = False
+    log: bool = False
+    log_file: str | None = None
+    log_level: str = "info"
+    file_log_level: str = "debug"
+    batter_halflives: tuple[int, ...] = (4, 12)
+    starter_halflives: tuple[int, ...] = (3, 8)
+    reliever_halflives: tuple[int, ...] = (3, 8)
+    team_halflives: tuple[int, ...] = (3, 8, 20)
+
+    def __post_init__(self):
+        if self.training_mode not in {"market_residual", "baseball_only"}:
+            raise ValueError("FeatureConfig training_mode must be market_residual or baseball_only")
+        if self.stage not in {"finetune", "pretrain"}:
+            raise ValueError("FeatureConfig stage must be finetune or pretrain")
+        if self.model_type not in {"xgboost", "mlp"}:
+            raise ValueError("FeatureConfig model_type must be xgboost or mlp")
+        for field_name in (
+            "batter_halflives",
+            "starter_halflives",
+            "reliever_halflives",
+            "team_halflives",
+        ):
+            object.__setattr__(self, field_name, tuple(getattr(self, field_name)))
+
+    @classmethod
+    def from_namespace(cls, namespace: Any) -> "FeatureConfig":
+        values = _select_dataclass_values(cls, _namespace_values(namespace))
+        return cls(**values)
+
+
+@dataclass(frozen=True)
+class XGBoostConfig(ConfigMixin):
+    stage: str
+    training_mode: str = "stacked"
+    retune: bool = False
+    force_recreate: bool = False
+    force_recreate_preprocessing: bool = False
+    clear_log: bool = False
+    log: bool = False
+    log_file: str | None = None
+    batter_halflives: tuple[int, ...] = (4, 12)
+    starter_halflives: tuple[int, ...] = (3, 8)
+    reliever_halflives: tuple[int, ...] = (3, 8)
+    team_halflives: tuple[int, ...] = (3, 8, 20)
+
+    def __post_init__(self):
+        if self.training_mode not in {"stacked", "market_residual", "baseball_only"}:
+            raise ValueError("XGBoostConfig training_mode must be stacked, market_residual, or baseball_only")
+        if self.stage not in {"finetune", "pretrain"}:
+            raise ValueError("XGBoostConfig stage must be finetune or pretrain")
+        for field_name in (
+            "batter_halflives",
+            "starter_halflives",
+            "reliever_halflives",
+            "team_halflives",
+        ):
+            object.__setattr__(self, field_name, tuple(getattr(self, field_name)))
+
+    @classmethod
+    def from_namespace(cls, namespace: Any) -> "XGBoostConfig":
+        values = _select_dataclass_values(cls, _namespace_values(namespace))
+        return cls(**values)
+
+    def for_stage(self, training_mode: str, stage: str) -> "XGBoostConfig":
+        return replace(self, training_mode=training_mode, stage=stage)
+
+    def to_feature_config(
+        self,
+        stage: str,
+        training_mode: str,
+        model_type: str = "xgboost",
+    ) -> FeatureConfig:
+        return FeatureConfig(
+            training_mode=training_mode,
+            stage=stage,
+            model_type=model_type,
+            force_recreate=self.force_recreate,
+            force_recreate_preprocessing=self.force_recreate_preprocessing,
+            clear_log=self.clear_log,
+            log=self.log,
+            log_file=self.log_file,
+            batter_halflives=self.batter_halflives,
+            starter_halflives=self.starter_halflives,
+            reliever_halflives=self.reliever_halflives,
+            team_halflives=self.team_halflives,
+        )
+
+
+@dataclass(frozen=True)
+class NeuralNetworkConfig(ConfigMixin):
+    stage: str
+    training_mode: str = "market_residual"
+    base_hidden_size: int = 256
+    max_residual: float = 0.5
+    alpha: float = 0.7
+    p_drop: float = 0.2
+    train_batch: int = 1024
+    val_batch: int = 8192
+    epochs: int = 100
+    lr: float = 1e-4
+    min_lr: float = 1e-6
+    cosine_scheduler: bool = True
+    retune: bool = False
+    use_hyperparams: bool = False
+    force_recreate: bool = False
+    force_recreate_preprocessing: bool = False
+    clear_log: bool = False
+    log: bool = False
+    log_file: str | None = None
+    batter_halflives: tuple[int, ...] = (4, 12)
+    starter_halflives: tuple[int, ...] = (3, 8)
+    reliever_halflives: tuple[int, ...] = (3, 8)
+    team_halflives: tuple[int, ...] = (3, 8, 20)
+
+    def __post_init__(self):
+        if self.training_mode not in {"stacked", "market_residual", "baseball_only"}:
+            raise ValueError("NeuralNetworkConfig training_mode must be stacked, market_residual, or baseball_only")
+        if self.stage not in {"finetune", "pretrain"}:
+            raise ValueError("NeuralNetworkConfig stage must be finetune or pretrain")
+        for field_name in (
+            "batter_halflives",
+            "starter_halflives",
+            "reliever_halflives",
+            "team_halflives",
+        ):
+            object.__setattr__(self, field_name, tuple(getattr(self, field_name)))
+
+    @classmethod
+    def from_namespace(cls, namespace: Any) -> "NeuralNetworkConfig":
+        values = _select_dataclass_values(cls, _namespace_values(namespace))
+        return cls(**values)
+
+    def for_stage(self, training_mode: str, stage: str) -> "NeuralNetworkConfig":
+        return replace(self, training_mode=training_mode, stage=stage)
+    
+    def to_feature_config(
+        self,
+        stage: str,
+        training_mode: str,
+        model_type: str = "mlp",
+    ) -> FeatureConfig:
+        return FeatureConfig(
+            training_mode=training_mode,
+            stage=stage,
+            model_type=model_type,
+            force_recreate=self.force_recreate,
+            force_recreate_preprocessing=self.force_recreate_preprocessing,
+            clear_log=self.clear_log,
+            log=self.log,
+            log_file=self.log_file,
+            batter_halflives=self.batter_halflives,
+            starter_halflives=self.starter_halflives,
+            reliever_halflives=self.reliever_halflives,
+            team_halflives=self.team_halflives,
+        )
+
+
+@dataclass(frozen=True)
+class TwoHeadNNConfig(NeuralNetworkConfig):
+    device: str = "auto"
+    pretrain_dir: Path = PROJECT_ROOT / "src" / "data" / "models" / "saved_models" / "nn_pretrain_ckpts"
+    finetune_dir: Path = PROJECT_ROOT / "src" / "data" / "models" / "saved_models" / "nn_finetune_ckpts"
+    pretrained_checkpoint: Path | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        object.__setattr__(self, "pretrain_dir", Path(self.pretrain_dir))
+        object.__setattr__(self, "finetune_dir", Path(self.finetune_dir))
+        if self.pretrained_checkpoint is not None:
+            object.__setattr__(self, "pretrained_checkpoint", Path(self.pretrained_checkpoint))
+
+    @classmethod
+    def from_namespace(cls, namespace: Any) -> "TwoHeadNNConfig":
+        values = _select_dataclass_values(cls, _namespace_values(namespace))
+        return cls(**values)
 
 TEAM_TO_TEAM_ID_STATSAPI_MAP = {
     'LAA': 108,

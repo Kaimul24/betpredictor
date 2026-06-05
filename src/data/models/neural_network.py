@@ -1,3 +1,6 @@
+"""
+DEPRECATED, use two_head_nn.py
+"""
 from pandas.core.api import DataFrame as DataFrame
 import pandas as pd
 from typing import Dict, List
@@ -11,8 +14,8 @@ import matplotlib.pyplot as plt
 
 from src.data.models.calibration import select_and_fit_calibrator, save_calibrator, load_calibrator, apply_calibration, plot_calibration
 from src.data.features.feature_preprocessing import PreProcessing
-from src.config import PROJECT_ROOT
-from src.utils import setup_logging
+from src.config import PROJECT_ROOT, NeuralNetworkConfig
+from src.utils import setup_logging, TupleAction
 
 HYPERPARAM_DIR = PROJECT_ROOT / "src" / "data" / "models" / "saved_hyperparameters"
 HYPERPARAM_DIR.mkdir(parents=True, exist_ok=True)
@@ -30,8 +33,12 @@ PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 def create_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description="Neural Network Model Pipeline")
-    parser.add_argument("--retune", action='store_true', help='Retune hyperparameters')
-    parser.add_argument("--use-hyperparams", action=argparse.BooleanOptionalAction, help='Use existing hyperparameters')
+    parser.add_argument(
+        "--training-mode",
+        choices=["market_residual"],
+        default="market_residual",
+        help="Train the legacy MLP as a market-residual model."
+        )
     parser.add_argument("--base-hidden-size", type=int, default=256, help="Base hidden units per layer")
     parser.add_argument("--max-residual", type=float, default=0.5, help="Max market adjustment")
     parser.add_argument("--alpha", type=float, default=0.7, help="Adjustment scaling factor")
@@ -41,6 +48,8 @@ def create_args():
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
     parser.add_argument("--lr", type=float, default=1e-4, help="Initial learning rate")
     parser.add_argument("--min-lr", type=float, default=1e-6, help="Minimum learning rate for cosine annealing")
+    parser.add_argument("--retune", action="store_true", help="Retune hyperparameters")
+    parser.add_argument("--use-hyperparams", action="store_true", help="Use saved hyperparameters")
     parser.add_argument(
         "--cosine-scheduler",
         action=argparse.BooleanOptionalAction,
@@ -52,15 +61,18 @@ def create_args():
     parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
+    parser.add_argument("--batter-halflives", nargs='*', type=int, action=TupleAction, default=(4, 12), help="EWM halflives for batting stats")
+    parser.add_argument("--starter-halflives", nargs='*', type=int, action=TupleAction, default=(3, 8), help="EWM halflives for starting pitching stats")
+    parser.add_argument("--reliever-halflives", nargs='*', type=int, action=TupleAction, default=(3, 8), help="EWM halflives for relief pitching stats")
+    parser.add_argument("--team-halflives", nargs='*', type=int, action=TupleAction, default=(3, 8, 20), help="EWM halflives for team metric stats")
     return parser.parse_args()
 
 def prepare_mlp_data(
+        config: NeuralNetworkConfig,
         model_data: Dict[str, DataFrame] | None = None, 
-        force_recreate: bool = False, 
-        force_recreate_preprocessing: bool = False,
-        train_batch_size: int = 1024,
-        val_batch_size: int = 8192
     ) -> Dict[str, int | DataLoader]:
+    if not isinstance(config, NeuralNetworkConfig):
+        raise TypeError("prepare_mlp_data requires a NeuralNetworkConfig")
 
     def to_tensor(x: DataFrame) -> torch.Tensor:
         return torch.tensor(x.values, dtype=torch.float32)
@@ -70,10 +82,16 @@ def prepare_mlp_data(
         return torch.log(p) - torch.log1p(-p)
     
     if not model_data:
-        model_data, _ = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='mlp', mkt_only=False).preprocess_feats(
-                    force_recreate=force_recreate,
-                    force_recreate_preprocessing=force_recreate_preprocessing,
-            )
+        feature_config = config.to_feature_config(stage="finetune", training_mode="market_residual")
+        model_data, _ = PreProcessing(
+            PreProcessing.FINETUNE_YEARS,
+            config=feature_config,
+            mkt_only=False,
+        ).preprocess_feats(
+            force_recreate=config.force_recreate,
+            force_recreate_preprocessing=config.force_recreate_preprocessing,
+            clear_log=config.clear_log,
+        )
 
     p_mkt_train = model_data["X_train"]["p_open_home_median_nv"].to_numpy()
     p_mkt_test = model_data["X_test"]["p_open_home_median_nv"].to_numpy()
@@ -102,9 +120,9 @@ def prepare_mlp_data(
     val_ds = TensorDataset(to_tensor(model_data['X_val']), base_val, to_tensor(model_data['y_val']))
     test_ds = TensorDataset(to_tensor(model_data['X_test']), base_test, to_tensor(model_data['y_test']))
 
-    train_dl = DataLoader(train_ds, batch_size=train_batch_size, shuffle=True, pin_memory=False, num_workers=2)
-    val_dl = DataLoader(val_ds, batch_size=val_batch_size, shuffle=False, pin_memory=False, num_workers=2)
-    test_dl = DataLoader(test_ds, batch_size=val_batch_size, shuffle=False, pin_memory=False, num_workers=2)
+    train_dl = DataLoader(train_ds, batch_size=config.train_batch, shuffle=False, pin_memory=False, num_workers=2)
+    val_dl = DataLoader(val_ds, batch_size=config.val_batch, shuffle=False, pin_memory=False, num_workers=2)
+    test_dl = DataLoader(test_ds, batch_size=config.val_batch, shuffle=False, pin_memory=False, num_workers=2)
 
     return {
         'in_dim': model_data["X_train"].shape[1],
@@ -141,19 +159,6 @@ class NeuralNetwork(nn.Module):
             nn.Linear(base_hidden_size // 2, 1),
         )
 
-        self.small_net = nn.Sequential(
-            nn.Linear(in_dim, 64),
-            nn.Dropout(p_drop),
-            nn.ReLU(),
-
-            nn.Linear(64, 16),
-            nn.Dropout(p_drop),
-            nn.ReLU(),
-
-            nn.Linear(16, 1),
-            nn.Dropout(p_drop),
-        )
-
         nn.init.zeros_(self.net[-1].weight)
         nn.init.zeros_(self.net[-1].bias)
 
@@ -165,21 +170,22 @@ class NeuralNetwork(nn.Module):
 class NNWrapper():
     def __init__(
             self, 
-            model_args, 
+            config: NeuralNetworkConfig,
             in_dim: int, 
             train_dl: DataLoader, 
             val_dl: DataLoader, 
-            test_dl: DataLoader,
-            max_residual: float = 0.5, 
-            alpha: float = 0.4):
+            test_dl: DataLoader):
+        if not isinstance(config, NeuralNetworkConfig):
+            raise TypeError("NNWrapper requires a NeuralNetworkConfig")
         
         self.device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
-        self.epochs = model_args.epochs
-        self.max_residual = max_residual
-        self.alpha = alpha
-        self.base_hidden_size = model_args.base_hidden_size if model_args.base_hidden_size is not None else 256
-        self.p_drop = model_args.p_drop if model_args.p_drop is not None else 0.2
-        self.model_args = model_args
+        self.epochs = config.epochs
+        self.max_residual = config.max_residual
+        self.alpha = config.alpha
+        self.base_hidden_size = config.base_hidden_size
+        self.p_drop = config.p_drop
+        self.config = config
+        self.model_args = config
         self.hyperparam_path = HYPERPARAM_DIR / "nn_hyperparams.json"
         
         self.in_dim = in_dim
@@ -475,13 +481,14 @@ class NNWrapper():
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
+            'config': self.config.to_dict(),
         }, model_path)
         print(f" Successfully saved Neural Network model to {model_path}")
 
     def load_model(self):
         model_path = SAVED_MODEL_DIR / "saved_nn.pt"
         if model_path.exists():
-            checkpoint = torch.load(model_path, map_location=self.device)
+            checkpoint = torch.load(model_path, map_location=self.device, weights_only=True)
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             print(f" Successfully loaded Neural Network model")
@@ -491,22 +498,21 @@ class NNWrapper():
         return None
 
 if __name__ == "__main__":
-    model_args = create_args()
+    args = create_args()
+    config = NeuralNetworkConfig.from_namespace(
+        argparse.Namespace(**vars(args), stage="finetune")
+    )
 
     data = prepare_mlp_data(
-        force_recreate=model_args.force_recreate, 
-        force_recreate_preprocessing=model_args.force_recreate_preprocessing,
-        train_batch_size=model_args.train_batch,
-        val_batch_size=model_args.val_batch)
+        config=config,
+    )
     
     mlp = NNWrapper(
-        model_args=model_args, 
+        config=config,
         in_dim=data['in_dim'], 
         train_dl=data['train_dl'], 
         val_dl=data['val_dl'], 
         test_dl=data['test_dl'],
-        max_residual=model_args.max_residual,
-        alpha=model_args.alpha,
     )
     mlp.train_and_eval_model()
 

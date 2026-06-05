@@ -1,7 +1,6 @@
 from pandas.core.api import DataFrame as DataFrame
 import pandas as pd
 import argparse, json
-from types import SimpleNamespace
 import xgboost as xgb
 import optuna
 import numpy as np
@@ -17,8 +16,8 @@ from src.data.models.two_stage import (
     add_pretrained_logit_feature,
 )
 from src.data.features.feature_preprocessing import PreProcessing
-from src.config import PROJECT_ROOT
-from src.utils import setup_logging
+from src.config import PROJECT_ROOT, XGBoostConfig
+from src.utils import setup_logging, TupleAction
 
 LOG_DIR = PROJECT_ROOT / "src" / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -48,6 +47,10 @@ def create_args():
     parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
+    parser.add_argument("--batter-halflives", nargs='*', type=int, action=TupleAction, default=(4, 12), help="EWM halflives for batting stats")
+    parser.add_argument("--starter-halflives", nargs='*', type=int, action=TupleAction, default=(3, 8), help="EWM halflives for starting pitching stats")
+    parser.add_argument("--reliever-halflives", nargs='*', type=int, action=TupleAction, default=(3, 8), help="EWM halflives for relief pitching stats")
+    parser.add_argument("--team-halflives", nargs='*', type=int, action=TupleAction, default=(3, 8, 20), help="EWM halflives for team metric stats")
     parser.add_argument(
         "--training-mode",
         choices=["stacked", "market_residual", "baseball_only"],
@@ -62,8 +65,14 @@ def create_args():
 
 class XGBoostModel:
 
-    def __init__(self, model_args, all_data: Dict, logger=None, mkt_only: bool = False):
-        self.model_args = self._normalize_args(model_args, all_data)
+    def __init__(self, config: XGBoostConfig, all_data: Dict, logger=None, mkt_only: bool = False):
+        if not isinstance(config, XGBoostConfig):
+            raise TypeError("XGBoostModel requires an XGBoostConfig")
+        if config.training_mode == "stacked":
+            raise ValueError("XGBoostModel requires a stage-specific config, not stacked")
+
+        self.config = config
+        self.model_args = config
         self.mkt_only = mkt_only
         if logger == None:
             self.logger = setup_logging("xgboost_model", LOG_FILE)
@@ -73,12 +82,8 @@ class XGBoostModel:
         if all_data == {}:
             raise ValueError(f" No data was supplied.")
 
-        self.training_mode = self.model_args.training_mode
-        self.stage = getattr(
-            self.model_args,
-            "stage",
-            "pretrain" if self.training_mode == "baseball_only" else "finetune",
-        )
+        self.training_mode = config.training_mode
+        self.stage = config.stage
         self.uses_market_base_margin = self.training_mode == "market_residual" and not self.mkt_only
         self.hyperparam_path = HYPERPARAM_DIR / f"xgboost_hyperparams_{self.stage}_{self.training_mode}.json"
         self.model_path = self._model_path()
@@ -145,23 +150,6 @@ class XGBoostModel:
 
         self.dval_es = dval_es
         self.dcal = dcal
-
-    @staticmethod
-    def _normalize_args(model_args, all_data: Dict):
-        if model_args is not None:
-            if not hasattr(model_args, "training_mode"):
-                has_market = MARKET_PROBABILITY_COL in all_data.get("X_train", pd.DataFrame()).columns
-                model_args.training_mode = "market_residual" if has_market else "baseball_only"
-            if not hasattr(model_args, "retune"):
-                model_args.retune = False
-            return model_args
-
-        has_market = MARKET_PROBABILITY_COL in all_data.get("X_train", pd.DataFrame()).columns
-        return SimpleNamespace(
-            training_mode="market_residual" if has_market else "baseball_only",
-            stage="finetune" if has_market else "pretrain",
-            retune=False,
-        )
 
     def _model_path(self):
         if self.training_mode == "baseball_only":
@@ -580,34 +568,27 @@ class XGBoostModel:
         self.logger.warning(f" No XGBoost model found")
         return None
 
-def args_for_training_mode(model_args, training_mode: str, stage: str):
-    args_dict = vars(model_args).copy() if model_args is not None else {}
-    args_dict["training_mode"] = training_mode
-    args_dict["feature_mode"] = training_mode
-    args_dict["stage"] = stage
-    args_dict.setdefault("retune", False)
-    args_dict.setdefault("force_recreate", False)
-    args_dict.setdefault("force_recreate_preprocessing", False)
-    args_dict.setdefault("clear_log", False)
-    return SimpleNamespace(**args_dict)
+def config_for_training_mode(config: XGBoostConfig, training_mode: str, stage: str) -> XGBoostConfig:
+    return config.for_stage(training_mode=training_mode, stage=stage)
 
-def preprocess_for_xgboost(model_args, training_mode: str, stage: str):
-    args = args_for_training_mode(model_args, training_mode=training_mode, stage=stage)
+def preprocess_for_xgboost(config: XGBoostConfig, training_mode: str, stage: str):
+    stage_config = config_for_training_mode(config, training_mode=training_mode, stage=stage)
+    feature_config = stage_config.to_feature_config(stage=stage, training_mode=training_mode)
     seasons = (
         PreProcessing.PRETRAIN_YEARS
         if training_mode == "baseball_only"
         else PreProcessing.FINETUNE_YEARS
     )
-    return PreProcessing(seasons, model_type="xgboost", mkt_only=False, args=args).preprocess_feats(
-        force_recreate=args.force_recreate,
-        force_recreate_preprocessing=args.force_recreate_preprocessing,
-        clear_log=args.clear_log,
+    return PreProcessing(seasons, config=feature_config, mkt_only=False).preprocess_feats(
+        force_recreate=stage_config.force_recreate,
+        force_recreate_preprocessing=stage_config.force_recreate_preprocessing,
+        clear_log=stage_config.clear_log,
     )
 
-def train_baseball_only_xgboost(model_args, logger):
-    args = args_for_training_mode(model_args, training_mode="baseball_only", stage="pretrain")
-    model_data, _ = preprocess_for_xgboost(args, training_mode="baseball_only", stage="pretrain")
-    model = XGBoostModel(args, model_data, logger, mkt_only=False)
+def train_baseball_only_xgboost(config: XGBoostConfig, logger):
+    stage_config = config_for_training_mode(config, training_mode="baseball_only", stage="pretrain")
+    model_data, _ = preprocess_for_xgboost(stage_config, training_mode="baseball_only", stage="pretrain")
+    model = XGBoostModel(stage_config, model_data, logger, mkt_only=False)
     return model.train_and_eval_model()
 
 def add_pretrained_xgboost_logits(model_data: Dict, pretrained_model: xgb.Booster) -> Dict:
@@ -623,33 +604,39 @@ def add_pretrained_xgboost_logits(model_data: Dict, pretrained_model: xgb.Booste
         XGBoostModel.logit,
     )
 
-def train_market_residual_xgboost(model_args, logger, pretrained_model: xgb.Booster | None = None):
-    args = args_for_training_mode(model_args, training_mode="market_residual", stage="finetune")
-    model_data, odds_data = preprocess_for_xgboost(args, training_mode="market_residual", stage="finetune")
+def train_market_residual_xgboost(config: XGBoostConfig, logger, pretrained_model: xgb.Booster | None = None):
+    stage_config = config_for_training_mode(config, training_mode="market_residual", stage="finetune")
+    model_data, odds_data = preprocess_for_xgboost(stage_config, training_mode="market_residual", stage="finetune")
     if pretrained_model is not None:
         model_data = add_pretrained_xgboost_logits(model_data, pretrained_model)
 
-    model = XGBoostModel(args, model_data, logger, mkt_only=False)
+    model = XGBoostModel(stage_config, model_data, logger, mkt_only=False)
     trained_model = model.train_and_eval_model()
     test_pred = model.predict(trained_model)
     return trained_model, test_pred, odds_data
 
 def main():
-    model_args = create_args()
-    logger = setup_logging("xgboost_model", LOG_FILE, args=model_args)
+    args = create_args()
+    config = XGBoostConfig.from_namespace(
+        argparse.Namespace(
+            **vars(args),
+            stage="pretrain" if args.training_mode == "baseball_only" else "finetune",
+        )
+    )
+    logger = setup_logging("xgboost_model", LOG_FILE, args=args)
     logger.info("="*75 + "XGBOOST MODEL" + "="*75)
 
-    if model_args.training_mode == "stacked":
-        pretrained_model = train_baseball_only_xgboost(model_args, logger)
-        train_market_residual_xgboost(model_args, logger, pretrained_model=pretrained_model)
-    elif model_args.training_mode == "baseball_only":
-        args = args_for_training_mode(model_args, training_mode="baseball_only", stage="pretrain")
-        model_data, _ = preprocess_for_xgboost(args, training_mode="baseball_only", stage="pretrain")
-        model = XGBoostModel(args, model_data, logger, mkt_only=False)
+    if config.training_mode == "stacked":
+        pretrained_model = train_baseball_only_xgboost(config, logger)
+        train_market_residual_xgboost(config, logger, pretrained_model=pretrained_model)
+    elif config.training_mode == "baseball_only":
+        stage_config = config_for_training_mode(config, training_mode="baseball_only", stage="pretrain")
+        model_data, _ = preprocess_for_xgboost(stage_config, training_mode="baseball_only", stage="pretrain")
+        model = XGBoostModel(stage_config, model_data, logger, mkt_only=False)
         trained_model = model.train_and_eval_model()
         model.predict(trained_model)
     else:
-        train_market_residual_xgboost(model_args, logger)
+        train_market_residual_xgboost(config, logger)
 
 if __name__ == "__main__":
     main()

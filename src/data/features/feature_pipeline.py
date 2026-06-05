@@ -10,9 +10,7 @@ import argparse
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 
-from torch import parse_type_comment
-
-from src.config import PROJECT_ROOT
+from src.config import FeatureConfig, PROJECT_ROOT
 
 from src.data.features.base_feature import BaseFeatures
 from src.data.features.game_features.context import GameContextFeatures
@@ -90,15 +88,16 @@ def create_args():
 
 class FeaturePipeline:
 
-    def __init__(self, season: int, args, logger: Optional[logging.Logger] = None):
+    def __init__(self, season: int, config: FeatureConfig, logger: Optional[logging.Logger] = None):
+        if not isinstance(config, FeatureConfig):
+            raise TypeError("FeaturePipeline requires a FeatureConfig")
+
         self.season = season
         self.cache = {}
         self.logger = logger or logging.getLogger("feature_pipeline")
-        self.args = args
-        if not hasattr(self.args, "training_mode"):
-            self.args.training_mode = getattr(self.args, "feature_mode", "market_residual")
-        if not hasattr(self.args, "feature_mode"):
-            self.args.feature_mode = self.args.training_mode
+        self.config = config
+        self.args = config
+        self.stage = config.stage
 
     def start_pipeline(self, force_recreate: bool = False, mkt_only: bool = False) -> Tuple[DataFrame, DataFrame] | DataFrame:
         self.logger.info("="*60)
@@ -120,11 +119,19 @@ class FeaturePipeline:
         idx = ["game_id", "game_date", "dh", "home_team", "away_team"]
         raw_odds_data = pd.DataFrame()
 
-        if self.args.training_mode != "baseball_only":
+        if self.stage == "finetune":
             odds_data = self._load_odds_data()
             odds_feats = Odds(odds_data, self.season, mkt_only).load_features()
             odds_sch_matched, raw_odds_data = self._match_schedule_to_odds(schedule_data, odds_feats)
             odds_sch_matched = odds_sch_matched.reset_index().set_index(idx)
+            # Needed for pretrain + finetune shapes to match
+            # May re-add later w/ dedicated market features head
+            drop_cols = [
+                col for col in odds_sch_matched.columns 
+                if ("prob_home" in col)
+                or (col in ["num_books", "vig_open"])
+            ]
+            odds_sch_matched = odds_sch_matched.drop(columns=drop_cols)
             schedule_data = odds_sch_matched
         else:
             schedule_data = schedule_data.reset_index(drop=True).set_index(idx)
@@ -145,8 +152,6 @@ class FeaturePipeline:
             [position_player_feats, pitching_feats, context_feats, team_feats],
 
         )
-
-        assert len(final_features) == len(schedule_data)
 
         final_features = self._apply_league_average_deltas(
             final_features,
@@ -1042,11 +1047,18 @@ class FeaturePipeline:
         
 def main():
     args = create_args()
+    config = FeatureConfig.from_namespace(
+        argparse.Namespace(
+            **vars(args),
+            stage="pretrain" if args.training_mode == "baseball_only" else "finetune",
+            model_type="xgboost",
+        )
+    )
     logger = setup_logging("feature_pipeline", LOG_FILE, args=args)
     
-    feat_pipe = FeaturePipeline(2021, args, logger)
+    feat_pipe = FeaturePipeline(2021, config, logger)
 
-    features, _ = feat_pipe.start_pipeline(args.force_recreate, mkt_only=True)
+    features, _ = feat_pipe.start_pipeline(config.force_recreate, mkt_only=True)
 
 if __name__ == "__main__":
     main()

@@ -1,9 +1,10 @@
-from types import SimpleNamespace
+from argparse import Namespace
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from src.config import XGBoostConfig
 from src.data.models.two_stage import (
     MARKET_PROBABILITY_COL,
     PRETRAINED_BASEBALL_LOGIT_COL,
@@ -15,7 +16,7 @@ from src.data.models.xgboost_model import XGBoostModel, add_pretrained_xgboost_l
 
 
 def _model_args(training_mode, stage):
-    return SimpleNamespace(training_mode=training_mode, stage=stage, retune=False)
+    return XGBoostConfig(training_mode=training_mode, stage=stage, retune=False)
 
 
 def _model_data(include_market):
@@ -52,6 +53,24 @@ def test_xgboost_baseball_only_accepts_data_without_market_probability():
     assert model.uses_market_base_margin is False
     assert model.p_mkt_train is None
     assert MARKET_PROBABILITY_COL not in model.X_train.columns
+
+
+def test_xgboost_config_converts_from_cli_namespace():
+    config = XGBoostConfig.from_namespace(
+        Namespace(
+            training_mode="market_residual",
+            stage="finetune",
+            retune=True,
+            force_recreate=True,
+            batter_halflives=(3, 10),
+        )
+    )
+
+    assert config.training_mode == "market_residual"
+    assert config.stage == "finetune"
+    assert config.retune is True
+    assert config.force_recreate is True
+    assert config.batter_halflives == (3, 10)
 
 
 def test_xgboost_market_residual_requires_market_probability():

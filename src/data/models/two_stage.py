@@ -9,12 +9,13 @@ MARKET_FEATURE_COLUMNS = {
     "vig_open",
     "num_books",
     "logit_prob_home_std_nv",
-    "home_opening_logit_temp",
 }
 MARKET_FEATURE_PREFIXES = (
     "p_open_",
     "home_opening_prob_",
     "away_opening_prob_",
+    "home_opening_logit_",
+    "away_opening_logit_",
 )
 
 def is_market_feature_column(column: str) -> bool:
