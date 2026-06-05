@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 import argparse
 import numpy as np
 
-from src.data.feature_preprocessing import PreProcessing
+from src.data.features.feature_preprocessing import PreProcessing
 from src.data.models.xgboost_model import XGBoostModel
-from src.config import PROJECT_ROOT
+from src.config import FeatureConfig, PROJECT_ROOT, XGBoostConfig
 from src.utils import setup_logging
 
 load_dotenv()
@@ -43,7 +43,8 @@ class ExpectedReturn:
         """
         Initializes, loads in, and predicts on the test set of an existing model  
         """
-        model = XGBoostModel(model_args=None, all_data=self.data, mkt_only=self.mkt_only)
+        config = XGBoostConfig(training_mode="market_residual", stage="finetune")
+        model = XGBoostModel(config=config, all_data=self.data, mkt_only=self.mkt_only)
         pred = model.predict()
 
         df = DataFrame(self.data['y_test']).copy()
@@ -140,7 +141,16 @@ def main():
     logger = setup_logging('expected_return', log_file=LOG_FILE, args=args)
 
     mkt_only = False
-    model_data, odds_data = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='xgboost', mkt_only=mkt_only).preprocess_feats()
+    feature_config = FeatureConfig(
+        training_mode="market_residual",
+        stage="finetune",
+        model_type="xgboost",
+    )
+    model_data, odds_data = PreProcessing(
+        PreProcessing.FINETUNE_YEARS,
+        config=feature_config,
+        mkt_only=mkt_only,
+    ).preprocess_feats()
 
     exp_ret = ExpectedReturn(model_data=model_data, odds_data=odds_data, logger=logger, mkt_only=mkt_only)
 

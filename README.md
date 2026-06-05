@@ -39,6 +39,12 @@ Install
 4) Install Playwright browser (for scrapy-playwright)
 - `python -m playwright install chromium`
 
+5) Refresh FanGraphs browser session when needed
+- `uv run python -m src.tools.refresh_fangraphs_session`
+- Complete the browser verification in the opened Chromium window, then press Enter
+  in the terminal. This saves a temporary Playwright storage state for FanGraphs
+  spiders.
+
 
 Database and Data Ingestion
 The project uses a single SQLite database at `src/data/mlb_stats.sqlite` defined in `src/config.py`.
@@ -57,7 +63,10 @@ The project uses a single SQLite database at `src/data/mlb_stats.sqlite` defined
     - Park factors: `scrapy crawl park_factor`
   - Notes:
     - Pipelines write directly into SQLite and will drop/recreate some tables (e.g., odds) for consistency.
-    - Playwright must be installed and able to launch headless Chromium.
+    - Playwright must be installed and able to launch Chromium.
+    - FanGraphs spiders (`stats`, `lineups`, `league_avg`) use the saved browser
+      session from `src.tools.refresh_fangraphs_session`. If FanGraphs returns a
+      verification prompt or 403, refresh that session and rerun the spider.
     - The date ranges per season are controlled in `src/config.py:DATES`.
 
 

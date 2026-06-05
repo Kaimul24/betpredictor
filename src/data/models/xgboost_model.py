@@ -1,6 +1,6 @@
 from pandas.core.api import DataFrame as DataFrame
 import pandas as pd
-import argparse, json, os
+import argparse, json
 import xgboost as xgb
 import optuna
 import numpy as np
@@ -11,9 +11,13 @@ from typing import Dict
 from tqdm import tqdm
 
 from src.data.models.calibration import select_and_fit_calibrator, save_calibrator, load_calibrator, apply_calibration, plot_calibration
+from src.data.models.two_stage import (
+    MARKET_PROBABILITY_COL,
+    add_pretrained_logit_feature,
+)
 from src.data.features.feature_preprocessing import PreProcessing
-from src.config import PROJECT_ROOT
-from src.utils import setup_logging
+from src.config import PROJECT_ROOT, XGBoostConfig
+from src.utils import setup_logging, TupleAction
 
 LOG_DIR = PROJECT_ROOT / "src" / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -31,6 +35,9 @@ PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 CAL_DIR = PROJECT_ROOT / "src" / "data" / "models" / "calibrators"
 CAL_DIR.mkdir(parents=True, exist_ok=True)
 
+BASEBALL_ONLY_MODEL_NAME = "saved_xgboost_baseball_only.json"
+FINAL_MODEL_NAME = "saved_xgboost.json"
+
 def create_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description="XGBoost Model Pipeline")
@@ -40,48 +47,76 @@ def create_args():
     parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
+    parser.add_argument("--batter-halflives", nargs='*', type=int, action=TupleAction, default=(4, 12), help="EWM halflives for batting stats")
+    parser.add_argument("--starter-halflives", nargs='*', type=int, action=TupleAction, default=(3, 8), help="EWM halflives for starting pitching stats")
+    parser.add_argument("--reliever-halflives", nargs='*', type=int, action=TupleAction, default=(3, 8), help="EWM halflives for relief pitching stats")
+    parser.add_argument("--team-halflives", nargs='*', type=int, action=TupleAction, default=(3, 8, 20), help="EWM halflives for team metric stats")
+    parser.add_argument(
+        "--training-mode",
+        choices=["stacked", "market_residual", "baseball_only"],
+        default="stacked",
+        help=(
+            "stacked pretrains a baseball-only model on 2016-2019, then finetunes "
+            "a 2021-2025 market-residual model. Use baseball_only or "
+            "market_residual to run a single stage directly."
+        )
+        )
     return parser.parse_args()
 
 class XGBoostModel:
 
-    def __init__(self, model_args, all_data: Dict, logger=None, mkt_only: bool = False):
-        self.model_args = model_args
-        self.mkt_only = mkt_only
+    def __init__(self, config: XGBoostConfig, all_data: Dict, logger=None, mkt_only: bool = False):
+        if not isinstance(config, XGBoostConfig):
+            raise TypeError("XGBoostModel requires an XGBoostConfig")
+        if config.training_mode == "stacked":
+            raise ValueError("XGBoostModel requires a stage-specific config, not stacked")
 
+        self.config = config
+        self.model_args = config
+        self.mkt_only = mkt_only
         if logger == None:
             self.logger = setup_logging("xgboost_model", LOG_FILE)
         else:
             self.logger = logger
 
-        self.hyperparam_path = HYPERPARAM_DIR / "xgboost_hyperparams.json"       
-
         if all_data == {}:
             raise ValueError(f" No data was supplied.")
 
-        X_train = all_data['X_train']
-        y_train = all_data['y_train']
-        X_val = all_data['X_val']
-        y_val = all_data['y_val']
-        X_test = all_data['X_test']
-        y_test = all_data['y_test']
+        self.training_mode = config.training_mode
+        self.stage = config.stage
+        self.uses_market_base_margin = self.training_mode == "market_residual" and not self.mkt_only
+        self.hyperparam_path = HYPERPARAM_DIR / f"xgboost_hyperparams_{self.stage}_{self.training_mode}.json"
+        self.model_path = self._model_path()
+        self.calibrator_path = self._calibrator_path()
 
-        p_mkt_train = X_train["p_open_home_median_nv"].to_numpy()
-        p_mkt_test = X_test["p_open_home_median_nv"].to_numpy()
-        p_mkt_val = X_val["p_open_home_median_nv"].to_numpy()
-
-        self.p_mkt_train = p_mkt_train
-        self.p_mkt_val   = p_mkt_val
-        self.p_mkt_test  = p_mkt_test
+        X_train = all_data['X_train'].copy()
+        y_train = all_data['y_train'].copy()
+        X_val = all_data['X_val'].copy()
+        y_val = all_data['y_val'].copy()
+        X_test = all_data['X_test'].copy()
+        y_test = all_data['y_test'].copy()
 
         n_val = len(y_val)
         cutoff = int(0.5 * n_val)
 
         self.val_cutoff = cutoff
+        self.p_mkt_train = None
+        self.p_mkt_val = None
+        self.p_mkt_test = None
 
-        if not self.mkt_only:
-            X_train.drop(columns=["p_open_home_median_nv"], inplace=True)
-            X_val.drop(columns=["p_open_home_median_nv"], inplace=True)
-            X_test.drop(columns=["p_open_home_median_nv"], inplace=True)
+        if self.uses_market_base_margin:
+            self._require_market_probability_column(X_train, X_val, X_test)
+            p_mkt_train = X_train[MARKET_PROBABILITY_COL].to_numpy()
+            p_mkt_test = X_test[MARKET_PROBABILITY_COL].to_numpy()
+            p_mkt_val = X_val[MARKET_PROBABILITY_COL].to_numpy()
+
+            self.p_mkt_train = p_mkt_train
+            self.p_mkt_val = p_mkt_val
+            self.p_mkt_test = p_mkt_test
+
+            X_train = X_train.drop(columns=[MARKET_PROBABILITY_COL])
+            X_val = X_val.drop(columns=[MARKET_PROBABILITY_COL])
+            X_test = X_test.drop(columns=[MARKET_PROBABILITY_COL])
 
             dtrain = xgb.DMatrix(X_train, label=y_train, base_margin=XGBoostModel.logit(p_mkt_train))
             dtest = xgb.DMatrix(X_test, label=y_test, base_margin=XGBoostModel.logit(p_mkt_test))
@@ -89,7 +124,10 @@ class XGBoostModel:
             dval_es = xgb.DMatrix(X_val[:cutoff], label=y_val[:cutoff], base_margin=XGBoostModel.logit(p_mkt_val[:cutoff]))
             dcal = xgb.DMatrix(X_val[cutoff:], label=y_val[cutoff:], base_margin=XGBoostModel.logit(p_mkt_val[cutoff:]))
         else:
-            
+            X_train = X_train.drop(columns=[MARKET_PROBABILITY_COL], errors="ignore")
+            X_val = X_val.drop(columns=[MARKET_PROBABILITY_COL], errors="ignore")
+            X_test = X_test.drop(columns=[MARKET_PROBABILITY_COL], errors="ignore")
+
             dtrain = xgb.DMatrix(X_train, label=y_train)
             dtest = xgb.DMatrix(X_test, label=y_test)
             dval_es = xgb.DMatrix(X_val[:cutoff], label=y_val[:cutoff])
@@ -112,6 +150,24 @@ class XGBoostModel:
 
         self.dval_es = dval_es
         self.dcal = dcal
+
+    def _model_path(self):
+        if self.training_mode == "baseball_only":
+            return SAVED_MODEL_DIR / BASEBALL_ONLY_MODEL_NAME
+        return SAVED_MODEL_DIR / FINAL_MODEL_NAME
+
+    def _calibrator_path(self):
+        if self.training_mode == "baseball_only":
+            return CAL_DIR / "xgb_calibrator_baseball_only.json"
+        return CAL_DIR / "xgb_calibrator.json"
+
+    def _require_market_probability_column(self, *frames: DataFrame) -> None:
+        for frame in frames:
+            if MARKET_PROBABILITY_COL not in frame.columns:
+                raise ValueError(
+                    f"{MARKET_PROBABILITY_COL} is required for market_residual XGBoost training. "
+                    "Use baseball_only mode for pretraining data without odds."
+                )
 
     @staticmethod
     def logit(p, eps=1e-6):
@@ -311,7 +367,7 @@ class XGBoostModel:
                     'nthread': 12, 
             }
         
-        all_params = {**BASE_PARAMS, **hyperparams}
+        all_params = {**BASE_PARAMS, **(hyperparams or {})}
 
         self.logger.info(" Training XGBoost model on CPU...")
         
@@ -340,7 +396,8 @@ class XGBoostModel:
         self.logger.info(f" Saved calibration curve (\"val_es\") to {out_path_curve}")
 
         self._percentile_summary(p_es, label="val_es (pre-cal)")
-        self._plot_logit_delta(p_es, self.p_mkt_val[:self.val_cutoff], split="val_es")
+        if self.uses_market_base_margin:
+            self._plot_logit_delta(p_es, self.p_mkt_val[:self.val_cutoff], split="val_es")
 
         self.logger.info(" Predictions on calibration set...")
         p_cal_raw = bst.predict(self.dcal, iteration_range=(0, bst.best_iteration + 1))
@@ -354,29 +411,42 @@ class XGBoostModel:
         self.logger.info(f" Val(CAL) Pre-Calibration Brier:   {brier_cal_pre}")
 
         self._percentile_summary(p_cal_raw, label="val_cal (pre-cal)")
-        self._plot_logit_delta(p_cal_raw, self.p_mkt_val[self.val_cutoff:], split="val_cal_pre")
+        if self.uses_market_base_margin:
+            self._plot_logit_delta(p_cal_raw, self.p_mkt_val[self.val_cutoff:], split="val_cal_pre")
 
         min_bin_size = 100
         filepath = PLOTS_DIR / 'xgboost_calibration'
         out_path_curve = plot_calibration(self.y_cal, p_cal_raw, split="pre_cal", filepath=filepath, n_bins=25, min_bin_size=min_bin_size)
 
-        calibrator, metrics = select_and_fit_calibrator(
-            y_cal=self.y_cal,
-            p_cal=p_cal_raw,
-            p_mkt_cal=self.p_mkt_val[self.val_cutoff:],
-            methods=("platt", "temperature"),
-            selection_metric="logloss",
-            min_bin_size=min_bin_size,
-            n_bins=25,
-            strategy="quantile",
-        )
+        if self.uses_market_base_margin:
+            calibrator, metrics = select_and_fit_calibrator(
+                y_cal=self.y_cal,
+                p_cal=p_cal_raw,
+                p_mkt_cal=self.p_mkt_val[self.val_cutoff:],
+                methods=("platt", "temperature"),
+                selection_metric="logloss",
+                min_bin_size=min_bin_size,
+                n_bins=25,
+                strategy="quantile",
+            )
+            p_cal_calibrated = apply_calibration(calibrator, p_cal_raw, self.p_mkt_val[self.val_cutoff:])
+        else:
+            calibrator, metrics = select_and_fit_calibrator(
+                y_cal=self.y_cal,
+                p_cal=p_cal_raw,
+                methods=("isotonic",),
+                selection_metric="logloss",
+                min_bin_size=min_bin_size,
+                n_bins=25,
+                strategy="quantile",
+            )
+            p_cal_calibrated = apply_calibration(calibrator, p_cal_raw)
         
         self.logger.info(f" Calibration candidates: {metrics}")
         self.logger.info(f" Best calibrator: {calibrator}")
-        save_calibrator(calibrator, str(CAL_DIR / "xgb_calibrator.json"))
+        save_calibrator(calibrator, str(self.calibrator_path))
 
         self.logger.info(" Evaluating calibrated predictions on calibration set...")
-        p_cal_calibrated = apply_calibration(calibrator, p_cal_raw, self.p_mkt_val[self.val_cutoff:])
         
         ll_cal_after = log_loss(self.y_cal, p_cal_calibrated)
         auc_cal_after = roc_auc_score(self.y_cal, p_cal_calibrated)
@@ -397,32 +467,36 @@ class XGBoostModel:
         self.logger.info(f" Saved calibration curve (\"cal_after\") to {out_path_curve}")
 
         self._percentile_summary(p_cal_calibrated, label="val_cal (post-cal)")
-        self._plot_logit_delta(p_cal_calibrated, self.p_mkt_val[self.val_cutoff:], split="val_cal_post")
+        if self.uses_market_base_margin:
+            self._plot_logit_delta(p_cal_calibrated, self.p_mkt_val[self.val_cutoff:], split="val_cal_post")
 
         combined_X_train = pd.concat([self.X_train, self.X_val])
         combined_y_train = pd.concat([self.y_train, self.y_val])
-        combined_p_mkt = pd.concat([pd.Series(self.p_mkt_train), pd.Series(self.p_mkt_val)])
 
-        combined_dtrain = xgb.DMatrix(data=combined_X_train, label=combined_y_train, base_margin=XGBoostModel.logit(combined_p_mkt))
+        if self.uses_market_base_margin:
+            combined_p_mkt = np.concatenate([self.p_mkt_train, self.p_mkt_val])
+            combined_dtrain = xgb.DMatrix(data=combined_X_train, label=combined_y_train, base_margin=XGBoostModel.logit(combined_p_mkt))
+        else:
+            combined_dtrain = xgb.DMatrix(data=combined_X_train, label=combined_y_train)
+
         self.best_interation = bst.best_iteration
+        num_boost_round = max(1, self.best_interation + 1)
         
         final_bst = xgb.train(
             all_params,
             combined_dtrain,
-            num_boost_round=self.best_interation,
+            num_boost_round=num_boost_round,
             verbose_eval=10,
         )
 
         self.logger.info(" Retrained on train + val data.")
         _ = self.analyze_feature_importance(final_bst, self.X_train)
-
         self._save_model(final_bst)
 
         return final_bst
     
 
     def _save_hyperparams(self, params: Dict) -> None:
-        self.hyperparam_path = HYPERPARAM_DIR / "xgboost_hyperparams.json"
         self.hyperparam_path.write_text(json.dumps(params, indent=4))
 
     def _load_hyperparameters(self) -> Dict:
@@ -445,8 +519,11 @@ class XGBoostModel:
         self.logger.info(f" Raw predictions before calibration: Min: {p_test_raw.min()}, Max: {p_test_raw.max()}, Std: {p_test_raw.std()}")
         
         try:
-            cal = load_calibrator(str(CAL_DIR / "xgb_calibrator.json"))
-            p_test = apply_calibration(cal, p_test_raw, self.p_mkt_test)
+            cal = load_calibrator(str(self.calibrator_path))
+            if self.uses_market_base_margin:
+                p_test = apply_calibration(cal, p_test_raw, self.p_mkt_test)
+            else:
+                p_test = apply_calibration(cal, p_test_raw)
             self.logger.info(" Applied calibrator to test predictions.")
             self.logger.info(f" Predictions after calibration: Min: {p_test.min()}, Max: {p_test.max()}, Std: {p_test.std()}")
         except FileNotFoundError:
@@ -468,19 +545,20 @@ class XGBoostModel:
         self.logger.info(f" Saved calibration curve (\"test\") to {out_path_curve}")
 
         self._percentile_summary(p_test, label="test (post-cal)")
-        self._plot_logit_delta(p_test, self.p_mkt_test, split="test")
+        if self.uses_market_base_margin:
+            self._plot_logit_delta(p_test, self.p_mkt_test, split="test")
 
         return p_test
     
     def _save_model(self, model: xgb.Booster) -> None:
-        xgboost_model_path = os.path.join(SAVED_MODEL_DIR, "saved_xgboost.json")
+        xgboost_model_path = self.model_path
         self.xgboost_model_path = xgboost_model_path
         model.save_model(str(xgboost_model_path))
 
         self.logger.info(f" Succesfully saved XGBoost model to {xgboost_model_path}")
 
     def load_model(self) -> xgb.Booster:
-        model_path = SAVED_MODEL_DIR / "saved_xgboost.json"
+        model_path = self.model_path
         if model_path.exists():
             bst = xgb.Booster()
             bst.load_model(str(model_path))
@@ -490,22 +568,75 @@ class XGBoostModel:
         self.logger.warning(f" No XGBoost model found")
         return None
 
+def config_for_training_mode(config: XGBoostConfig, training_mode: str, stage: str) -> XGBoostConfig:
+    return config.for_stage(training_mode=training_mode, stage=stage)
+
+def preprocess_for_xgboost(config: XGBoostConfig, training_mode: str, stage: str):
+    stage_config = config_for_training_mode(config, training_mode=training_mode, stage=stage)
+    feature_config = stage_config.to_feature_config(stage=stage, training_mode=training_mode)
+    seasons = (
+        PreProcessing.PRETRAIN_YEARS
+        if training_mode == "baseball_only"
+        else PreProcessing.FINETUNE_YEARS
+    )
+    return PreProcessing(seasons, config=feature_config, mkt_only=False).preprocess_feats(
+        force_recreate=stage_config.force_recreate,
+        force_recreate_preprocessing=stage_config.force_recreate_preprocessing,
+        clear_log=stage_config.clear_log,
+    )
+
+def train_baseball_only_xgboost(config: XGBoostConfig, logger):
+    stage_config = config_for_training_mode(config, training_mode="baseball_only", stage="pretrain")
+    model_data, _ = preprocess_for_xgboost(stage_config, training_mode="baseball_only", stage="pretrain")
+    model = XGBoostModel(stage_config, model_data, logger, mkt_only=False)
+    return model.train_and_eval_model()
+
+def add_pretrained_xgboost_logits(model_data: Dict, pretrained_model: xgb.Booster) -> Dict:
+    feature_names = pretrained_model.feature_names
+
+    def predict_proba(X):
+        return pretrained_model.predict(xgb.DMatrix(X))
+
+    return add_pretrained_logit_feature(
+        model_data,
+        feature_names,
+        predict_proba,
+        XGBoostModel.logit,
+    )
+
+def train_market_residual_xgboost(config: XGBoostConfig, logger, pretrained_model: xgb.Booster | None = None):
+    stage_config = config_for_training_mode(config, training_mode="market_residual", stage="finetune")
+    model_data, odds_data = preprocess_for_xgboost(stage_config, training_mode="market_residual", stage="finetune")
+    if pretrained_model is not None:
+        model_data = add_pretrained_xgboost_logits(model_data, pretrained_model)
+
+    model = XGBoostModel(stage_config, model_data, logger, mkt_only=False)
+    trained_model = model.train_and_eval_model()
+    test_pred = model.predict(trained_model)
+    return trained_model, test_pred, odds_data
+
 def main():
-    model_args = create_args()
-    logger = setup_logging("xgboost_model", LOG_FILE, args=model_args)
+    args = create_args()
+    config = XGBoostConfig.from_namespace(
+        argparse.Namespace(
+            **vars(args),
+            stage="pretrain" if args.training_mode == "baseball_only" else "finetune",
+        )
+    )
+    logger = setup_logging("xgboost_model", LOG_FILE, args=args)
     logger.info("="*75 + "XGBOOST MODEL" + "="*75)
 
-    mkt_only = False
-    
-    model_data, odds_data = PreProcessing([2021, 2022, 2023, 2024, 2025], model_type='xgboost', mkt_only=mkt_only).preprocess_feats(
-            force_recreate=model_args.force_recreate,
-            force_recreate_preprocessing=model_args.force_recreate_preprocessing,
-            clear_log=model_args.clear_log,
-    )
-    
-    model = XGBoostModel(model_args, model_data, logger, mkt_only=mkt_only)
-    model.train_and_eval_model()
-    test_pred = model.predict()
+    if config.training_mode == "stacked":
+        pretrained_model = train_baseball_only_xgboost(config, logger)
+        train_market_residual_xgboost(config, logger, pretrained_model=pretrained_model)
+    elif config.training_mode == "baseball_only":
+        stage_config = config_for_training_mode(config, training_mode="baseball_only", stage="pretrain")
+        model_data, _ = preprocess_for_xgboost(stage_config, training_mode="baseball_only", stage="pretrain")
+        model = XGBoostModel(stage_config, model_data, logger, mkt_only=False)
+        trained_model = model.train_and_eval_model()
+        model.predict(trained_model)
+    else:
+        train_market_residual_xgboost(config, logger)
 
 if __name__ == "__main__":
     main()

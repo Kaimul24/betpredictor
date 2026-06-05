@@ -10,9 +10,7 @@ import argparse
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 
-from torch import parse_type_comment
-
-from src.config import PROJECT_ROOT
+from src.config import FeatureConfig, PROJECT_ROOT
 
 from src.data.features.base_feature import BaseFeatures
 from src.data.features.game_features.context import GameContextFeatures
@@ -41,6 +39,12 @@ def create_args():
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
     parser.add_argument(
+        "--training-mode",
+        choices=["market_residual", "baseball_only"],
+        required=True,
+        help="Determines if odds features are used. Pretraining should not have odds"
+        )
+    parser.add_argument(
         "--log-level",
         choices=["debug", "info", "warning", "error", "critical"],
         default="info",
@@ -55,21 +59,21 @@ def create_args():
         nargs='*',
         type=int,
         action=TupleAction,
-        default=(3, 8, 20),
+        default=(4, 12),
         help="EWM halflives for batting stats")
     parser.add_argument(
         "--starter-halflives",
         nargs='*',
         type=int,
         action=TupleAction,
-        default=(3, 8, 20),
+        default=(3, 8),
         help="EWM halflives for starting pitching stats")
     parser.add_argument(
         "--reliever-halflives", 
         nargs='*',
         type=int,
         action=TupleAction,
-        default=(3, 8, 20),
+        default=(3, 8),
         help="EWM halflives for starting pitching stats")
     parser.add_argument(
         "--team-halflives",
@@ -84,11 +88,16 @@ def create_args():
 
 class FeaturePipeline:
 
-    def __init__(self, season: int, args, logger: Optional[logging.Logger] = None):
+    def __init__(self, season: int, config: FeatureConfig, logger: Optional[logging.Logger] = None):
+        if not isinstance(config, FeatureConfig):
+            raise TypeError("FeaturePipeline requires a FeatureConfig")
+
         self.season = season
         self.cache = {}
         self.logger = logger or logging.getLogger("feature_pipeline")
-        self.args = args
+        self.config = config
+        self.args = config
+        self.stage = config.stage
 
     def start_pipeline(self, force_recreate: bool = False, mkt_only: bool = False) -> Tuple[DataFrame, DataFrame] | DataFrame:
         self.logger.info("="*60)
@@ -102,25 +111,47 @@ class FeaturePipeline:
         self.logger.info(f" Dropping rescheduled games that are far past original game_date")
 
         schedule_data = schedule_data.drop(far_future_games.index)
+        schedule_data = schedule_data[schedule_data["winning_team"].notna()].copy()
+        schedule_data["is_winner_home"] = (
+            schedule_data["winning_team"] == schedule_data["home_team"]
+        ).astype(int)
         
         idx = ["game_id", "game_date", "dh", "home_team", "away_team"]
-        odds_data = self._load_odds_data()
-        odds_feats = Odds(odds_data, self.season, mkt_only).load_features()
-        odds_sch_matched, raw_odds_data = self._match_schedule_to_odds(schedule_data, odds_feats)
-        odds_sch_matched = odds_sch_matched.reset_index().set_index(idx)
-        
-        position_player_feats = self._get_position_player_features(odds_sch_matched, force_recreate).reset_index().set_index(idx)
-        pitching_feats = self._get_pitcher_features(odds_sch_matched, force_recreate).reset_index().set_index(idx)
-        context_feats = GameContextFeatures(self.season, schedule_data).load_features().reset_index().set_index(idx)
-        team_feats = TeamFeatures(self.season, odds_sch_matched, self.args.team_halflives).load_features().reset_index().set_index(idx)
+        raw_odds_data = pd.DataFrame()
 
+        if self.stage == "finetune":
+            odds_data = self._load_odds_data()
+            odds_feats = Odds(odds_data, self.season, mkt_only).load_features()
+            odds_sch_matched, raw_odds_data = self._match_schedule_to_odds(schedule_data, odds_feats)
+            odds_sch_matched = odds_sch_matched.reset_index().set_index(idx)
+            # Needed for pretrain + finetune shapes to match
+            # May re-add later w/ dedicated market features head
+            drop_cols = [
+                col for col in odds_sch_matched.columns 
+                if ("prob_home" in col)
+                or (col in ["num_books", "vig_open"])
+            ]
+            odds_sch_matched = odds_sch_matched.drop(columns=drop_cols)
+            schedule_data = odds_sch_matched
+        else:
+            schedule_data = schedule_data.reset_index(drop=True).set_index(idx)
 
-        final_features = odds_sch_matched.join(
+        position_player_feats = self._get_position_player_features(schedule_data, force_recreate).reset_index().set_index(idx)
+        pitching_feats = self._get_pitcher_features(schedule_data, force_recreate).reset_index().set_index(idx)
+        schedule_data_for_game_features = schedule_data.reset_index()
+        context_feats = GameContextFeatures(self.season, schedule_data_for_game_features).load_features().reset_index().set_index(idx)
+        team_feats = TeamFeatures(self.season, schedule_data, self.args.team_halflives).load_features().reset_index().set_index(idx)
+
+        context_overlap_cols = [
+            col for col in context_feats.columns
+            if col in schedule_data.columns
+        ]
+        schedule_data = schedule_data.drop(columns=context_overlap_cols)
+
+        final_features = schedule_data.join(
             [position_player_feats, pitching_feats, context_feats, team_feats],
 
         )
-
-        assert len(final_features) == len(odds_sch_matched)
 
         final_features = self._apply_league_average_deltas(
             final_features,
@@ -677,34 +708,6 @@ class FeaturePipeline:
                 adjusted[col] = adjusted[col] - averages
         return adjusted
 
-
-
-
-    def _add_opponent_features(self, df:DataFrame,
-                               team_level='team',
-                               opp_level='opposing_team',
-                               feature_cols=None) -> DataFrame:
-        """
-        df has a MultiIndex that includes team and opposing_team (plus game keys).
-        Returns df with opponent's columns prefixed 'opposing_'.
-        """
-        if feature_cols is None:
-            feature_cols = df.columns
-
-        feature_cols = [col for col in feature_cols if not col.startswith('opposing')]
-
-        if df.index.has_duplicates:
-            raise ValueError("Input index has duplicates; disambiguate (e.g., include dh/game_datetime).")
-
-        opp_view = df[feature_cols].copy()
-        opp_view.index = opp_view.index.swaplevel(team_level, opp_level)
-        opp_view = opp_view.sort_index()
-
-        opp_aligned = opp_view.reindex(df.index)
-        opp_aligned.columns = [f"opposing_{c}" for c in feature_cols]
-
-        return pd.concat([df, opp_aligned], axis=1)    
-
     def _match_schedule_to_odds(self, schedule_data: DataFrame, odds_data: DataFrame) -> Tuple[DataFrame, DataFrame]:
         """
         Match schedule games to odds. A single game will have many odds matches. Games without a match are due to incorrect labeling
@@ -858,11 +861,11 @@ class FeaturePipeline:
         merged_games = merged_games.sort_values(id_cols).set_index(id_cols)
         
         game_metadata_cols = [
-            'game_id', 'season', 'venue_timezone', 'venue_gametime_offset', 'status',
-            'away_probable_pitcher', 'home_probable_pitcher', 'away_starter_normalized',
-            'home_starter_normalized', 'wind', 'condition', 'away_score',
-            'home_score', 'winning_team', 'losing_team', 'away_starter', 'home_starter',
-            'winner'
+            'game_id', 'season', 'venue_id', 'venue_name', 'venue_timezone', 'venue_elevation',
+            'venue_gametime_offset', 'status', 'away_probable_pitcher', 'home_probable_pitcher',
+            'away_starter_normalized', 'home_starter_normalized', 'temp', 'wind', 'condition',
+            'day_night_game', 'away_score', 'home_score', 'winning_team', 'losing_team',
+            'is_winner_home', 'away_starter', 'home_starter', 'winner'
         ]
         
         aggregated_odds_cols = [
@@ -1044,11 +1047,18 @@ class FeaturePipeline:
         
 def main():
     args = create_args()
+    config = FeatureConfig.from_namespace(
+        argparse.Namespace(
+            **vars(args),
+            stage="pretrain" if args.training_mode == "baseball_only" else "finetune",
+            model_type="xgboost",
+        )
+    )
     logger = setup_logging("feature_pipeline", LOG_FILE, args=args)
     
-    feat_pipe = FeaturePipeline(2021, args, logger)
+    feat_pipe = FeaturePipeline(2021, config, logger)
 
-    features, _ = feat_pipe.start_pipeline(args.force_recreate, mkt_only=True)
+    features, _ = feat_pipe.start_pipeline(config.force_recreate, mkt_only=True)
 
 if __name__ == "__main__":
     main()

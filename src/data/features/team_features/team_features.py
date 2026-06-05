@@ -51,6 +51,7 @@ class TeamFeatures(BaseFeatures):
 
         result = self._team_games_played(result)
         result = self._collapse_to_game_level(result)
+        result = result.drop(columns=['is_winner_home']) # Dropped here instead of the schedule df to allow join
 
         return result
 
@@ -61,6 +62,8 @@ class TeamFeatures(BaseFeatures):
         computed across a team's full chronological history (home and away games).
         """
         df = self.data.reset_index().copy()
+        if "is_winner_home" not in df.columns and "winning_team" in df.columns:
+            df["is_winner_home"] = df["winning_team"] == df["home_team"]
         common_cols = ['game_id', 'game_date', 'dh', 'game_datetime']
 
         away_df = df[common_cols].assign(
@@ -69,7 +72,7 @@ class TeamFeatures(BaseFeatures):
             opposing_team=df['home_team'],
             team_score=df['away_score'],
             opposing_team_score=df['home_score'],
-            is_winner=np.where(df['winning_team'] == df['away_team'], 1, 0),
+            is_winner=np.where(df['is_winner_home'] == False, 1, 0),
         )
 
         home_df = df[common_cols].assign(
@@ -78,7 +81,7 @@ class TeamFeatures(BaseFeatures):
             opposing_team=df['away_team'],
             team_score=df['home_score'],
             opposing_team_score=df['away_score'],
-            is_winner=np.where(df['winning_team'] == df['home_team'], 1, 0),
+            is_winner=np.where(df['is_winner_home'] == True, 1, 0),
         )
 
         log = pd.concat([away_df, home_df], ignore_index=True)
