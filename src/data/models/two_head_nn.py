@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader, Dataset
 import matplotlib.pyplot as plt
 from pathlib import Path
 from collections.abc import Callable
+from dataclasses import replace
 
 from src.data.models.two_stage import MARKET_PROBABILITY_COL, baseball_feature_columns
 from src.data.models.calibration import select_and_fit_calibrator, save_calibrator, load_calibrator, apply_calibration, plot_calibration
@@ -20,6 +21,11 @@ from src.utils import setup_logging, TupleAction
 
 SAVED_MODEL_DIR = PROJECT_ROOT / "src" / "data" / "models" / "saved_models"
 SAVED_MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
+HYPERPARAM_DIR = PROJECT_ROOT / "src" / "data" / "models" / "saved_hyperparameters"
+HYPERPARAM_DIR.mkdir(parents=True, exist_ok=True)
+PRETRAIN_HYPERPARAM_PATH = HYPERPARAM_DIR / "two_head_pretrain_hyperparams.json"
+PRETRAIN_HYPERPARAM_KEYS = ("base_hidden_size", "p_drop", "lr", "weight_decay")
 
 PRETRAIN_CHECKPOINTS = SAVED_MODEL_DIR / "nn_pretrain_ckpts"
 PRETRAIN_CHECKPOINTS.mkdir(parents=True, exist_ok=True)
@@ -66,7 +72,7 @@ def create_args():
         help="Optional pretrained checkpoint file. Defaults to --pretrain-dir/best_model.pt."
     )
     parser.add_argument("--device", type=str, default="auto", help="Training device.")
-    parser.add_argument("--base-hidden-size", type=int, default=256, help="Base hidden units per layer")
+    parser.add_argument("--base-hidden-size", type=int, default=32, help="Base hidden units per layer")
     parser.add_argument("--max-residual", type=float, default=0.5, help="Max market adjustment")
     parser.add_argument("--alpha", type=float, default=0.7, help="Adjustment scaling factor")
     parser.add_argument("--p-drop", type=float, default=0.2, help="Dropout Probability")
@@ -75,8 +81,13 @@ def create_args():
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
     parser.add_argument("--lr", type=float, default=1e-4, help="Initial learning rate")
     parser.add_argument("--min-lr", type=float, default=1e-6, help="Minimum learning rate for cosine annealing")
+    parser.add_argument("--weight-decay", type=float, default=0.03, help="AdamW weight decay")
+    parser.add_argument("--retune", action="store_true", help="Tune pretrain hyperparameters with Optuna")
+    parser.add_argument("--use-hyperparams", action="store_true", help="Use saved pretrain hyperparameters")
+    parser.add_argument("--pretrain-trials", type=int, default=50, help="Number of Optuna pretrain tuning trials")
     parser.add_argument("--force-recreate", action="store_true", help="Recreate rolling features, even if cached file exists")
     parser.add_argument("--force-recreate-preprocessing", action="store_true", help="Recreate preprocessed datasets, even if cached file exists")
+    parser.add_argument("--perspective-duplication", action="store_true", help="Duplicate training rows from each focal team's perspective")
     parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
@@ -90,6 +101,7 @@ class TwoHeadNN(nn.Module):
     def __init__(self, in_dim: int, base_hidden_size: int = 256, p_drop: float = 0.2, max_residual: float = 0.5):
         super().__init__()
         self.in_dim = in_dim
+        self.base_hidden_size = base_hidden_size
 
         self.encoder = nn.Sequential(
             nn.Linear(in_dim, base_hidden_size),
@@ -171,6 +183,151 @@ def get_device(dev: str) -> torch.device:
             return torch.device("mps")
         return torch.device("cpu")
     return torch.device(dev)
+
+def _set_torch_seed(seed: int = 42) -> None:
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+def build_model(in_dim: int, config: TwoHeadNNConfig, device: torch.device) -> TwoHeadNN:
+    return TwoHeadNN(
+        in_dim=in_dim,
+        base_hidden_size=config.base_hidden_size,
+        p_drop=config.p_drop,
+        max_residual=config.max_residual,
+    ).to(device)
+
+def build_optimizer(model: TwoHeadNN, config: TwoHeadNNConfig) -> torch.optim.Optimizer:
+    return optim.AdamW(model.parameters(), weight_decay=config.weight_decay, lr=config.lr)
+
+def build_scheduler(optimizer: torch.optim.Optimizer, config: TwoHeadNNConfig):
+    return optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=config.epochs,
+        eta_min=config.min_lr,
+    )
+
+def _coerce_pretrain_hyperparameters(params: dict) -> dict:
+    missing = [key for key in PRETRAIN_HYPERPARAM_KEYS if key not in params]
+    if missing:
+        raise ValueError(f"Missing pretrain hyperparameters: {missing}")
+    return {
+        "base_hidden_size": int(params["base_hidden_size"]),
+        "p_drop": float(params["p_drop"]),
+        "lr": float(params["lr"]),
+        "weight_decay": float(params["weight_decay"]),
+    }
+
+def apply_pretrain_hyperparameters(config: TwoHeadNNConfig, params: dict) -> TwoHeadNNConfig:
+    return replace(config, **_coerce_pretrain_hyperparameters(params))
+
+def save_pretrain_hyperparameters(
+    params: dict,
+    best_value: float,
+    n_trials: int,
+    path: Path = PRETRAIN_HYPERPARAM_PATH,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "best_params": _coerce_pretrain_hyperparameters(params),
+        "best_value": float(best_value),
+        "n_trials": int(n_trials),
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+def load_pretrain_hyperparameters(path: Path = PRETRAIN_HYPERPARAM_PATH) -> dict:
+    if not path.exists():
+        raise FileNotFoundError(f"Saved pretrain hyperparameters not found: {path}")
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    params = payload.get("best_params", payload)
+    return _coerce_pretrain_hyperparameters(params)
+
+def pretrain_stability_objective(val_losses: list[float], window: int = 5) -> float:
+    if not val_losses:
+        raise ValueError("val_losses must contain at least one epoch")
+    if window < 1:
+        raise ValueError("window must be at least 1")
+
+    window = min(window, len(val_losses))
+    best_epoch, best_val = min(enumerate(val_losses), key=lambda item: item[1])
+    smoothed_vals = [
+        sum(val_losses[i:i + window]) / window
+        for i in range(len(val_losses) - window + 1)
+    ]
+    best_smoothed_val = min(smoothed_vals)
+    tail_val = sum(val_losses[-window:]) / window
+    overfit_penalty = max(0.0, tail_val - best_val)
+    min_good_epoch = int(0.15 * len(val_losses))
+    early_peak_penalty = max(0.0, (min_good_epoch - best_epoch) / len(val_losses))
+
+    return (
+        best_smoothed_val
+        + 0.25 * overfit_penalty
+        + 0.02 * early_peak_penalty
+    )
+
+def tune_pretrain_hyperparameters(
+    config: TwoHeadNNConfig,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    in_dim: int,
+    device: torch.device,
+    logger,
+    n_trials: int | None = None,
+    hyperparam_path: Path = PRETRAIN_HYPERPARAM_PATH,
+) -> dict:
+    trial_count = n_trials if n_trials is not None else config.pretrain_trials
+    criterion = nn.BCEWithLogitsLoss().to(device)
+
+    def objective(trial: optuna.Trial) -> float:
+        params = {
+            "base_hidden_size": trial.suggest_categorical("base_hidden_size", [16, 32, 64]),
+            "p_drop": trial.suggest_float("p_drop", 0.1, 0.6),
+            "lr": trial.suggest_float("lr", 1e-5, 1e-3, log=True),
+            "weight_decay": trial.suggest_float("weight_decay", 1e-5, 2e-1, log=True),
+        }
+        trial_config = apply_pretrain_hyperparameters(config, params)
+        _set_torch_seed(42)
+        model = build_model(in_dim, trial_config, device)
+        optimizer = build_optimizer(model, trial_config)
+        scheduler = build_scheduler(optimizer, trial_config)
+        train_losses, val_losses = [], []
+
+        for epoch in range(trial_config.epochs):
+            train_loss = train_epoch_pretrain(model, train_loader, optimizer, criterion, device)
+            val_loss = val_epoch_pretrain(model, val_loader, criterion, device)
+            train_losses.append(train_loss)
+            val_losses.append(val_loss)
+            scheduler.step()
+            trial.report(val_loss, epoch)
+            if trial.should_prune():
+                raise optuna.exceptions.TrialPruned()
+
+        return pretrain_stability_objective(val_losses)
+
+    sampler = optuna.samplers.TPESampler(seed=42)
+    pruner = optuna.pruners.MedianPruner()
+    study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner)
+    logger.info(f" Tuning pretrain hyperparameters for {trial_count} trials...")
+
+    with tqdm(total=trial_count, desc="Optuna pretrain tuning") as progress:
+        def _tick(study, trial):
+            progress.update(1)
+
+        study.optimize(objective, n_trials=trial_count, callbacks=[_tick])
+
+    best_params = _coerce_pretrain_hyperparameters(study.best_params)
+    save_pretrain_hyperparameters(
+        params=best_params,
+        best_value=study.best_value,
+        n_trials=trial_count,
+        path=hyperparam_path,
+    )
+    logger.info(f" Best pretrain stability objective: {study.best_value:.4f}")
+    logger.info(f" Saved pretrain hyperparameters to {hyperparam_path}")
+    return best_params
 
 def prepare_data(
         stage: str,
@@ -426,7 +583,7 @@ def train(
     train_losses, val_losses = [], []
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    for epoch in range(0, epochs):
+    for epoch in tqdm(range(0, epochs), desc="Training Progress", leave=False):
         train_loss = train_epoch_fn(
             model, train_loader, optimizer, criterion, device
         )
@@ -459,29 +616,40 @@ def train(
     return train_losses, val_losses, best_val
 
 def pretrain(device, logger, config: TwoHeadNNConfig) -> TwoHeadNN:
-    pt_config = config.for_stage(training_mode="baseball_only", stage="pretrain")
+    pt_config = config.for_stage(training_mode="baseball_only", stage="pretrain", perspective_duplication=True)
     pt_train_ldr, pt_val_ldr, pt_test_ldr, pt_in_dim = prepare_data(
         stage="pretrain",
         config=pt_config,
         train_batch_size=pt_config.train_batch,
         val_test_batch_size=pt_config.val_batch
     )
-            
-    pretrained_model = TwoHeadNN(
-        in_dim=pt_in_dim,
-        base_hidden_size=pt_config.base_hidden_size,
-        p_drop=pt_config.p_drop,
-        max_residual=pt_config.max_residual
-    ).to(device)
 
-    optimizer = optim.AdamW(pretrained_model.parameters(), weight_decay=0.03, lr=pt_config.lr)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=pt_config.epochs,
-        eta_min=pt_config.min_lr,
-    )
+    if pt_config.retune:
+        best_params = tune_pretrain_hyperparameters(
+            config=pt_config,
+            train_loader=pt_train_ldr,
+            val_loader=pt_val_ldr,
+            in_dim=pt_in_dim,
+            device=device,
+            logger=logger,
+        )
+        pt_config = apply_pretrain_hyperparameters(pt_config, best_params)
+    elif pt_config.use_hyperparams:
+        best_params = load_pretrain_hyperparameters()
+        pt_config = apply_pretrain_hyperparameters(pt_config, best_params)
+        logger.info(f" Loaded pretrain hyperparameters from {PRETRAIN_HYPERPARAM_PATH}")
+            
+    pretrained_model = build_model(pt_in_dim, pt_config, device)
+
+    optimizer = build_optimizer(pretrained_model, pt_config)
+    scheduler = build_scheduler(optimizer, pt_config)
     criterion = nn.BCEWithLogitsLoss().to(device)
-    logger.info(f" Pretraining for {pt_config.epochs} epochs...")
+    logger.info(
+        " Pretraining for "
+        f"{pt_config.epochs} epochs with hidden={pt_config.base_hidden_size}, "
+        f"p_drop={pt_config.p_drop:.3f}, lr={pt_config.lr:.2e}, "
+        f"weight_decay={pt_config.weight_decay:.2e}..."
+    )
 
     train_losses_pt, val_losses_pt, best_val_pt = train(
         model=pretrained_model,
@@ -498,20 +666,21 @@ def pretrain(device, logger, config: TwoHeadNNConfig) -> TwoHeadNN:
         logger=logger,
         config=pt_config
     )
-                
-    logger.info(f" Done pretraining. Best val loss: {best_val_pt}")
-    _plot_loss(train_losses_pt, val_losses_pt, logger)
 
-    return pretrained_model
+    logger.info(f" Done pretraining. Best val loss: {best_val_pt}")
+    _plot_loss(train_losses_pt, val_losses_pt, "pretrain_plot.png", logger)
+
+    best_model = build_model(pt_in_dim, pt_config, device)
+    return load_pretrained_checkpoint(best_model, pt_config.pretrain_dir / "best_model.pt", device=device)
     
 
 def finetune(
-        device,
-        logger,
-        config: TwoHeadNNConfig,
-        pretrained_model: TwoHeadNN | None = None,
-    ) -> None:
-    ft_config = config.for_stage(training_mode="market_residual", stage="finetune")
+    device,
+    logger,
+    config: TwoHeadNNConfig,
+    pretrained_model: TwoHeadNN | None = None,
+) -> None:
+    ft_config = config.for_stage(training_mode="market_residual", stage="finetune", perspective_duplication=False)
     ft_train_ldr, ft_val_ldr, ft_test_ldr, ft_in_dim = prepare_data(
         stage="finetune",
         config=ft_config,
@@ -519,15 +688,9 @@ def finetune(
         val_test_batch_size=ft_config.val_batch
     )
 
-    ft_model = TwoHeadNN(
-        in_dim=ft_in_dim,
-        base_hidden_size=ft_config.base_hidden_size,
-        p_drop=ft_config.p_drop,
-        max_residual=ft_config.max_residual
-    ).to(device)
-
     if pretrained_model is None:
-        checkpoint_path = config.pretrained_checkpoint
+        ft_model = build_model(ft_in_dim, ft_config, device)
+        checkpoint_path = config.pretrained_checkpoint or (config.pretrain_dir / "best_model.pt")
         if not checkpoint_path.exists():
             raise FileNotFoundError(
                 f"Pretrained checkpoint not found: {checkpoint_path}. "
@@ -536,14 +699,18 @@ def finetune(
         logger.info(f" Loading pretrained checkpoint from {checkpoint_path}")
         load_pretrained_checkpoint(ft_model, checkpoint_path, device=device)
     else:
+        if pretrained_model.in_dim != ft_in_dim:
+            raise RuntimeError(
+                f"Pretrained model input dimension {pretrained_model.in_dim} does not match "
+                f"finetune input dimension {ft_in_dim}. Rebuild preprocessing caches so both "
+                "stages use the same baseball feature columns."
+            )
+        ft_config = replace(ft_config, base_hidden_size=pretrained_model.base_hidden_size)
+        ft_model = build_model(ft_in_dim, ft_config, device)
         ft_model.load_state_dict(pretrained_model.state_dict())
 
-    optimizer = optim.AdamW(ft_model.parameters(), weight_decay=0.03, lr=ft_config.lr)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=ft_config.epochs,
-        eta_min=ft_config.min_lr,
-    )
+    optimizer = build_optimizer(ft_model, ft_config)
+    scheduler = build_scheduler(optimizer, ft_config)
     criterion = nn.BCEWithLogitsLoss().to(device)
     logger.info(f" Finetuning for {ft_config.epochs} epochs...")
 
@@ -564,9 +731,9 @@ def finetune(
     )
 
     logger.info(f" Done finetuning. Best val loss: {best_val_ft}")
-    _plot_loss(train_losses_ft, val_losses_ft, logger)
+    _plot_loss(train_losses_ft, val_losses_ft, "finetune_plot.png", logger)
 
-def _plot_loss(train_losses: List[float], val_losses: List[float], logger) -> None:
+def _plot_loss(train_losses: List[float], val_losses: List[float], plot_name: str, logger) -> None:
         """Plot training and validation loss curves across epochs.
         
         Args:
@@ -591,10 +758,17 @@ def _plot_loss(train_losses: List[float], val_losses: List[float], logger) -> No
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         
-        plot_path = PLOTS_DIR / "loss_curves.png"
+        plot_path = PLOTS_DIR / f"{plot_name}"
         plt.savefig(plot_path, dpi=150)
         plt.close()
-        logger.info(f"  Loss curves saved to {plot_path}")
+        logger.info(f" Loss curves saved to {plot_path}")
+
+def validate_tuning_mode(config: TwoHeadNNConfig) -> None:
+    if config.training_mode == "market_residual" and config.retune:
+        raise ValueError(
+            "--retune tunes only the baseball-only pretrain stage. "
+            "Use --training-mode stacked or --training-mode baseball_only."
+        )
 
 def main():
     args = create_args()
@@ -604,6 +778,7 @@ def main():
             stage="pretrain" if args.training_mode == "baseball_only" else "finetune",
         )
     )
+    validate_tuning_mode(config)
 
     logger = setup_logging("two_head_nn", LOG_FILE, args=args)
     device = get_device(config.device)
