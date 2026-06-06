@@ -26,20 +26,13 @@ Prerequisites
 - Playwright browser binaries for the scrapers that render pages.
 
 Install
-1) Create a virtual environment and activate it
-- macOS/Linux: `python3 -m venv .venv && source .venv/bin/activate`
-- Windows (PowerShell): `py -m venv .venv; .\.venv\Scripts\Activate.ps1`
+1) Install project dependencies with uv
+- From repo root: `uv sync --extra testing`
 
-2) Install the package and core dependencies
-- From repo root: `pip install -e .`
+2) Install Playwright browser (for scrapy-playwright)
+- `uv run python -m playwright install chromium`
 
-3) Install model/plotting dependencies (not listed in pyproject)
-- `pip install xgboost scikit-learn optuna matplotlib scipy joblib tqdm`
-
-4) Install Playwright browser (for scrapy-playwright)
-- `python -m playwright install chromium`
-
-5) Refresh FanGraphs browser session when needed
+3) Refresh FanGraphs browser session when needed
 - `uv run python -m src.tools.refresh_fangraphs_session`
 - Complete the browser verification in the opened Chromium window, then press Enter
   in the terminal. This saves a temporary Playwright storage state for FanGraphs
@@ -50,17 +43,17 @@ Database and Data Ingestion
 The project uses a single SQLite database at `src/data/mlb_stats.sqlite` defined in `src/config.py`.
 
 - Initialize / refresh schedule (MLB StatsAPI)
-  - `python -m src.tools.fetch_schedule`
+  - `uv run python -m src.tools.fetch_schedule`
   - This also ensures the schema is up to date and clears/rebuilds `schedule` and `rosters` tables.
 
 - Run scrapers (Scrapy + Playwright)
   - Run from `src/` so that `scrapy.cfg` is picked up:
     - `cd src`
-    - Odds: `scrapy crawl odds`
-    - Player game logs (batting, pitching): `scrapy crawl stats`
-    - Lineups + starters: `scrapy crawl lineups`
-    - Fielding FRV (Baseball Savant): `scrapy crawl fielding`
-    - Park factors: `scrapy crawl park_factor`
+    - Odds: `uv run scrapy crawl odds`
+    - Player game logs (batting, pitching): `uv run scrapy crawl stats`
+    - Lineups + starters: `uv run scrapy crawl lineups`
+    - Fielding FRV (Baseball Savant): `uv run scrapy crawl fielding`
+    - Park factors: `uv run scrapy crawl park_factor`
   - Notes:
     - Pipelines write directly into SQLite and will drop/recreate some tables (e.g., odds) for consistency.
     - Playwright must be installed and able to launch Chromium.
@@ -73,9 +66,9 @@ The project uses a single SQLite database at `src/data/mlb_stats.sqlite` defined
 Feature Engineering and Preprocessing
 The feature pipeline merges schedule, odds, lineups, batting/pitching rolling features (EWM and season-to-date with shrinkage to league priors), fielding FRV, and game context (weather, park factors, day/night).
 
-Primary entrypoint: `src/data/feature_preprocessing.py`
+Primary entrypoint: `src/data/features/feature_preprocessing.py`
 - Default run (builds features, splits, scales, and caches):
-  - `python -m src.data.feature_preprocessing --log --clear-log`
+  - `uv run python -m src.data.features.feature_preprocessing --training-mode market_residual --log --clear-log`
   - Output cache: `src/data/features/cache/` with `X_*`, `y_*`, `odds_data` parquet files and a saved scaler.
 - Options:
   - `--force-recreate`: recompute rolling features from raw tables even if cached.
@@ -88,7 +81,7 @@ The baseline model is XGBoost trained on engineered features with the market’s
 
 Entrypoint: `src/data/models/xgboost_model.py`
 - Train and evaluate:
-  - `python -m src.data.models.xgboost_model --log`
+  - `uv run python -m src.data.models.xgboost_model --log`
   - Add `--retune` to run Optuna hyperparameter search before training.
   - Add `--force-recreate` / `--force-recreate-preprocessing` to rebuild features if needed.
 - Artifacts and reports:
@@ -100,16 +93,17 @@ Entrypoint: `src/data/models/xgboost_model.py`
 Backtesting (Expected Return)
 Entrypoint: `src/data/backtesting/expected_return.py`
 - Computes simple EV metrics from model probabilities vs opening prices in the test split.
-- Run: `python -m src.data.backtesting.expected_return --log`
+- Run: `uv run python -m src.data.backtesting.expected_return --log`
 - Outputs summary statistics and can plot EV distributions (see code for toggles).
 
 
 Testing
-- Quick runner: `python run_tests.py --all`
+- Primary gate: `uv run pytest tests/`
+- Quick runner: `uv run python run_tests.py --all`
 - Selective examples:
-  - Loaders only: `python run_tests.py --loaders`
-  - Features only: `python run_tests.py --features`
-  - Individual: `python run_tests.py --pipeline` (feature pipeline tests)
+  - Loaders only: `uv run python run_tests.py --loaders`
+  - Features only: `uv run python run_tests.py --features`
+  - Individual: `uv run python run_tests.py --pipeline` (feature pipeline tests)
 
 
 Configuration

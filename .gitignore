@@ -137,7 +137,6 @@ env.bak/
 venv.bak/
 .betpredictor
 .betpredictorOLD
-.github
 *.parquet
 *.txt
 *.pkl
@@ -215,3 +214,4 @@ cython_debug/
 
 # misc.
 PROJECT.md
+AGENTS.md

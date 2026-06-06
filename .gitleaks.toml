@@ -1,0 +1,14 @@
+title = "Betpredictor Gitleaks Config"
+
+[allowlist]
+description = "Ignore dependency lock hashes and generated local artifact paths."
+paths = [
+  '''^uv\.lock$''',
+  '''^src/data/features/cache/''',
+  '''^src/data/models/saved_models/''',
+  '''^src/data/models/saved_hyperparameters/''',
+  '''^src/data/models/calibrators/''',
+  '''^src/data/models/plots/''',
+  '''^src/data/plots/''',
+  '''^src/data/logs/''',
+]

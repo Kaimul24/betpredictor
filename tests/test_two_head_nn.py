@@ -254,7 +254,7 @@ def test_train_runs_full_epoch_count_and_saves_best_checkpoint(tmp_path):
         calls["val"] += 1
         return val_loss
 
-    train_losses, observed_val_losses, best_val = train(
+    train_losses, observed_val_losses, best_val, best_epoch = train(
         model=model,
         train_loader=[],
         val_loader=[],
@@ -274,6 +274,7 @@ def test_train_runs_full_epoch_count_and_saves_best_checkpoint(tmp_path):
     assert train_losses == [1.0, 2.0, 3.0]
     assert observed_val_losses == val_losses
     assert best_val == pytest.approx(0.4)
+    assert best_epoch == 1
     best_checkpoint = torch.load(tmp_path / "best_model.pt", weights_only=True)
     assert best_checkpoint["epoch"] == 1
 
@@ -293,7 +294,7 @@ def test_pretrain_reloads_best_checkpoint_before_returning(monkeypatch, tmp_path
         return [], [], [], 2
 
     def fake_train(*args, **kwargs):
-        return [0.5, 0.4], [0.7, 0.6], 0.6
+        return [0.5, 0.4], [0.7, 0.6], 0.6, 1
 
     def fake_plot_loss(*args, **kwargs):
         return None
