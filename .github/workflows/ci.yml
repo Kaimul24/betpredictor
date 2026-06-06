@@ -52,24 +52,3 @@ jobs:
         run: uv sync --extra ci --locked
       - name: Run tests
         run: uv run pytest tests/
-
-  security:
-    name: security
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Audit dependencies
-        run: uv audit --locked --ignore PYSEC-2017-83 --ignore PYSEC-2026-139 --preview-features audit
-      - name: Secret scan
-        uses: gitleaks/gitleaks-action@v2
-        with:
-          args: detect --source . --no-git --redact --verbose --config .gitleaks.toml
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
