@@ -1,4 +1,5 @@
 from pandas.core.api import DataFrame as DataFrame
+import numpy as np
 import pandas as pd
 from typing import List
 import pickle
@@ -74,6 +75,7 @@ def create_args():
     parser.add_argument("--device", type=str, default="auto", help="Training device.")
     parser.add_argument("--base-hidden-size", type=int, default=32, help="Base hidden units per layer")
     parser.add_argument("--max-residual", type=float, default=0.5, help="Max market adjustment")
+    parser.add_argument("--residual-penalty", type=float, default=0.05, help="Residual regularization penalty")
     parser.add_argument("--alpha", type=float, default=0.7, help="Adjustment scaling factor")
     parser.add_argument("--p-drop", type=float, default=0.2, help="Dropout Probability")
     parser.add_argument("--train-batch", type=int, default=256, help="Training Batch Size")
@@ -85,6 +87,7 @@ def create_args():
     parser.add_argument("--retune", action="store_true", help="Tune pretrain hyperparameters with Optuna")
     parser.add_argument("--use-hyperparams", action="store_true", help="Use saved pretrain hyperparameters")
     parser.add_argument("--pretrain-trials", type=int, default=50, help="Number of Optuna pretrain tuning trials")
+    parser.add_argument("--encoder-freeze-epochs", type=int, default=10, help="Number of epochs the encoder is frozen during finetuning")
     parser.add_argument("--force-recreate", action="store_true", help="Recreate rolling features, even if cached file exists")
     parser.add_argument("--force-recreate-preprocessing", action="store_true", help="Recreate preprocessed datasets, even if cached file exists")
     parser.add_argument("--perspective-duplication", action="store_true", help="Duplicate training rows from each focal team's perspective")
@@ -496,7 +499,8 @@ def train_epoch_finetune(
         optimizer: torch.optim.Optimizer,
         criterion,
         device,
-        alpha: float = 1.0
+        alpha: float = 1.0,
+        residual_penalty: float = 0.05
     ) -> float:
 
     model.train()
@@ -509,8 +513,8 @@ def train_epoch_finetune(
         pred_raw = model.forward_finetune(X, alpha=alpha)
         p_res = logit(p_mkt.reshape(-1,1)) + pred_raw
         loss = criterion(p_res, y.view(-1, 1))
-        # res = pred_raw - p_mkt
-        # loss += 0.05 * res.pow(2).mean()
+        res = pred_raw - p_mkt
+        loss += residual_penalty * res.pow(2).mean()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
@@ -547,7 +551,8 @@ def val_epoch_finetune(
         loader: DataLoader,
         criterion,
         device,
-        alpha: float = 1.0
+        alpha: float = 1.0,
+        residual_penalty: float = 0.05
     ) -> float:
 
     model.eval()
@@ -559,6 +564,8 @@ def val_epoch_finetune(
         pred_raw = model.forward_finetune(X, alpha=alpha)
         pred_res = logit(p_mkt.view(-1,1)) + pred_raw
         loss = criterion(pred_res, y.view(-1, 1))
+        res = pred_raw - p_mkt
+        loss += residual_penalty * res.pow(2).mean()
         total_loss += float(loss.item())
         n_batches += 1
 
@@ -578,12 +585,33 @@ def train(
     epochs: int,
     logger,
     config: TwoHeadNNConfig
-) -> tuple[list[float], list[float], float]:
+) -> tuple[list[float], list[float], float, int]:
+    
+    def freeze_encoder_parameters(model: TwoHeadNN) -> None:
+        for p in model.encoder.parameters():
+            p.requires_grad = False
+
+        if any(param.requires_grad for param in model.encoder.parameters()):
+            raise RuntimeError("Encoder should be frozen but is not")
+        
+    def unfreeze_encoder_parameters(model: TwoHeadNN) -> None:
+        for p in model.encoder.parameters():
+            p.requires_grad = True
+
+        if any(param.requires_grad == False for param in model.encoder.parameters()):
+            raise RuntimeError("Encoder should not frozen but is")
+
     best_val = float("inf")
+    best_epoch = -1
     train_losses, val_losses = [], []
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    for epoch in tqdm(range(0, epochs), desc="Training Progress", leave=False):
+    for epoch in range(0, epochs):
+        if epoch < config.encoder_freeze_epochs:
+            freeze_encoder_parameters(model)
+        elif epoch == config.encoder_freeze_epochs:
+            unfreeze_encoder_parameters(model)
+
         train_loss = train_epoch_fn(
             model, train_loader, optimizer, criterion, device
         )
@@ -601,6 +629,7 @@ def train(
         )
         if val_loss < best_val:
             best_val = val_loss
+            best_epoch = epoch
             best_path = checkpoint_dir / "best_model.pt"
             logger.info(f"  New best model: {best_val:.4f}, saving...")
             save_checkpoint(
@@ -613,7 +642,7 @@ def train(
                 model, optimizer, epoch, train_loss, val_loss, path, config=config
             )
 
-    return train_losses, val_losses, best_val
+    return train_losses, val_losses, best_val, best_epoch
 
 def pretrain(device, logger, config: TwoHeadNNConfig) -> TwoHeadNN:
     pt_config = config.for_stage(training_mode="baseball_only", stage="pretrain", perspective_duplication=True)
@@ -651,7 +680,7 @@ def pretrain(device, logger, config: TwoHeadNNConfig) -> TwoHeadNN:
         f"weight_decay={pt_config.weight_decay:.2e}..."
     )
 
-    train_losses_pt, val_losses_pt, best_val_pt = train(
+    train_losses_pt, val_losses_pt, best_val_pt, best_epoch = train(
         model=pretrained_model,
         train_loader=pt_train_ldr,
         val_loader=pt_val_ldr,
@@ -667,7 +696,7 @@ def pretrain(device, logger, config: TwoHeadNNConfig) -> TwoHeadNN:
         config=pt_config
     )
 
-    logger.info(f" Done pretraining. Best val loss: {best_val_pt}")
+    logger.info(f" Done pretraining. Best val loss: {best_val_pt:.4f}, epoch: {best_epoch}")
     _plot_loss(train_losses_pt, val_losses_pt, "pretrain_plot.png", logger)
 
     best_model = build_model(pt_in_dim, pt_config, device)
@@ -680,6 +709,7 @@ def finetune(
     config: TwoHeadNNConfig,
     pretrained_model: TwoHeadNN | None = None,
 ) -> None:
+
     ft_config = config.for_stage(training_mode="market_residual", stage="finetune", perspective_duplication=False)
     ft_train_ldr, ft_val_ldr, ft_test_ldr, ft_in_dim = prepare_data(
         stage="finetune",
@@ -714,7 +744,7 @@ def finetune(
     criterion = nn.BCEWithLogitsLoss().to(device)
     logger.info(f" Finetuning for {ft_config.epochs} epochs...")
 
-    train_losses_ft, val_losses_ft, best_val_ft = train(
+    train_losses_ft, val_losses_ft, best_val_ft, best_epoch = train(
         model=ft_model,
         train_loader=ft_train_ldr,
         val_loader=ft_val_ldr,
@@ -730,7 +760,7 @@ def finetune(
         config=ft_config
     )
 
-    logger.info(f" Done finetuning. Best val loss: {best_val_ft}")
+    logger.info(f" Done finetuning. Best val loss: {best_val_ft:.4f}, epoch: {best_epoch}")
     _plot_loss(train_losses_ft, val_losses_ft, "finetune_plot.png", logger)
 
 def _plot_loss(train_losses: List[float], val_losses: List[float], plot_name: str, logger) -> None:

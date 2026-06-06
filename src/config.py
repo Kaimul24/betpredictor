@@ -211,14 +211,17 @@ class TwoHeadNNConfig(NeuralNetworkConfig):
     pretrain_dir: Path = PROJECT_ROOT / "src" / "data" / "models" / "saved_models" / "nn_pretrain_ckpts"
     finetune_dir: Path = PROJECT_ROOT / "src" / "data" / "models" / "saved_models" / "nn_finetune_ckpts"
     pretrained_checkpoint: Path | None = None
+    encoder_freeze_epochs: int = 10
+    residual_penalty: float = 0.05
 
     def __post_init__(self):
         super().__post_init__()
         object.__setattr__(self, "pretrain_dir", Path(self.pretrain_dir))
         object.__setattr__(self, "finetune_dir", Path(self.finetune_dir))
+        object.__setattr__(self, "encoder_freeze_epochs", self.encoder_freeze_epochs)
+        object.__setattr__(self, "residual_penalty", self.residual_penalty)
         if self.pretrained_checkpoint is not None:
             object.__setattr__(self, "pretrained_checkpoint", Path(self.pretrained_checkpoint))
-
     @classmethod
     def from_namespace(cls, namespace: Any) -> "TwoHeadNNConfig":
         values = _select_dataclass_values(cls, _namespace_values(namespace))
