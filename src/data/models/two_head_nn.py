@@ -513,8 +513,7 @@ def train_epoch_finetune(
         pred_raw = model.forward_finetune(X, alpha=alpha)
         p_res = logit(p_mkt.reshape(-1,1)) + pred_raw
         loss = criterion(p_res, y.view(-1, 1))
-        res = pred_raw - p_mkt
-        loss += residual_penalty * res.pow(2).mean()
+        loss += residual_penalty * pred_raw.pow(2).mean()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
@@ -564,8 +563,7 @@ def val_epoch_finetune(
         pred_raw = model.forward_finetune(X, alpha=alpha)
         pred_res = logit(p_mkt.view(-1,1)) + pred_raw
         loss = criterion(pred_res, y.view(-1, 1))
-        res = pred_raw - p_mkt
-        loss += residual_penalty * res.pow(2).mean()
+        loss += residual_penalty * pred_raw.pow(2).mean()
         total_loss += float(loss.item())
         n_batches += 1
 
