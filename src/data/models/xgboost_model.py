@@ -200,7 +200,7 @@ class XGBoostModel:
         return trained_model
 
     def _hyperparam_tune(self):
-        pbar = tqdm(total=200, desc="Optuna HPO")
+        pbar = tqdm(total=20, desc="Optuna HPO")
 
         def tqdm_callback(study, trial):
             pbar.update(1)
@@ -216,13 +216,13 @@ class XGBoostModel:
                     "booster": trial.suggest_categorical("booster", ["gbtree", "dart"]),
                     'seed': 42,
                     'nthread': 6, 
-                    'max_depth': trial.suggest_int('max_depth', 2, 10),
+                    'max_depth': trial.suggest_int('max_depth', 2, 8),
                     'learning_rate': trial.suggest_float('learning_rate', 0.001, 0.1),
                     'subsample': trial.suggest_float('subsample', 0.1, 1.0),
                     'colsample_bytree': trial.suggest_float('colsample_bytree', 0.1, 1),
-                    'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
+                    'min_child_weight': trial.suggest_int('min_child_weight', 1, 8),
                     'reg_alpha': trial.suggest_float('reg_alpha', 0, 1),
-                    'reg_lambda': trial.suggest_float('reg_lambda', 1, 10),
+                    'reg_lambda': trial.suggest_float('reg_lambda', 1, 8),
                     'gamma': trial.suggest_float('gamma', 0, 5),
                     'grow_policy':  trial.suggest_categorical("grow_policy", ["depthwise", "lossguide"]),
                     
@@ -248,9 +248,9 @@ class XGBoostModel:
                 bst = xgb.train(
                     params,
                     dtr,
-                    num_boost_round=4000,
+                    num_boost_round=100,
                     evals=[(dtr, 'train'), (dvl, 'eval')],
-                    early_stopping_rounds = 50,
+                    early_stopping_rounds = 20,
                     verbose_eval=False
                 )
 
@@ -263,7 +263,7 @@ class XGBoostModel:
             return float(sum(scores)/len(scores))
         
         study = optuna.create_study(direction='minimize')
-        study.optimize(objective, n_trials=200, callbacks=[tqdm_callback])
+        study.optimize(objective, n_trials=20, callbacks=[tqdm_callback])
         pbar.close()
 
         self.logger.info(f" Number of finished trials: {len(study.trials)}")
@@ -375,10 +375,10 @@ class XGBoostModel:
         bst = xgb.train(
             all_params,
             self.dtrain,
-            num_boost_round=4000,
+            num_boost_round=200,
             evals=[(self.dtrain, 'train'), (self.dval_es, 'eval')],
             verbose_eval=10,
-            early_stopping_rounds=50
+            early_stopping_rounds=40
         )
 
         self.logger.info(f" Early stopping scores...")
