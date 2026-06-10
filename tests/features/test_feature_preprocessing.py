@@ -3,7 +3,7 @@ from unittest.mock import Mock
 import pandas as pd
 import pytest
 
-from src.config import FeatureConfig
+from src.config import FeatureConfig, TwoHeadNNConfig
 from src.data.features.feature_preprocessing import PreProcessing
 
 
@@ -94,8 +94,43 @@ def test_preprocessing_cache_key_uses_stable_dataclass_values():
 
     assert processor._cache_key() == (
         "xgboost_finetune_market_residual_seasons-2021_2022_2023_2024_2025_"
-        "perspective-0_bat-4-12_sp-3-8_rp-3-8_team-3-8-20"
+        "perspective-0_structured-0_structured_player_v1_bat-4-12_"
+        "sp-3-8_rp-3-8_team-3-8-20"
     )
+
+
+def test_structured_player_features_config_flows_to_feature_config_and_cache_key():
+    nn_config = TwoHeadNNConfig(
+        training_mode="stacked",
+        stage="finetune",
+        structured_player_features=True,
+    )
+
+    feature_config = nn_config.to_feature_config(
+        stage="pretrain",
+        training_mode="baseball_only",
+        model_type="mlp",
+    )
+
+    assert feature_config.structured_player_features is True
+
+    structured_processor = PreProcessing(
+        PreProcessing.PRETRAIN_YEARS,
+        config=feature_config,
+    )
+    default_processor = PreProcessing(
+        PreProcessing.PRETRAIN_YEARS,
+        config=FeatureConfig(
+            training_mode="baseball_only",
+            stage="pretrain",
+            model_type="mlp",
+            structured_player_features=False,
+        ),
+    )
+
+    assert "structured-1" in structured_processor._cache_key()
+    assert "structured-0" in default_processor._cache_key()
+    assert structured_processor._cache_key() != default_processor._cache_key()
 
 
 def test_preprocessing_config_defaults_still_work():

@@ -1,7 +1,9 @@
 from src.data.features.feature_pipeline import FeaturePipeline
 import pandas as pd
+import numpy as np
 from pandas.core.api import DataFrame as DataFrame
 import argparse
+import json
 from typing import List, Tuple, Dict, Union
 from sklearn.preprocessing import StandardScaler
 from src.config import FeatureConfig, PROJECT_ROOT, FEATURES_CACHE_PATH
@@ -15,6 +17,9 @@ load_dotenv()
 LOG_DIR = PROJECT_ROOT / "src" / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "feature_preprocessing.log"
+STRUCTURED_PLAYER_CACHE_VERSION = "structured_player_v1"
+STRUCTURED_SIDE_PREFIXES = ("home_", "away_")
+STRUCTURED_MISSING_MARKERS = ("is_missing_player", "is_missing_starter")
 
 def create_args():
     """Parse command line arguments"""
@@ -22,6 +27,7 @@ def create_args():
     parser.add_argument("--force-recreate", action="store_true", help="Recreate rolling features, even if cached file exists")
     parser.add_argument("--force-recreate-preprocessing", action="store_true", help="Recreate preprocessed datasets, even if cached file exists")
     parser.add_argument("--perspective-duplication", action="store_true", help="Duplicate training rows from each focal team's perspective")
+    parser.add_argument("--structured-player-features", action="store_true", help="Append fixed-slot lineup and starter vectors to NN features")
     parser.add_argument(
         "--model-type",
         choices=["xgboost", "mlp"],
@@ -112,7 +118,12 @@ class PreProcessing():
             'X_test': self.cache_dir / f"X_test_{cache_key}.parquet",
             'y_test': self.cache_dir / f"y_test_{cache_key}.parquet",
             'odds_data': self.cache_dir / f"odds_data_{cache_key}.parquet",
-            'scaler': self.cache_dir / f"scaler_{cache_key}.pkl"
+            'scaler': self.cache_dir / f"scaler_{cache_key}.pkl",
+            'X_train_structured_flat': self.cache_dir / f"X_train_structured_flat_{cache_key}.npz",
+            'X_val_structured_flat': self.cache_dir / f"X_val_structured_flat_{cache_key}.npz",
+            'X_test_structured_flat': self.cache_dir / f"X_test_structured_flat_{cache_key}.npz",
+            'structured_feature_metadata': self.cache_dir / f"structured_feature_metadata_{cache_key}.json",
+            'structured_scaler': self.cache_dir / f"structured_scaler_{cache_key}.pkl",
         }
 
         self.target = ['is_winner_home']
@@ -139,6 +150,8 @@ class PreProcessing():
             self.training_mode,
             f"seasons-{self.seasons_str}",
             f"perspective-{int(self.config.perspective_duplication)}",
+            f"structured-{int(self.config.structured_player_features)}",
+            STRUCTURED_PLAYER_CACHE_VERSION,
             *halflive_parts,
         ])
 
@@ -178,10 +191,15 @@ class PreProcessing():
             self.logger.info(f" No cached preprocessed data found, processing features...")
 
         self.logger.info(f" Getting raw features for seasons {self.seasons}")
-        features, odds_data = self._get_features(force_recreate, clear_log)
+        feature_payload = self._get_features(force_recreate, clear_log)
+        if self.config.structured_player_features:
+            features, odds_data, structured_features = feature_payload
+        else:
+            features, odds_data = feature_payload
+            structured_features = None
 
         self.logger.info(f" Performing feature scaling and data splitting")
-        processed_data = self._feature_scaling(features)
+        processed_data = self._feature_scaling(features, structured_features)
         all_odds = pd.concat(odds_data) 
         
         self.logger.info(f" Caching processed data")
@@ -192,10 +210,17 @@ class PreProcessing():
         
         return processed_data, all_odds
            
-    def _feature_scaling(self, dfs: List[DataFrame]) -> Dict[str, Union[DataFrame, StandardScaler | None]]:
+    def _feature_scaling(
+        self,
+        dfs: List[DataFrame],
+        structured_dfs: List[DataFrame] | None = None,
+    ) -> Dict[str, Union[DataFrame, StandardScaler | None]]:
         filtered_dfs = [df[[col for col in df.columns if col not in self.exclude_columns]] for df in dfs]
 
         train_data, val_df, test_df = self._split_data(filtered_dfs)
+        structured_splits = None
+        if structured_dfs is not None:
+            structured_splits = self._split_data(structured_dfs)
 
         if self.config.perspective_duplication:
             train_data = self._duplicate_training_perspective(train_data)
@@ -225,6 +250,11 @@ class PreProcessing():
 
         self.logger.info(f" Dropping {test_df.isna().any(axis=1).sum()} rows from test data...")
         test_df = test_df.dropna()
+
+        if self.config.structured_player_features:
+            train_data = self._drop_structured_duplicate_tabular_features(train_data)
+            val_df = self._drop_structured_duplicate_tabular_features(val_df)
+            test_df = self._drop_structured_duplicate_tabular_features(test_df)
 
         self.logger.debug(f" Dtypes\n{filtered_dfs[0].dtypes.value_counts()}")
         self.logger.debug(f" Features\n{filtered_dfs[0].columns.to_list()}")
@@ -297,7 +327,7 @@ class PreProcessing():
         
         self.scaler = scaler
             
-        return {
+        processed = {
             'X_train': X_train,
             'y_train': y_train,
             'X_val': X_val,
@@ -306,6 +336,18 @@ class PreProcessing():
             'y_test': y_test,
             'scaler': scaler
         }
+
+        if structured_splits is not None:
+            processed.update(
+                self._process_structured_features(
+                    structured_splits=structured_splits,
+                    X_train=X_train,
+                    X_val=X_val,
+                    X_test=X_test,
+                )
+            )
+        
+        return processed
 
     def _duplicate_training_perspective(self, train_data: DataFrame) -> DataFrame:
         from src.data.features.perspective import duplicate_training_perspective
@@ -353,9 +395,14 @@ class PreProcessing():
 
         return train_data, val_df, test_df
         
-    def _get_features(self, force_recreate: bool = False, clear_log: bool = False) -> Tuple[List[DataFrame], List[DataFrame]]:
+    def _get_features(
+        self,
+        force_recreate: bool = False,
+        clear_log: bool = False,
+    ) -> Tuple[List[DataFrame], List[DataFrame]] | Tuple[List[DataFrame], List[DataFrame], List[DataFrame]]:
         all_features = []
         all_odds = []
+        all_structured_features = []
 
         pipeline_logger = setup_logging(
             "feature_pipeline",
@@ -367,8 +414,126 @@ class PreProcessing():
             season_feats, odds_data = feat_pipe.start_pipeline(force_recreate, self.mkt_only)
             all_features.append(season_feats)
             all_odds.append(odds_data)
+            if self.config.structured_player_features:
+                all_structured_features.append(
+                    feat_pipe.get_structured_player_features(season_feats, force_recreate)
+                )
 
+        if self.config.structured_player_features:
+            return all_features, all_odds, all_structured_features
         return all_features, all_odds
+
+    def _drop_structured_duplicate_tabular_features(self, data: DataFrame) -> DataFrame:
+        drop_cols = [
+            col for col in data.columns
+            if self._is_structured_duplicate_tabular_column(col)
+        ]
+        return data.drop(columns=drop_cols, errors="ignore")
+
+    def _is_structured_duplicate_tabular_column(self, column: str) -> bool:
+        batting_stats = (
+            "woba", "ops", "wrc_plus", "iso", "babip", "k_percent",
+            "bb_percent", "barrel_percent", "hard_hit", "ev", "gb_fb",
+            "bb_k", "baserunning", "wraa", "wpa", "frv_per_9",
+        )
+        if column.startswith(("home_starter_", "away_starter_", "home_away_starter_")):
+            return True
+        if column.startswith(("home_", "away_")):
+            side = "home_" if column.startswith("home_") else "away_"
+            suffix = column.removeprefix(side)
+            return any(suffix == stat or suffix.startswith(f"{stat}_") for stat in batting_stats)
+        if column.startswith("home_away_"):
+            suffix = column.removeprefix("home_away_")
+            return any(suffix.startswith(f"{stat}_") for stat in batting_stats)
+        return False
+
+    def _process_structured_features(
+        self,
+        structured_splits: Tuple[DataFrame, DataFrame, DataFrame],
+        X_train: DataFrame,
+        X_val: DataFrame,
+        X_test: DataFrame,
+    ) -> Dict[str, object]:
+        train_structured, val_structured, test_structured = structured_splits
+        train_aligned = self._align_structured_split(train_structured, X_train)
+        val_aligned = self._align_structured_split(val_structured, X_val)
+        test_aligned = self._align_structured_split(test_structured, X_test)
+
+        train_scaled, val_scaled, test_scaled, structured_scaler = self._scale_structured_splits(
+            train_aligned,
+            val_aligned,
+            test_aligned,
+        )
+        return {
+            "X_train_structured_flat": train_scaled.to_numpy(dtype=np.float32),
+            "X_val_structured_flat": val_scaled.to_numpy(dtype=np.float32),
+            "X_test_structured_flat": test_scaled.to_numpy(dtype=np.float32),
+            "structured_feature_names": train_scaled.columns.tolist(),
+            "structured_feature_metadata": {
+                "version": STRUCTURED_PLAYER_CACHE_VERSION,
+                "feature_names": train_scaled.columns.tolist(),
+                "lineup_slots": 9,
+                "flatten_order": "home_lineup,away_lineup,home_starter,away_starter",
+            },
+            "structured_scaler": structured_scaler,
+        }
+
+    def _align_structured_split(self, structured: DataFrame, X: DataFrame) -> DataFrame:
+        aligned_rows = []
+        for idx, row in X.iterrows():
+            structured_row = structured.loc[idx]
+            if isinstance(structured_row, pd.DataFrame):
+                structured_row = structured_row.iloc[0]
+            if "focal_is_home" in X.columns and int(row["focal_is_home"]) == 0:
+                structured_row = self._swap_structured_home_away(structured_row)
+            aligned_rows.append(structured_row)
+        return pd.DataFrame(aligned_rows, index=X.index)
+
+    def _swap_structured_home_away(self, row: pd.Series) -> pd.Series:
+        swapped = row.copy()
+        for col in row.index:
+            if col.startswith(STRUCTURED_SIDE_PREFIXES[0]):
+                away_col = f"{STRUCTURED_SIDE_PREFIXES[1]}{col.removeprefix(STRUCTURED_SIDE_PREFIXES[0])}"
+                if away_col in row.index:
+                    swapped[col] = row[away_col]
+                    swapped[away_col] = row[col]
+        return swapped
+
+    def _scale_structured_splits(
+        self,
+        train: DataFrame,
+        val: DataFrame,
+        test: DataFrame,
+    ) -> Tuple[DataFrame, DataFrame, DataFrame, Dict[str, object]]:
+        indicator_cols = [
+            col for col in train.columns
+            if any(marker in col for marker in STRUCTURED_MISSING_MARKERS)
+        ]
+        numeric_cols = [col for col in train.columns if col not in indicator_cols]
+        medians = train[numeric_cols].median(numeric_only=True).fillna(0.0)
+
+        train_filled = train.copy()
+        val_filled = val.copy()
+        test_filled = test.copy()
+        for frame in (train_filled, val_filled, test_filled):
+            frame[numeric_cols] = frame[numeric_cols].fillna(medians)
+            frame[indicator_cols] = frame[indicator_cols].fillna(1).astype(int)
+
+        scaler = StandardScaler()
+        if numeric_cols:
+            train_filled[numeric_cols] = scaler.fit_transform(train_filled[numeric_cols])
+            val_filled[numeric_cols] = scaler.transform(val_filled[numeric_cols])
+            test_filled[numeric_cols] = scaler.transform(test_filled[numeric_cols])
+        else:
+            scaler = None
+
+        metadata = {
+            "scaler": scaler,
+            "medians": medians.to_dict(),
+            "numeric_columns": numeric_cols,
+            "indicator_columns": indicator_cols,
+        }
+        return train_filled, val_filled, test_filled, metadata
     
     def _log_nan_rows(self, dfs: List[DataFrame]) -> None:
         for i, df in enumerate(dfs):
@@ -394,6 +559,14 @@ class PreProcessing():
 
             joblib.dump(processed_data['scaler'], self.cache_paths['scaler'])
             self.logger.info(f" Cached scaler to {self.cache_paths['scaler']}")
+
+            if self.config.structured_player_features:
+                for key in ["X_train_structured_flat", "X_val_structured_flat", "X_test_structured_flat"]:
+                    np.savez_compressed(self.cache_paths[key], values=processed_data[key])
+                    self.logger.info(f" Cached {key} to {self.cache_paths[key]}")
+                with open(self.cache_paths["structured_feature_metadata"], "w", encoding="utf-8") as f:
+                    json.dump(processed_data["structured_feature_metadata"], f, indent=2)
+                joblib.dump(processed_data["structured_scaler"], self.cache_paths["structured_scaler"])
             
         except Exception as e:
             self.logger.error(f" Failed to cache processed data: {e}")
@@ -413,6 +586,17 @@ class PreProcessing():
 
             cached_data['scaler'] = joblib.load(self.cache_paths['scaler'])
             self.logger.info(f" Loaded cached scaler")
+
+            if self.config.structured_player_features:
+                for key in ["X_train_structured_flat", "X_val_structured_flat", "X_test_structured_flat"]:
+                    with np.load(self.cache_paths[key]) as payload:
+                        cached_data[key] = payload["values"]
+                    self.logger.info(f" Loaded cached {key}")
+                with open(self.cache_paths["structured_feature_metadata"], "r", encoding="utf-8") as f:
+                    metadata = json.load(f)
+                cached_data["structured_feature_metadata"] = metadata
+                cached_data["structured_feature_names"] = metadata["feature_names"]
+                cached_data["structured_scaler"] = joblib.load(self.cache_paths["structured_scaler"])
             
             return cached_data, odds_df
             
@@ -423,6 +607,14 @@ class PreProcessing():
     def _cache_exists(self) -> bool:
         """Check if all required cache files exist"""
         required_files = ['X_train', 'y_train', 'X_val', 'y_val', 'X_test', 'y_test', 'scaler']
+        if self.config.structured_player_features:
+            required_files.extend([
+                "X_train_structured_flat",
+                "X_val_structured_flat",
+                "X_test_structured_flat",
+                "structured_feature_metadata",
+                "structured_scaler",
+            ])
         return all(self.cache_paths[key].exists() for key in required_files)
     
     def _clear_cache(self) -> None:

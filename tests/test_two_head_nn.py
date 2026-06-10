@@ -3,6 +3,7 @@ import json
 import logging
 import sys
 
+import numpy as np
 import pytest
 import torch
 import pandas as pd
@@ -13,22 +14,29 @@ from src.config import TwoHeadNNConfig
 import src.data.models.two_head_nn as two_head_module
 from src.data.models.two_head_nn import (
     DatasetFineTune,
+    DatasetPretrain,
     TwoHeadNN,
-    apply_pretrain_hyperparameters,
+    apply_hyperparameters,
     create_args,
     load_checkpoint,
+    load_hyperparameters,
     load_pretrained_checkpoint,
-    load_pretrain_hyperparameters,
     pretrain,
-    pretrain_stability_objective,
     save_checkpoint,
+    stability_objective,
     train,
-    tune_pretrain_hyperparameters,
+    train_epoch_pretrain,
+    tune_hyperparameters,
+    val_epoch_pretrain,
     validate_tuning_mode,
 )
 
 
 LOGGER = logging.getLogger("test_two_head_nn")
+
+
+def _structured_player_array(row_count: int = 2) -> np.ndarray:
+    return np.arange(row_count * 3 * 2, dtype=np.float32).reshape(row_count, 3, 2)
 
 
 def test_two_head_checkpoint_uses_weights_only_safe_config_dict(tmp_path):
@@ -65,6 +73,58 @@ def test_two_head_checkpoint_uses_weights_only_safe_config_dict(tmp_path):
     assert optimizer_out is loaded_optimizer
 
 
+def test_two_head_checkpoint_persists_and_validates_feature_signature(tmp_path):
+    config = TwoHeadNNConfig(
+        training_mode="baseball_only",
+        stage="pretrain",
+        epochs=1,
+        structured_player_features=True,
+    )
+    model = TwoHeadNN(in_dim=2, base_hidden_size=4, p_drop=0.0)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr)
+    checkpoint_path = tmp_path / "checkpoint.pt"
+    feature_signature = {
+        "tabular_columns": ["baseball_a", "baseball_b"],
+        "structured_player_shape": [3, 2],
+    }
+
+    save_checkpoint(
+        model=model,
+        optimizer=optimizer,
+        epoch=0,
+        train_loss=0.2,
+        val_loss=0.3,
+        path=checkpoint_path,
+        config=config,
+        feature_signature=feature_signature,
+    )
+
+    raw_checkpoint = torch.load(checkpoint_path, weights_only=True)
+    assert raw_checkpoint["feature_signature"] == feature_signature
+
+    loaded_model = TwoHeadNN(in_dim=2, base_hidden_size=4, p_drop=0.0)
+    loaded_optimizer = torch.optim.AdamW(loaded_model.parameters(), lr=config.lr)
+    load_checkpoint(
+        model=loaded_model,
+        optimizer=loaded_optimizer,
+        model_path=checkpoint_path,
+        config=config,
+        feature_signature=feature_signature,
+    )
+
+    with pytest.raises(RuntimeError, match="feature signature"):
+        load_checkpoint(
+            model=loaded_model,
+            optimizer=loaded_optimizer,
+            model_path=checkpoint_path,
+            config=config,
+            feature_signature={
+                "tabular_columns": ["baseball_a"],
+                "structured_player_shape": [3, 2],
+            },
+        )
+
+
 def test_two_head_load_pretrained_checkpoint_from_disk(tmp_path):
     pretrain_config = TwoHeadNNConfig(training_mode="baseball_only", stage="pretrain", epochs=1)
     finetune_config = TwoHeadNNConfig(training_mode="market_residual", stage="finetune", epochs=1)
@@ -91,6 +151,32 @@ def test_two_head_load_pretrained_checkpoint_from_disk(tmp_path):
         torch.testing.assert_close(expected, actual)
 
 
+def test_pretrain_dataset_accepts_optional_structured_player_features():
+    X = pd.DataFrame({"baseball_a": [1.0, 2.0], "baseball_b": [3.0, 4.0]})
+    y = pd.Series([1, 0])
+    structured_features = _structured_player_array()
+
+    plain_dataset = DatasetPretrain(X, y)
+    assert len(plain_dataset[0]) == 2
+
+    dataset = DatasetPretrain(
+        X,
+        y,
+        structured_player_features=structured_features,
+    )
+
+    features, label = dataset[1]
+    expected_features = torch.tensor(
+        [2.0, 4.0, *structured_features[1].reshape(-1).tolist()]
+    )
+    torch.testing.assert_close(features, expected_features)
+    assert label == torch.tensor(0.0)
+    assert dataset.X.shape == (2, 8)
+
+    with pytest.raises(ValueError, match="structured_player_features length"):
+        DatasetPretrain(X, y, structured_player_features=structured_features[:1])
+
+
 def test_finetune_dataset_uses_baseball_features_and_market_baseline():
     X = pd.DataFrame(
         {
@@ -111,6 +197,41 @@ def test_finetune_dataset_uses_baseball_features_and_market_baseline():
     assert dataset.p_mkt.tolist() == [0.55, 0.60]
 
 
+def test_finetune_dataset_accepts_optional_structured_player_features():
+    X = pd.DataFrame(
+        {
+            "baseball_a": [1.0, 2.0],
+            "baseball_b": [3.0, 4.0],
+            "p_open_home_median_nv": [0.55, 0.60],
+            "num_books": [8, 7],
+        }
+    )
+    y = pd.Series([1, 0])
+    structured_features = _structured_player_array()
+
+    plain_dataset = DatasetFineTune(X, y)
+    assert len(plain_dataset[0]) == 3
+
+    dataset = DatasetFineTune(
+        X,
+        y,
+        structured_player_features=structured_features,
+    )
+
+    features, label, p_mkt = dataset[0]
+    expected_features = torch.tensor(
+        [1.0, 3.0, *structured_features[0].reshape(-1).tolist()]
+    )
+    assert dataset.feature_columns == ["baseball_a", "baseball_b"]
+    torch.testing.assert_close(features, expected_features)
+    assert label == torch.tensor(1.0)
+    assert p_mkt == torch.tensor(0.55)
+    assert dataset.X.shape == (2, 8)
+
+    with pytest.raises(ValueError, match="structured_player_features length"):
+        DatasetFineTune(X, y, structured_player_features=structured_features[:1])
+
+
 def test_two_head_cli_parses_pretrain_tuning_fields(monkeypatch):
     monkeypatch.setattr(
         sys,
@@ -127,10 +248,13 @@ def test_two_head_cli_parses_pretrain_tuning_fields(monkeypatch):
     )
 
     args = create_args()
-    config = TwoHeadNNConfig.from_namespace(argparse.Namespace(**vars(args), stage="finetune"))
+    namespace = argparse.Namespace(**vars(args), stage="finetune")
+    if hasattr(args, "use_hyperparams"):
+        namespace.use_pt_hyperparams = args.use_hyperparams
+    config = TwoHeadNNConfig.from_namespace(namespace)
 
     assert config.retune is True
-    assert config.use_hyperparams is True
+    assert config.use_pt_hyperparams is True
     assert config.pretrain_trials == 3
     assert config.weight_decay == pytest.approx(0.05)
 
@@ -161,13 +285,13 @@ def test_saved_hyperparams_apply_to_pretrain_config_without_mutating_finetune_co
         weight_decay=0.03,
     )
 
-    params = load_pretrain_hyperparameters(hyperparam_path)
+    params = load_hyperparameters(hyperparam_path)
     pretrain_config = config.for_stage(
         training_mode="baseball_only",
         stage="pretrain",
         perspective_duplication=True,
     )
-    tuned_pretrain_config = apply_pretrain_hyperparameters(pretrain_config, params)
+    tuned_pretrain_config = apply_hyperparameters(pretrain_config, params)
     finetune_config = config.for_stage(
         training_mode="market_residual",
         stage="finetune",
@@ -198,12 +322,14 @@ def test_tiny_optuna_pretrain_tuning_returns_all_hyperparameter_keys(tmp_path):
         base_hidden_size=16,
     )
 
-    params = tune_pretrain_hyperparameters(
+    params = tune_hyperparameters(
         config=config,
         train_loader=train_loader,
         val_loader=val_loader,
         in_dim=3,
         device=torch.device("cpu"),
+        train_epoch_fn=train_epoch_pretrain,
+        val_epoch_fn=val_epoch_pretrain,
         logger=LOGGER,
         n_trials=2,
         hyperparam_path=tmp_path / "params.json",
@@ -215,7 +341,7 @@ def test_tiny_optuna_pretrain_tuning_returns_all_hyperparameter_keys(tmp_path):
 def test_pretrain_stability_objective_penalizes_late_validation_drift():
     val_losses = [0.70, 0.68, 0.67, 0.69, 0.72, 0.74]
 
-    objective = pretrain_stability_objective(val_losses)
+    objective = stability_objective(val_losses)
 
     best_smoothed_val = (0.70 + 0.68 + 0.67 + 0.69 + 0.72) / 5
     overfit_penalty = ((0.68 + 0.67 + 0.69 + 0.72 + 0.74) / 5) - 0.67
@@ -224,7 +350,7 @@ def test_pretrain_stability_objective_penalizes_late_validation_drift():
 
 
 def test_pretrain_stability_objective_handles_short_trials():
-    assert pretrain_stability_objective([0.7]) == pytest.approx(0.7)
+    assert stability_objective([0.7]) == pytest.approx(0.7)
 
 
 def test_train_runs_full_epoch_count_and_saves_best_checkpoint(tmp_path):
@@ -299,7 +425,7 @@ def test_pretrain_reloads_best_checkpoint_before_returning(monkeypatch, tmp_path
     def fake_plot_loss(*args, **kwargs):
         return None
 
-    def fake_load_pretrained_checkpoint(model, model_path, device=None):
+    def fake_load_pretrained_checkpoint(model, model_path, device=None, feature_signature=None):
         calls["path"] = model_path
         model.loaded_from_best_checkpoint = True
         return model

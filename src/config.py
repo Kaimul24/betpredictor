@@ -38,6 +38,7 @@ class FeatureConfig(ConfigMixin):
     stage: str
     training_mode: str = "market_residual"
     model_type: str = "mlp"
+    structured_player_features: bool = False
     perspective_duplication: bool = False
     force_recreate: bool = False
     force_recreate_preprocessing: bool = False
@@ -119,6 +120,7 @@ class XGBoostConfig(ConfigMixin):
             training_mode=training_mode,
             stage=stage,
             model_type=model_type,
+            structured_player_features=False,
             perspective_duplication=self.perspective_duplication,
             force_recreate=self.force_recreate,
             force_recreate_preprocessing=self.force_recreate_preprocessing,
@@ -136,20 +138,22 @@ class XGBoostConfig(ConfigMixin):
 class NeuralNetworkConfig(ConfigMixin):
     stage: str
     training_mode: str = "market_residual"
+    structured_player_features: bool = False
     perspective_duplication: bool = False
     base_hidden_size: int = 256
     max_residual: float = 0.5
     alpha: float = 0.7
     p_drop: float = 0.2
-    train_batch: int = 1024
-    val_batch: int = 8192
+    train_batch: int = 256
+    val_batch: int = 512
     epochs: int = 100
     lr: float = 1e-4
     min_lr: float = 1e-6
     weight_decay: float = 0.03
     cosine_scheduler: bool = True
     retune: bool = False
-    use_hyperparams: bool = False
+    use_pt_hyperparams: bool = False
+    use_ft_hyperparams: bool = False
     force_recreate: bool = False
     force_recreate_preprocessing: bool = False
     clear_log: bool = False
@@ -191,6 +195,7 @@ class NeuralNetworkConfig(ConfigMixin):
             training_mode=training_mode,
             stage=stage,
             model_type=model_type,
+            structured_player_features=self.structured_player_features,
             perspective_duplication=self.perspective_duplication,
             force_recreate=self.force_recreate,
             force_recreate_preprocessing=self.force_recreate_preprocessing,
@@ -208,6 +213,7 @@ class NeuralNetworkConfig(ConfigMixin):
 class TwoHeadNNConfig(NeuralNetworkConfig):
     device: str = "auto"
     pretrain_trials: int = 50
+    finetune_trials: int = 50
     pretrain_dir: Path = PROJECT_ROOT / "src" / "data" / "models" / "saved_models" / "nn_pretrain_ckpts"
     finetune_dir: Path = PROJECT_ROOT / "src" / "data" / "models" / "saved_models" / "nn_finetune_ckpts"
     pretrained_checkpoint: Path | None = None

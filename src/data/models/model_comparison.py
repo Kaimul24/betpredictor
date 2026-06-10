@@ -57,6 +57,7 @@ def create_args():
     parser.add_argument("--output-csv", type=Path, default=None)
     parser.add_argument("--force-recreate", action="store_true")
     parser.add_argument("--force-recreate-preprocessing", action="store_true")
+    parser.add_argument("--structured-player-features", action="store_true", help="Load structured NN player features for two-head NN predictions")
     return parser.parse_args()
 
 
@@ -68,11 +69,13 @@ def load_finetune_model_data(
     model_type: str,
     force_recreate: bool = False,
     force_recreate_preprocessing: bool = False,
+    structured_player_features: bool = False,
 ):
     config = FeatureConfig(
         stage="finetune",
         training_mode="market_residual",
         model_type=model_type,
+        structured_player_features=structured_player_features,
         perspective_duplication=False,
         force_recreate=force_recreate,
         force_recreate_preprocessing=force_recreate_preprocessing,
@@ -225,7 +228,11 @@ def predict_two_head_split(
 ) -> PredictionResult:
     X = model_data[f"X_{split}"]
     y = model_data[f"y_{split}"]
-    dataset = DatasetFineTune(X, y)
+    dataset = DatasetFineTune(
+        X,
+        y,
+        structured_player_features=model_data.get(f"X_{split}_structured_flat"),
+    )
     device = get_device(device_name)
     model, config = load_two_head_model_from_checkpoint(
         checkpoint_path,
@@ -315,6 +322,7 @@ def main():
         model_type="xgboost",
         force_recreate=args.force_recreate,
         force_recreate_preprocessing=args.force_recreate_preprocessing,
+        structured_player_features=False,
     )
     nn_data = None
     if "two_head_nn" in args.models:
@@ -322,6 +330,7 @@ def main():
             model_type="mlp",
             force_recreate=args.force_recreate,
             force_recreate_preprocessing=args.force_recreate_preprocessing,
+            structured_player_features=args.structured_player_features,
         )
 
     frames = []

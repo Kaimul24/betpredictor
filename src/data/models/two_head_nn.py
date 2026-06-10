@@ -26,7 +26,8 @@ SAVED_MODEL_DIR.mkdir(parents=True, exist_ok=True)
 HYPERPARAM_DIR = PROJECT_ROOT / "src" / "data" / "models" / "saved_hyperparameters"
 HYPERPARAM_DIR.mkdir(parents=True, exist_ok=True)
 PRETRAIN_HYPERPARAM_PATH = HYPERPARAM_DIR / "two_head_pretrain_hyperparams.json"
-PRETRAIN_HYPERPARAM_KEYS = ("base_hidden_size", "p_drop", "lr", "weight_decay")
+FINETUNE_HYPERPARAM_PATH = HYPERPARAM_DIR / "two_head_finetune_hyperparams.json"
+HYPERPARAM_KEYS = ("base_hidden_size", "p_drop", "lr", "weight_decay")
 
 PRETRAIN_CHECKPOINTS = SAVED_MODEL_DIR / "nn_pretrain_ckpts"
 PRETRAIN_CHECKPOINTS.mkdir(parents=True, exist_ok=True)
@@ -91,6 +92,7 @@ def create_args():
     parser.add_argument("--force-recreate", action="store_true", help="Recreate rolling features, even if cached file exists")
     parser.add_argument("--force-recreate-preprocessing", action="store_true", help="Recreate preprocessed datasets, even if cached file exists")
     parser.add_argument("--perspective-duplication", action="store_true", help="Duplicate training rows from each focal team's perspective")
+    parser.add_argument("--structured-player-features", action="store_true", help="Append fixed-slot lineup and starter vectors to the NN input")
     parser.add_argument("--log", action="store_true", help=f"Write debug data to log file {LOG_FILE}")
     parser.add_argument("--log-file", type=str, help="Custom log file path (overrides default)")
     parser.add_argument("--clear-log", action="store_true", help="Clear the log file before starting (removes existing log content)")
@@ -145,11 +147,39 @@ class TwoHeadNN(nn.Module):
     def forward_finetune(self, x, alpha: float = 1.0):
         return alpha * self.residual_logit(x)
     
+def _coerce_structured_features(structured_player_features, expected_rows: int) -> np.ndarray | None:
+    if structured_player_features is None:
+        return None
+
+    structured = np.asarray(structured_player_features, dtype=np.float32)
+    if len(structured) != expected_rows:
+        raise ValueError(
+            "structured_player_features length must match X length: "
+            f"{len(structured)} != {expected_rows}"
+        )
+    return structured.reshape(expected_rows, -1)
+
+def _append_structured_features(X: np.ndarray, structured_player_features) -> np.ndarray:
+    structured = _coerce_structured_features(structured_player_features, len(X))
+    if structured is None:
+        return X
+    return np.concatenate([X.astype(np.float32, copy=False), structured], axis=1)
+
 class DatasetPretrain(Dataset):
-    def __init__(self, X: DataFrame, y: pd.Series, mkt_col: str = MARKET_PROBABILITY_COL):
+    def __init__(
+        self,
+        X: DataFrame,
+        y: pd.Series,
+        mkt_col: str = MARKET_PROBABILITY_COL,
+        structured_player_features=None,
+    ):
         assert mkt_col not in X.columns
         assert len(X) == len(y)
-        self.X = X.to_numpy()
+        self.feature_columns = list(X.columns)
+        self.X = _append_structured_features(
+            X.to_numpy(dtype=np.float32),
+            structured_player_features,
+        )
         self.y = y.to_numpy()
 
     def __len__(self):
@@ -161,11 +191,20 @@ class DatasetPretrain(Dataset):
         return feature, label
 
 class DatasetFineTune(Dataset):
-    def __init__(self, X: DataFrame, y: pd.Series, mkt_col: str = MARKET_PROBABILITY_COL):
+    def __init__(
+        self,
+        X: DataFrame,
+        y: pd.Series,
+        mkt_col: str = MARKET_PROBABILITY_COL,
+        structured_player_features=None,
+    ):
         assert mkt_col in X.columns
         assert len(X) == len(y)
         self.feature_columns = baseball_feature_columns(X.columns)
-        self.X = X.loc[:, self.feature_columns].to_numpy()
+        self.X = _append_structured_features(
+            X.loc[:, self.feature_columns].to_numpy(dtype=np.float32),
+            structured_player_features,
+        )
         self.y = y.to_numpy()
         self.p_mkt = X[mkt_col].to_numpy()
 
@@ -210,44 +249,49 @@ def build_scheduler(optimizer: torch.optim.Optimizer, config: TwoHeadNNConfig):
         eta_min=config.min_lr,
     )
 
-def _coerce_pretrain_hyperparameters(params: dict) -> dict:
-    missing = [key for key in PRETRAIN_HYPERPARAM_KEYS if key not in params]
+def _coerce_hyperparameters(params: dict) -> dict:
+    missing = [key for key in HYPERPARAM_KEYS if key not in params]
     if missing:
-        raise ValueError(f"Missing pretrain hyperparameters: {missing}")
-    return {
+        raise ValueError(f"Missing hyperparameters: {missing}")
+    p = {
         "base_hidden_size": int(params["base_hidden_size"]),
         "p_drop": float(params["p_drop"]),
         "lr": float(params["lr"]),
         "weight_decay": float(params["weight_decay"]),
     }
 
-def apply_pretrain_hyperparameters(config: TwoHeadNNConfig, params: dict) -> TwoHeadNNConfig:
-    return replace(config, **_coerce_pretrain_hyperparameters(params))
+    if "encoder_freeze_epochs" in params.keys():
+        p.update({"encoder_freeze_epochs": int(params["encoder_freeze_epochs"])})
 
-def save_pretrain_hyperparameters(
+    return p
+
+def apply_hyperparameters(config: TwoHeadNNConfig, params: dict) -> TwoHeadNNConfig:
+    return replace(config, **_coerce_hyperparameters(params))
+
+def save_hyperparameters(
     params: dict,
     best_value: float,
     n_trials: int,
-    path: Path = PRETRAIN_HYPERPARAM_PATH,
+    path: Path
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "best_params": _coerce_pretrain_hyperparameters(params),
+        "best_params": _coerce_hyperparameters(params),
         "best_value": float(best_value),
         "n_trials": int(n_trials),
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
-def load_pretrain_hyperparameters(path: Path = PRETRAIN_HYPERPARAM_PATH) -> dict:
+def load_hyperparameters(path: Path) -> dict:
     if not path.exists():
-        raise FileNotFoundError(f"Saved pretrain hyperparameters not found: {path}")
+        raise FileNotFoundError(f"Saved hyperparameters not found: {path}")
     with open(path, "r", encoding="utf-8") as f:
         payload = json.load(f)
     params = payload.get("best_params", payload)
-    return _coerce_pretrain_hyperparameters(params)
+    return _coerce_hyperparameters(params)
 
-def pretrain_stability_objective(val_losses: list[float], window: int = 5) -> float:
+def stability_objective(val_losses: list[float], window: int = 5) -> float:
     if not val_losses:
         raise ValueError("val_losses must contain at least one epoch")
     if window < 1:
@@ -271,27 +315,33 @@ def pretrain_stability_objective(val_losses: list[float], window: int = 5) -> fl
         + 0.02 * early_peak_penalty
     )
 
-def tune_pretrain_hyperparameters(
+def tune_hyperparameters(
     config: TwoHeadNNConfig,
     train_loader: DataLoader,
     val_loader: DataLoader,
     in_dim: int,
     device: torch.device,
+    train_epoch_fn: Callable,
+    val_epoch_fn: Callable,
     logger,
+    hyperparam_path: Path,
     n_trials: int | None = None,
-    hyperparam_path: Path = PRETRAIN_HYPERPARAM_PATH,
 ) -> dict:
     trial_count = n_trials if n_trials is not None else config.pretrain_trials
     criterion = nn.BCEWithLogitsLoss().to(device)
 
     def objective(trial: optuna.Trial) -> float:
         params = {
-            "base_hidden_size": trial.suggest_categorical("base_hidden_size", [16, 32, 64]),
-            "p_drop": trial.suggest_float("p_drop", 0.1, 0.6),
+            "base_hidden_size": trial.suggest_categorical("base_hidden_size", [32, 64]),
+            "p_drop": trial.suggest_float("p_drop", 0.2, 0.6),
             "lr": trial.suggest_float("lr", 1e-5, 1e-3, log=True),
             "weight_decay": trial.suggest_float("weight_decay", 1e-5, 2e-1, log=True),
         }
-        trial_config = apply_pretrain_hyperparameters(config, params)
+
+        if config.stage == "finetune":
+            params.update({"encoder_freeze_epochs": trial.suggest_int("encoder_freeze_epochs", 5, config.epochs)})
+
+        trial_config = apply_hyperparameters(config, params)
         _set_torch_seed(42)
         model = build_model(in_dim, trial_config, device)
         optimizer = build_optimizer(model, trial_config)
@@ -299,8 +349,14 @@ def tune_pretrain_hyperparameters(
         train_losses, val_losses = [], []
 
         for epoch in range(trial_config.epochs):
-            train_loss = train_epoch_pretrain(model, train_loader, optimizer, criterion, device)
-            val_loss = val_epoch_pretrain(model, val_loader, criterion, device)
+            if config.stage == "finetune":
+                freeze_epochs = params.get("encoder_freeze_epochs", config.encoder_freeze_epochs)
+                if epoch < freeze_epochs:
+                    freeze_encoder_parameters(model)
+                elif epoch == freeze_epochs:
+                    unfreeze_encoder_parameters(model)
+            train_loss = train_epoch_fn(model, train_loader, optimizer, criterion, device)
+            val_loss = val_epoch_fn(model, val_loader, criterion, device)
             train_losses.append(train_loss)
             val_losses.append(val_loss)
             scheduler.step()
@@ -308,12 +364,12 @@ def tune_pretrain_hyperparameters(
             if trial.should_prune():
                 raise optuna.exceptions.TrialPruned()
 
-        return pretrain_stability_objective(val_losses)
+        return stability_objective(val_losses)
 
     sampler = optuna.samplers.TPESampler(seed=42)
     pruner = optuna.pruners.MedianPruner()
     study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner)
-    logger.info(f" Tuning pretrain hyperparameters for {trial_count} trials...")
+    logger.info(f" Tuning hyperparameters for {trial_count} trials...")
 
     with tqdm(total=trial_count, desc="Optuna pretrain tuning") as progress:
         def _tick(study, trial):
@@ -321,8 +377,8 @@ def tune_pretrain_hyperparameters(
 
         study.optimize(objective, n_trials=trial_count, callbacks=[_tick])
 
-    best_params = _coerce_pretrain_hyperparameters(study.best_params)
-    save_pretrain_hyperparameters(
+    best_params = _coerce_hyperparameters(study.best_params)
+    save_hyperparameters(
         params=best_params,
         best_value=study.best_value,
         n_trials=trial_count,
@@ -337,7 +393,7 @@ def prepare_data(
         config: TwoHeadNNConfig,
         train_batch_size: int = 256,
         val_test_batch_size: int = 512
-    ) -> tuple[DataLoader, DataLoader, DataLoader, int]:
+    ) -> tuple[DataLoader, DataLoader, DataLoader, int, dict]:
 
     if not isinstance(config, TwoHeadNNConfig):
         raise TypeError("prepare_data requires a TwoHeadNNConfig")
@@ -367,23 +423,33 @@ def prepare_data(
             config.force_recreate_preprocessing,
             config.clear_log
     )
+    use_structured = config.structured_player_features
     train_dataset = dataset(
         data["X_train"],
-        data["y_train"]
+        data["y_train"],
+        structured_player_features=data.get("X_train_structured_flat") if use_structured else None,
     )
     val_dataset = dataset(
         data["X_val"],
-        data["y_val"]
+        data["y_val"],
+        structured_player_features=data.get("X_val_structured_flat") if use_structured else None,
     )
     test_dataset = dataset(
         data["X_test"],
-        data["y_test"]
+        data["y_test"],
+        structured_player_features=data.get("X_test_structured_flat") if use_structured else None,
     )
+
+    feature_signature = {
+        "tabular_columns": list(train_dataset.feature_columns),
+        "structured_player_features": bool(use_structured),
+        "structured_feature_names": list(data.get("structured_feature_names", [])) if use_structured else [],
+    }
 
     train_loader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=False, num_workers=4)
     val_loader = DataLoader(val_dataset, batch_size=val_test_batch_size, shuffle=False, num_workers=4)
     test_loader = DataLoader(test_dataset, batch_size=val_test_batch_size, shuffle=False, num_workers=4)
-    return train_loader, val_loader, test_loader, train_loader.dataset.X.shape[1]
+    return train_loader, val_loader, test_loader, train_loader.dataset.X.shape[1], feature_signature
 
 def save_checkpoint(
         model: TwoHeadNN, 
@@ -392,7 +458,8 @@ def save_checkpoint(
         train_loss: float, 
         val_loss: float, 
         path: str | Path, 
-        config: TwoHeadNNConfig
+        config: TwoHeadNNConfig,
+        feature_signature: dict | None = None,
     ) -> None:
 
     torch.save({
@@ -402,6 +469,7 @@ def save_checkpoint(
             'state_dict': model.state_dict(),
             'optimizer': optimizer.state_dict(),
             'config': config.to_dict(),
+            'feature_signature': feature_signature,
         }, path
     )
 
@@ -420,6 +488,7 @@ def load_checkpoint(
         config: TwoHeadNNConfig,
         optimizer: torch.optim.Optimizer | None = None, 
         device: torch.device | str | None = None,
+        feature_signature: dict | None = None,
     ) -> tuple[TwoHeadNN, torch.optim.Optimizer | None]:
     """Resume an exact same-stage checkpoint, including config and optimizer."""
     ckpt = _load_checkpoint_file(model_path, device=device)
@@ -435,6 +504,12 @@ def load_checkpoint(
             f"{model_path} was saved with a different config. "
             "Use load_pretrained_checkpoint for transfer learning, or resume with the original config."
         )
+    checkpoint_signature = ckpt.get("feature_signature")
+    if feature_signature is not None and checkpoint_signature != feature_signature:
+        raise RuntimeError(
+            f"{model_path} was saved with a different feature signature. "
+            "Rebuild preprocessing caches and retrain the checkpoint."
+        )
     
     model.load_state_dict(ckpt['state_dict'])
     if optimizer is not None:
@@ -446,11 +521,18 @@ def load_pretrained_checkpoint(
         model: TwoHeadNN,
         model_path: str | Path,
         device: torch.device | str | None = None,
+        feature_signature: dict | None = None,
     ) -> TwoHeadNN:
     """Transfer-load pretrained weights from disk without optimizer/config coupling."""
     ckpt = _load_checkpoint_file(model_path, device=device)
     if "state_dict" not in ckpt:
         raise RuntimeError(f"{model_path} is missing a model state_dict.")
+    checkpoint_signature = ckpt.get("feature_signature")
+    if feature_signature is not None and checkpoint_signature != feature_signature:
+        raise RuntimeError(
+            f"{model_path} was saved with a different feature signature. "
+            "Pretrain and finetune structured player feature columns must match."
+        )
 
     try:
         model.load_state_dict(ckpt["state_dict"])
@@ -569,6 +651,12 @@ def val_epoch_finetune(
 
     return total_loss / max(1, n_batches)
 
+def freeze_encoder_parameters(model: TwoHeadNN) -> None:
+    model.encoder.requires_grad_(False)
+
+def unfreeze_encoder_parameters(model: TwoHeadNN) -> None:
+    model.encoder.requires_grad_(True)
+
 def train(
     model: TwoHeadNN, 
     train_loader: DataLoader, 
@@ -582,22 +670,9 @@ def train(
     checkpoint_dir: Path,
     epochs: int,
     logger,
-    config: TwoHeadNNConfig
+    config: TwoHeadNNConfig,
+    feature_signature: dict | None = None,
 ) -> tuple[list[float], list[float], float, int]:
-    
-    def freeze_encoder_parameters(model: TwoHeadNN) -> None:
-        for p in model.encoder.parameters():
-            p.requires_grad = False
-
-        if any(param.requires_grad for param in model.encoder.parameters()):
-            raise RuntimeError("Encoder should be frozen but is not")
-        
-    def unfreeze_encoder_parameters(model: TwoHeadNN) -> None:
-        for p in model.encoder.parameters():
-            p.requires_grad = True
-
-        if any(param.requires_grad == False for param in model.encoder.parameters()):
-            raise RuntimeError("Encoder should not frozen but is")
 
     best_val = float("inf")
     best_epoch = -1
@@ -605,10 +680,11 @@ def train(
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     for epoch in range(0, epochs):
-        if epoch < config.encoder_freeze_epochs:
-            freeze_encoder_parameters(model)
-        elif epoch == config.encoder_freeze_epochs:
-            unfreeze_encoder_parameters(model)
+        if config.stage == "finetune":
+            if epoch < config.encoder_freeze_epochs:
+                freeze_encoder_parameters(model)
+            elif epoch == config.encoder_freeze_epochs:
+                unfreeze_encoder_parameters(model)
 
         train_loss = train_epoch_fn(
             model, train_loader, optimizer, criterion, device
@@ -631,39 +707,58 @@ def train(
             best_path = checkpoint_dir / "best_model.pt"
             logger.info(f"  New best model: {best_val:.4f}, saving...")
             save_checkpoint(
-                model, optimizer, epoch, train_loss, val_loss, best_path, config=config
+                model,
+                optimizer,
+                epoch,
+                train_loss,
+                val_loss,
+                best_path,
+                config=config,
+                feature_signature=feature_signature,
             )
         elif (epoch + 1) % 10 == 0:
             path = checkpoint_dir / f"epoch_{epoch+1:04d}.pt"
             logger.info(f" Saving checkpoint to {path}. Epoch: {epoch+1}")
             save_checkpoint(
-                model, optimizer, epoch, train_loss, val_loss, path, config=config
+                model,
+                optimizer,
+                epoch,
+                train_loss,
+                val_loss,
+                path,
+                config=config,
+                feature_signature=feature_signature,
             )
 
     return train_losses, val_losses, best_val, best_epoch
 
 def pretrain(device, logger, config: TwoHeadNNConfig) -> TwoHeadNN:
     pt_config = config.for_stage(training_mode="baseball_only", stage="pretrain", perspective_duplication=True)
-    pt_train_ldr, pt_val_ldr, pt_test_ldr, pt_in_dim = prepare_data(
+    prepared = prepare_data(
         stage="pretrain",
         config=pt_config,
         train_batch_size=pt_config.train_batch,
         val_test_batch_size=pt_config.val_batch
     )
+    pt_train_ldr, pt_val_ldr, pt_test_ldr, pt_in_dim = prepared[:4]
+    feature_signature = prepared[4] if len(prepared) > 4 else None
 
     if pt_config.retune:
-        best_params = tune_pretrain_hyperparameters(
+        best_params = tune_hyperparameters(
             config=pt_config,
             train_loader=pt_train_ldr,
             val_loader=pt_val_ldr,
             in_dim=pt_in_dim,
             device=device,
+            train_epoch_fn=train_epoch_pretrain,
+            val_epoch_fn=val_epoch_pretrain,
             logger=logger,
+            hyperparam_path=PRETRAIN_HYPERPARAM_PATH
         )
-        pt_config = apply_pretrain_hyperparameters(pt_config, best_params)
-    elif pt_config.use_hyperparams:
-        best_params = load_pretrain_hyperparameters()
-        pt_config = apply_pretrain_hyperparameters(pt_config, best_params)
+        pt_config = apply_hyperparameters(pt_config, best_params)
+    elif pt_config.use_pt_hyperparams:
+        best_params = load_hyperparameters(PRETRAIN_HYPERPARAM_PATH)
+        pt_config = apply_hyperparameters(pt_config, best_params)
         logger.info(f" Loaded pretrain hyperparameters from {PRETRAIN_HYPERPARAM_PATH}")
             
     pretrained_model = build_model(pt_in_dim, pt_config, device)
@@ -691,14 +786,22 @@ def pretrain(device, logger, config: TwoHeadNNConfig) -> TwoHeadNN:
         checkpoint_dir=pt_config.pretrain_dir,
         epochs=pt_config.epochs,
         logger=logger,
-        config=pt_config
+        config=pt_config,
+        feature_signature=feature_signature,
     )
 
     logger.info(f" Done pretraining. Best val loss: {best_val_pt:.4f}, epoch: {best_epoch}")
     _plot_loss(train_losses_pt, val_losses_pt, "pretrain_plot.png", logger)
 
     best_model = build_model(pt_in_dim, pt_config, device)
-    return load_pretrained_checkpoint(best_model, pt_config.pretrain_dir / "best_model.pt", device=device)
+    best_model = load_pretrained_checkpoint(
+        best_model,
+        pt_config.pretrain_dir / "best_model.pt",
+        device=device,
+        feature_signature=feature_signature,
+    )
+    best_model.feature_signature = feature_signature
+    return best_model
     
 
 def finetune(
@@ -709,12 +812,14 @@ def finetune(
 ) -> None:
 
     ft_config = config.for_stage(training_mode="market_residual", stage="finetune", perspective_duplication=False)
-    ft_train_ldr, ft_val_ldr, ft_test_ldr, ft_in_dim = prepare_data(
+    prepared = prepare_data(
         stage="finetune",
         config=ft_config,
         train_batch_size=ft_config.train_batch,
         val_test_batch_size=ft_config.val_batch
     )
+    ft_train_ldr, ft_val_ldr, ft_test_ldr, ft_in_dim = prepared[:4]
+    feature_signature = prepared[4] if len(prepared) > 4 else None
 
     if pretrained_model is None:
         ft_model = build_model(ft_in_dim, ft_config, device)
@@ -725,7 +830,12 @@ def finetune(
                 "Run --training-mode baseball_only first or pass --pretrained-checkpoint."
             )
         logger.info(f" Loading pretrained checkpoint from {checkpoint_path}")
-        load_pretrained_checkpoint(ft_model, checkpoint_path, device=device)
+        load_pretrained_checkpoint(
+            ft_model,
+            checkpoint_path,
+            device=device,
+            feature_signature=feature_signature,
+        )
     else:
         if pretrained_model.in_dim != ft_in_dim:
             raise RuntimeError(
@@ -733,9 +843,33 @@ def finetune(
                 f"finetune input dimension {ft_in_dim}. Rebuild preprocessing caches so both "
                 "stages use the same baseball feature columns."
             )
+        pretrained_signature = getattr(pretrained_model, "feature_signature", None)
+        if pretrained_signature is not None and pretrained_signature != feature_signature:
+            raise RuntimeError(
+                "Pretrained model feature signature does not match finetune data. "
+                "Rebuild preprocessing caches so both stages use the same structured player columns."
+            )
         ft_config = replace(ft_config, base_hidden_size=pretrained_model.base_hidden_size)
         ft_model = build_model(ft_in_dim, ft_config, device)
         ft_model.load_state_dict(pretrained_model.state_dict())
+
+    if ft_config.retune:
+        best_params = tune_hyperparameters(
+            config=ft_config,
+            train_loader=ft_train_ldr,
+            val_loader=ft_val_ldr,
+            in_dim=ft_in_dim,
+            device=device,
+            train_epoch_fn=train_epoch_finetune,
+            val_epoch_fn=val_epoch_finetune,
+            logger=logger,
+            hyperparam_path=FINETUNE_HYPERPARAM_PATH
+        )
+        ft_config = apply_hyperparameters(ft_config, best_params)
+    elif ft_config.use_ft_hyperparams:
+        best_params = load_hyperparameters(FINETUNE_HYPERPARAM_PATH)
+        ft_config = apply_hyperparameters(ft_config, best_params)
+        logger.info(f" Loaded finetune hyperparameters from {FINETUNE_HYPERPARAM_PATH}")
 
     optimizer = build_optimizer(ft_model, ft_config)
     scheduler = build_scheduler(optimizer, ft_config)
@@ -755,7 +889,8 @@ def finetune(
         checkpoint_dir=ft_config.finetune_dir,
         epochs=ft_config.epochs,
         logger=logger,
-        config=ft_config
+        config=ft_config,
+        feature_signature=feature_signature,
     )
 
     logger.info(f" Done finetuning. Best val loss: {best_val_ft:.4f}, epoch: {best_epoch}")
@@ -806,7 +941,6 @@ def main():
             stage="pretrain" if args.training_mode == "baseball_only" else "finetune",
         )
     )
-    validate_tuning_mode(config)
 
     logger = setup_logging("two_head_nn", LOG_FILE, args=args)
     device = get_device(config.device)

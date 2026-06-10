@@ -18,6 +18,7 @@ from src.data.features.game_features.odds import Odds
 from src.data.features.player_features.batting import BattingFeatures
 from src.data.features.player_features.fielding import FieldingFeatures
 from src.data.features.player_features.pitching import PitchingFeatures
+from src.data.features.player_features.structured import StructuredPlayerFeatures
 from src.data.features.player_features.war import WAR
 from src.data.features.team_features.team_features import TeamFeatures
 
@@ -519,6 +520,93 @@ class FeaturePipeline:
         assert len(all_pitching_features) == len(games)
         
         return all_pitching_features
+
+    def get_structured_player_features(self, final_features: DataFrame, force_recreate: bool = False) -> DataFrame:
+        """Build fixed-slot lineup and starter vectors aligned to final game rows."""
+        raw_batter_data = self.cache.get("raw_batting_data")
+        if raw_batter_data is None:
+            raw_batter_data = self._load_batting_data()
+            self.cache["raw_batting_data"] = raw_batter_data.copy()
+
+        batter_data = self._filter_position_player_batting_data(raw_batter_data)
+        previous_batter_data = self._filter_position_player_batting_data(self._load_previous_batting_data())
+        batting_features = BattingFeatures(
+            self.season,
+            batter_data,
+            force_recreate,
+            self.args.batter_halflives,
+            previous_season_data=previous_batter_data,
+        ).load_features()
+
+        fielding_feats = FieldingFeatures(self.season, self._load_fielding_data()).load_features()
+        bat_fld_feats = self._merge_batting_fielding_features(batting_features, fielding_feats)
+        bat_fld_feats["frv_per_9"] = bat_fld_feats["frv_per_9"].fillna(0.0)
+        bat_fld_feats = self._apply_batter_deltas_to_player_features(
+            bat_fld_feats,
+            raw_batting_data=raw_batter_data,
+        )
+
+        builder = StructuredPlayerFeatures(
+            final_features,
+            batter_halflives=self.args.batter_halflives,
+            starter_halflives=self.args.starter_halflives,
+        )
+        lineup_features = builder.lineup_slot_result(self._load_lineups_data(), bat_fld_feats)
+        starter_features = builder.starter_result(final_features)
+        structured = lineup_features.data.join(starter_features.data, how="left")
+
+        canonical_index = [
+            "season",
+            "game_date",
+            "dh",
+            "game_datetime",
+            "home_team",
+            "away_team",
+            "game_id",
+        ]
+        game_index = ["game_id", "game_date", "dh", "home_team", "away_team"]
+        games = final_features.reset_index()[canonical_index].drop_duplicates()
+        structured = (
+            games.merge(structured.reset_index(), on=game_index, how="left")
+            .set_index(canonical_index)
+            .sort_index()
+        )
+        structured.attrs["structured_feature_metadata"] = {
+            "version": "structured_player_v1",
+            "lineup": lineup_features.metadata,
+            "starter": starter_features.metadata,
+            "feature_names": structured.columns.to_list(),
+        }
+        return structured
+
+    def _apply_batter_deltas_to_player_features(
+        self,
+        player_features: DataFrame,
+        raw_batting_data: DataFrame,
+    ) -> DataFrame:
+        stats_cols = [
+            col for col in player_features.columns
+            if any(suffix in col for suffix in ["_season", *[f"_ewm_h{hl}" for hl in self.args.batter_halflives]])
+        ]
+        if not stats_cols:
+            return player_features
+
+        passthrough_cols = [col for col in player_features.columns if col not in stats_cols]
+        temp = player_features[passthrough_cols].copy()
+        temp = temp.join(player_features[stats_cols].rename(columns={col: f"home_{col}" for col in stats_cols}))
+        adjusted = self._apply_league_average_deltas(
+            temp,
+            raw_batting_data=raw_batting_data,
+            raw_pitching_data=pd.DataFrame(),
+        )
+        adjusted = adjusted.rename(
+            columns={
+                f"home_{col}": col
+                for col in stats_cols
+                if f"home_{col}" in adjusted.columns
+            }
+        )
+        return adjusted
 
     def _apply_league_average_deltas(
         self,

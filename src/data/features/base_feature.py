@@ -65,10 +65,10 @@ class BaseFeatures(ABC):
     
     @staticmethod
     def expanding_weighted_mean(
-                val: pd.Series,
-                weight: pd.Series,
-                by: pd.Series,
-                val_is_rate: bool = True) -> Tuple[pd.Series, pd.Series]:
+        val: pd.Series,
+        weight: pd.Series,
+        by: pd.Series,
+        val_is_rate: bool = True) -> Tuple[pd.Series, pd.Series]:
         """
         Season-to-date (expanding) weighted mean and N (cumulative weight) per group.
         """
@@ -116,12 +116,12 @@ class BaseFeatures(ABC):
 
     @staticmethod
     def compute_player_priors(
-                    data: DataFrame,
-                    prior_specs: Dict[str, Tuple[str, str]],
-                    prior_data: DataFrame,
-                    fallback_prior_data: Optional[DataFrame] = None,
-                    min_samples: Optional[Dict[str, float]] = None,
-                ) -> Tuple[DataFrame, Dict[str, float]]:
+        data: DataFrame,
+        prior_specs: Dict[str, Tuple[str, str]],
+        prior_data: DataFrame,
+        fallback_prior_data: Optional[DataFrame] = None,
+        min_samples: Optional[Dict[str, float]] = None,
+    ) -> Tuple[DataFrame, Dict[str, float]]:
         df = data.copy()
         min_samples = min_samples or {}
         priors = {}
@@ -153,11 +153,11 @@ class BaseFeatures(ABC):
 
     @staticmethod
     def _prior_league_average(
-                    current_data: DataFrame,
-                    prior_data: DataFrame,
-                    val_col: str,
-                    weight_col: str,
-                ) -> float:
+        current_data: DataFrame,
+        prior_data: DataFrame,
+        val_col: str,
+        weight_col: str,
+    ) -> float:
         source = prior_data if {val_col, weight_col}.issubset(prior_data.columns) else current_data
         if not {val_col, weight_col}.issubset(source.columns):
             return np.nan
@@ -169,11 +169,11 @@ class BaseFeatures(ABC):
 
     @staticmethod
     def _player_prior_map(
-                    prior_data: DataFrame,
-                    val_col: str,
-                    weight_col: str,
-                    min_sample: float,
-                ) -> pd.Series:
+        prior_data: DataFrame,
+        val_col: str,
+        weight_col: str,
+        min_sample: float,
+    ) -> pd.Series:
         if prior_data.empty or "player_id" not in prior_data.columns:
             return pd.Series(dtype=float)
         if not {val_col, weight_col}.issubset(prior_data.columns):
@@ -193,17 +193,17 @@ class BaseFeatures(ABC):
     
     @staticmethod
     def compute_rolling_stats(
-                        data: DataFrame,
-                        prior_specs: Dict[str, Tuple[str, str]], 
-                        shrinkage_weights_cols: List[str], 
-                        ewm_cols: Dict[str, Tuple[str, str, str, int, bool]],
-                        preserve_cols: List[str],
-                        by: pd.Series = pd.Series([]),
-                        halflives=(3, 8, 20),
-                        prior_data: Optional[DataFrame] = None,
-                        fallback_prior_data: Optional[DataFrame] = None,
-                        prior_min_samples: Optional[Dict[str, float]] = None,
-                    ) -> Tuple[DataFrame, Dict]:
+        data: DataFrame,
+        prior_specs: Dict[str, Tuple[str, str]], 
+        shrinkage_weights_cols: List[str], 
+        ewm_cols: Dict[str, Tuple[str, str, str, int, bool]],
+        preserve_cols: List[str],
+        by: pd.Series = pd.Series([]),
+        halflives=(3, 8, 20),
+        prior_data: Optional[DataFrame] = None,
+        fallback_prior_data: Optional[DataFrame] = None,
+        prior_min_samples: Optional[Dict[str, float]] = None,
+    ) -> Tuple[DataFrame, Dict]:
 
         df = data.copy()
         

@@ -138,6 +138,7 @@ venv.bak/
 .betpredictor
 .betpredictorOLD
 *.parquet
+*.npz
 *.txt
 *.pkl
 *.png
